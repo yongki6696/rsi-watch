@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RSI Watch">
+<meta name="theme-color" content="#090e1a">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>RSI Watch</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+:root{--bg:#090e1a;--surface:#111827;--card:#161f30;--border:#1e2d45;--accent:#3b82f6;--danger:#ef4444;--warn:#f59e0b;--ok:#22c55e;--text:#e2e8f0;--muted:#64748b;--mono:'JetBrains Mono',monospace;--sans:'Space Grotesk',sans-serif;--safe-top:env(safe-area-inset-top);--safe-bot:env(safe-area-inset-bottom)}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overscroll-behavior:none}
+
+header{display:flex;align-items:center;justify-content:space-between;padding:calc(16px + var(--safe-top)) 20px 16px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:700}
+.logo-dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.header-right{display:flex;align-items:center;gap:10px}
+.btn{padding:8px 14px;border-radius:8px;border:none;cursor:pointer;font-family:var(--sans);font-size:13px;font-weight:600;transition:all .15s;-webkit-appearance:none}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:active{background:#1d4ed8}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+.btn-ghost:active{color:var(--text)}
+.alert-badge{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--danger);color:#fff;font-weight:700;display:none}
+
+main{max-width:700px;margin:0 auto;padding:20px 16px calc(28px + var(--safe-bot))}
+
+/* 배너 */
+#pwa-banner,#notif-banner{border-radius:12px;padding:13px 16px;margin-bottom:16px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+#pwa-banner{background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3)}
+#notif-banner{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3)}
+.hidden{display:none!important}
+
+/* 통계 */
+.summary-bar{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:20px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px;font-family:var(--mono)}
+.stat-value{font-size:24px;font-weight:700;font-family:var(--mono)}
+.stat-value.danger{color:var(--danger)}
+.stat-value.warn{color:var(--warn)}
+
+/* 추가 패널 */
+.add-panel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px}
+.add-row{display:flex;gap:10px;margin-bottom:10px}
+.field{display:flex;flex-direction:column;gap:5px;flex:1}
+.field label{font-size:10px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px}
+.field input,.field select{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px 12px;color:var(--text);font-family:var(--mono);font-size:14px;outline:none;width:100%;-webkit-appearance:none;appearance:none}
+.field input:focus,.field select:focus{border-color:var(--accent)}
+.field input::placeholder{color:var(--muted)}
+.add-bottom{display:flex;gap:10px;align-items:flex-end}
+
+/* 임계값 */
+.threshold-area{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:20px}
+.thr-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.thr-label{font-size:12px;color:var(--muted)}
+#threshold-display{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--danger)}
+#threshold-slider{width:100%;accent-color:var(--danger);height:4px}
+
+/* 그리드 */
+.grid-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.section-title{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;font-family:var(--mono)}
+.refresh-info{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.stock-grid{display:flex;flex-direction:column;gap:12px}
+
+/* 카드 */
+.stock-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;transition:border-color .2s}
+.stock-card.alert-active{border-color:var(--danger)!important;box-shadow:0 0 0 1px var(--danger),0 0 20px rgba(239,68,68,.15)}
+.stock-card.alert-warn{border-color:var(--warn)!important;box-shadow:0 0 0 1px var(--warn),0 0 20px rgba(245,158,11,.1)}
+.card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+.ticker{font-family:var(--mono);font-size:20px;font-weight:700}
+.company-name{font-size:11px;color:var(--muted);margin-top:2px;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.remove-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;padding:2px 6px;border-radius:4px}
+.remove-btn:active{color:var(--danger)}
+
+/* RSI 게이지 */
+.rsi-section{margin-bottom:12px}
+.rsi-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
+.rsi-label{font-size:10px;font-family:var(--mono);color:var(--muted);text-transform:uppercase}
+.rsi-value{font-family:var(--mono);font-size:28px;font-weight:700}
+.rsi-danger{color:var(--danger)}.rsi-warn{color:var(--warn)}.rsi-ok{color:var(--ok)}.rsi-high{color:#a78bfa}
+.rsi-bar-bg{height:6px;background:var(--border);border-radius:3px;position:relative;overflow:visible}
+.rsi-bar-fill{height:100%;border-radius:3px;transition:width .6s ease,background-color .4s}
+.threshold-marker{position:absolute;top:-4px;width:2px;height:14px;background:var(--danger);border-radius:1px;opacity:.7}
+
+.card-footer{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border);padding-top:10px;font-family:var(--mono);font-size:11px}
+.price-display{font-size:14px;color:var(--text);font-weight:600}
+.price-change{font-size:11px}
+.price-change.up{color:var(--ok)}.price-change.down{color:var(--danger)}
+.status-badge{padding:3px 8px;border-radius:20px;font-size:10px;font-weight:700;font-family:var(--mono);text-transform:uppercase}
+.badge-alert{background:rgba(239,68,68,.2);color:var(--danger)}.badge-warn{background:rgba(245,158,11,.2);color:var(--warn)}
+.badge-ok{background:rgba(34,197,94,.15);color:var(--ok)}.badge-high{background:rgba(167,139,250,.15);color:#a78bfa}
+.badge-load{background:rgba(100,116,139,.15);color:var(--muted)}
+.badge-err{background:rgba(239,68,68,.1);color:var(--danger)}
+
+/* 빈 상태 */
+.empty-state{text-align:center;padding:50px 20px;color:var(--muted)}
+.empty-icon{font-size:44px;margin-bottom:14px}
+.empty-title{font-size:17px;font-weight:600;color:var(--text);margin-bottom:7px}
+.empty-desc{font-size:13px;line-height:1.6}
+
+/* 토스트 */
+#toast-container{position:fixed;top:80px;right:16px;z-index:999;display:flex;flex-direction:column;gap:8px;max-width:300px}
+.toast{background:#1a0a0a;border:1px solid var(--danger);border-radius:12px;padding:12px 16px;display:flex;align-items:flex-start;gap:10px;animation:slideIn .25s ease;box-shadow:0 4px 20px rgba(239,68,68,.2)}
+@keyframes slideIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
+.toast-icon{font-size:17px;flex-shrink:0}.toast-title{font-weight:700;font-size:13px;color:var(--danger)}.toast-msg{font-size:11px;color:var(--muted);margin-top:2px}
+
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><div class="logo-dot"></div>RSI Watch</div>
+  <div class="header-right">
+    <span class="alert-badge" id="alert-count-badge">0</span>
+    <button class="btn btn-ghost" onclick="refreshAll()" id="refresh-btn">⟳ 새로고침</button>
+  </div>
+</header>
+
+<div id="toast-container"></div>
+
+<main>
+  <!-- iOS PWA 안내 배너 -->
+  <div id="pwa-banner" class="hidden">
+    <span>📲 홈화면에 추가하려면: <strong>공유 → 홈 화면에 추가</strong></span>
+    <button class="btn btn-ghost" style="padding:6px 10px;font-size:12px" onclick="document.getElementById('pwa-banner').classList.add('hidden')">✕</button>
+  </div>
+
+  <!-- 알림 허용 배너 -->
+  <div id="notif-banner" class="hidden">
+    <span>🔔 RSI 경보를 알림으로 받으려면 허용해주세요</span>
+    <button class="btn btn-primary" style="padding:7px 12px;font-size:12px;white-space:nowrap" onclick="requestNotifPermission()">허용</button>
+  </div>
+
+  <!-- 요약 -->
+  <div class="summary-bar">
+    <div class="stat-card">
+      <div class="stat-label">감시 종목</div>
+      <div class="stat-value" id="stat-total" style="color:var(--text)">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">RSI 경보</div>
+      <div class="stat-value danger" id="stat-alert">0</div>
+    </div>
+  </div>
+
+  <!-- 추가 패널 -->
+  <div class="add-panel">
+    <div class="add-row">
+      <div class="field">
+        <label>티커 심볼</label>
+        <input type="text" id="input-ticker" placeholder="AAPL, NVDA…" maxlength="10"
+               onkeydown="if(event.key==='Enter')addStock()" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+      </div>
+      <div class="field" style="max-width:110px">
+        <label>기간</label>
+        <select id="input-period">
+          <option value="1d">일봉</option>
+          <option value="1wk">주봉</option>
+          <option value="1mo">월봉</option>
+        </select>
+      </div>
+    </div>
+    <div class="add-bottom">
+      <div class="field">
+        <label>자동 새로고침</label>
+        <select id="input-interval" onchange="setupAutoRefresh()">
+          <option value="0">끄기</option>
+          <option value="60">1분</option>
+          <option value="300" selected>5분</option>
+          <option value="600">10분</option>
+          <option value="1800">30분</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="addStock()" style="padding:11px 20px;white-space:nowrap">+ 추가</button>
+    </div>
+  </div>
+
+  <!-- 임계값 -->
+  <div class="threshold-area">
+    <div class="thr-top">
+      <span class="thr-label">🔴 RSI 알림 임계값 — 이하이면 경보</span>
+      <span id="threshold-display">30</span>
+    </div>
+    <input type="range" id="threshold-slider" min="10" max="50" value="30" oninput="updateThreshold(this.value)">
+  </div>
+
+  <!-- 목록 -->
+  <div class="grid-header">
+    <div class="section-title">감시 목록</div>
+    <div class="refresh-info" id="next-refresh-label"></div>
+  </div>
+  <div class="stock-grid" id="stock-grid">
+    <div class="empty-state" id="empty-state">
+      <div class="empty-icon">📈</div>
+      <div class="empty-title">감시할 종목을 추가하세요</div>
+      <div class="empty-desc">티커 입력 후 추가 버튼을 눌러주세요<br>RSI가 임계값 이하로 내려가면 알림이 옵니다</div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ═══════════════════════════════════════════
+// 상태
+// ═══════════════════════════════════════════
+let stocks     = [];
+let threshold  = parseInt(localStorage.getItem('rsi_threshold') || '30');
+let autoTimer  = null;
+let prevAlerts = new Set(JSON.parse(localStorage.getItem('rsi_prev_alerts') || '[]'));
+
+document.getElementById('threshold-slider').value = threshold;
+document.getElementById('threshold-display').textContent = threshold;
+
+// ═══════════════════════════════════════════
+// PWA / 알림 배너
+// ═══════════════════════════════════════════
+function checkBanners() {
+  // iOS 홈화면 추가 안내 (standalone 아닐 때만)
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  if (isIOS && !isStandalone) {
+    document.getElementById('pwa-banner').classList.remove('hidden');
+  }
+  // 알림 배너
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    document.getElementById('notif-banner').classList.remove('hidden');
+  }
+}
+checkBanners();
+
+function requestNotifPermission() {
+  if (typeof Notification === 'undefined') {
+    showToast('ℹ','알림 불가','이 브라우저는 푸시 알림을 지원하지 않아요. 화면 알림으로 대신 알려드립니다.');
+    document.getElementById('notif-banner').classList.add('hidden');
+    return;
+  }
+  Notification.requestPermission().then(p => {
+    document.getElementById('notif-banner').classList.add('hidden');
+    if (p === 'granted') showToast('✅','알림 허용됨','RSI 경보를 알림으로 받습니다');
+    else showToast('ℹ','알림 거부됨','화면 토스트로 대신 알려드립니다');
+  });
+}
+
+// ═══════════════════════════════════════════
+// Yahoo Finance — 프록시 폴백 체인
+// ═══════════════════════════════════════════
+const PROXIES = [
+  (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+  (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  (url) => `https://proxy.cors.sh/${url}`,
+];
+
+async function fetchWithFallback(yahooUrl) {
+  for (let i = 0; i < PROXIES.length; i++) {
+    try {
+      const proxyUrl = PROXIES[i](yahooUrl);
+      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) continue;
+      const raw = await res.text();
+      // allorigins 응답은 { contents: "..." } 형태
+      let jsonStr = raw;
+      try {
+        const wrapper = JSON.parse(raw);
+        if (wrapper.contents) jsonStr = wrapper.contents;
+      } catch(e) {}
+      const data = JSON.parse(jsonStr);
+      if (data?.chart?.result) return data;
+    } catch(e) {
+      console.warn(`Proxy ${i} failed:`, e.message);
+    }
+  }
+  throw new Error('모든 프록시 실패');
+}
+
+// ═══════════════════════════════════════════
+// RSI 계산 (Wilder 스무딩, 14기간)
+// ═══════════════════════════════════════════
+function calcRSI(closes, period = 14) {
+  const c = closes.filter(v => v != null && !isNaN(v));
+  if (c.length < period + 1) return null;
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = c[i] - c[i-1];
+    if (d > 0) gains += d; else losses -= d;
+  }
+  let ag = gains / period, al = losses / period;
+  for (let i = period + 1; i < c.length; i++) {
+    const d = c[i] - c[i-1];
+    ag = (ag * (period-1) + (d>0?d:0)) / period;
+    al = (al * (period-1) + (d<0?-d:0)) / period;
+  }
+  if (al === 0) return 100;
+  return parseFloat((100 - 100/(1 + ag/al)).toFixed(2));
+}
+
+// ═══════════════════════════════════════════
+// 단일 종목 로드
+// ═══════════════════════════════════════════
+async function loadStock(s) {
+  s.loading = true; s.error = null;
+  renderCard(s);
+  try {
+    const rangeMap = { '1d':'6mo', '1wk':'2y', '1mo':'5y' };
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${s.ticker}?interval=${s.period}&range=${rangeMap[s.period]}`;
+    const data  = await fetchWithFallback(url);
+    const chart = data.chart.result[0];
+    const closes = chart.indicators.quote[0].close;
+    s.rsi       = calcRSI(closes);
+    const valid  = closes.filter(v=>v!=null);
+    s.price      = valid[valid.length-1];
+    s.prevClose  = valid[valid.length-2];
+    s.name       = chart.meta?.longName || chart.meta?.shortName || '';
+    s.loading    = false;
+    s.lastUpdate = new Date();
+  } catch(e) {
+    s.loading = false;
+    s.error   = e.message.includes('프록시') ? '데이터 로드 실패' : e.message;
+  }
+  renderCard(s);
+  checkAlert(s);
+  updateStats();
+}
+
+// ═══════════════════════════════════════════
+// 알림 트리거
+// ═══════════════════════════════════════════
+function checkAlert(s) {
+  if (s.rsi == null) return;
+  const key = `${s.ticker}_${s.period}`;
+  if (s.rsi <= threshold) {
+    if (!prevAlerts.has(key)) {
+      prevAlerts.add(key);
+      localStorage.setItem('rsi_prev_alerts', JSON.stringify([...prevAlerts]));
+      fireAlert(s);
+    }
+  } else {
+    prevAlerts.delete(key);
+    localStorage.setItem('rsi_prev_alerts', JSON.stringify([...prevAlerts]));
+  }
+}
+
+function fireAlert(s) {
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try {
+      new Notification(`🚨 ${s.ticker} RSI 경보`, {
+        body: `RSI ${s.rsi} ← 임계값 ${threshold} 이하 진입!`,
+        icon: 'icon-192.png',
+        badge: 'icon-192.png',
+        tag: `rsi-${s.ticker}`,
+        requireInteraction: true
+      });
+    } catch(e) {}
+  }
+  showToast('🚨', `${s.ticker} RSI 경보`, `RSI ${s.rsi} — 임계값 ${threshold} 이하 진입`);
+}
+
+// ═══════════════════════════════════════════
+// 토스트
+// ═══════════════════════════════════════════
+function showToast(icon, title, msg, ms=6000) {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = `<div class="toast-icon">${icon}</div><div><div class="toast-title">${title}</div><div class="toast-msg">${msg}</div></div>`;
+  c.prepend(t);
+  setTimeout(()=>{ t.style.cssText='opacity:0;transition:opacity .4s'; setTimeout(()=>t.remove(),400); }, ms);
+}
+
+// ═══════════════════════════════════════════
+// 카드 렌더링
+// ═══════════════════════════════════════════
+function rsiCls(v, thr) {
+  if(!v) return '';
+  if(v<=thr) return 'rsi-danger';
+  if(v<=40) return 'rsi-warn';
+  if(v<=60) return 'rsi-ok';
+  return 'rsi-high';
+}
+function cardCls(v, thr) {
+  if(!v) return '';
+  if(v<=thr) return 'alert-active';
+  if(v<=40)  return 'alert-warn';
+  return '';
+}
+function barColor(v, thr) {
+  if(!v) return '#1e2d45';
+  if(v<=thr) return '#ef4444';
+  if(v<=40)  return '#f59e0b';
+  if(v<=60)  return '#22c55e';
+  return '#a78bfa';
+}
+function badge(v, thr) {
+  if(v==null) return `<span class="status-badge badge-load"><span class="spinner"></span></span>`;
+  if(v<=thr)  return `<span class="status-badge badge-alert">🚨 경보</span>`;
+  if(v<=40)   return `<span class="status-badge badge-warn">⚠ 주의</span>`;
+  if(v<=60)   return `<span class="status-badge badge-ok">정상</span>`;
+  return `<span class="status-badge badge-high">과매수</span>`;
+}
+
+function renderCard(s) {
+  const id = `card-${s.ticker}-${s.period}`;
+  const el = document.getElementById(id);
+  if (!el) return;
+  const v   = s.rsi;
+  const pct = v!=null ? Math.min(v,100) : 0;
+  const tpct = threshold;
+  const chg  = s.price && s.prevClose ? ((s.price-s.prevClose)/s.prevClose*100).toFixed(2) : null;
+  const chgSign = chg && parseFloat(chg)>=0 ? '+' : '';
+  const periodLabel = {1d:'일봉',1wk:'주봉',1mo:'월봉'}[s.period] || s.period;
+  el.className = `stock-card ${cardCls(v,threshold)}`;
+  el.innerHTML = `
+    <div class="card-top">
+      <div>
+        <div class="ticker">${s.ticker}</div>
+        <div class="company-name">${s.name||''}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        ${s.error ? `<span class="status-badge badge-err">오류</span>` : badge(v, threshold)}
+        <button class="remove-btn" onclick="removeStock('${s.ticker}','${s.period}')">✕</button>
+      </div>
+    </div>
+    <div class="rsi-section">
+      <div class="rsi-row">
+        <span class="rsi-label">RSI(14) · ${periodLabel}</span>
+        <span class="rsi-value ${rsiCls(v,threshold)}">${s.loading?'<span class="spinner"></span>':v!=null?v:s.error?'—':'—'}</span>
+      </div>
+      <div class="rsi-bar-bg">
+        <div class="rsi-bar-fill" style="width:${pct}%;background:${barColor(v,threshold)}"></div>
+        <div class="threshold-marker" style="left:${tpct}%"></div>
+      </div>
+    </div>
+    <div class="card-footer">
+      <div>
+        ${s.price?`<span class="price-display">$${s.price.toFixed(2)}</span> `:''}
+        ${chg?`<span class="price-change ${parseFloat(chg)>=0?'up':'down'}">${chgSign}${chg}%</span>`:''}
+      </div>
+      <span style="color:var(--muted)">
+        ${s.error?'⚠ '+s.error:s.lastUpdate?s.lastUpdate.toLocaleTimeString('ko-KR'):''}
+      </span>
+    </div>`;
+}
+
+function renderAll() {
+  const grid  = document.getElementById('stock-grid');
+  const empty = document.getElementById('empty-state');
+  if (stocks.length === 0) { empty.style.display='block'; updateStats(); return; }
+  empty.style.display = 'none';
+  // 없는 카드만 새로 삽입
+  const existing = new Set([...grid.querySelectorAll('.stock-card')].map(el=>el.id));
+  stocks.forEach(s => {
+    const id = `card-${s.ticker}-${s.period}`;
+    if (!existing.has(id)) {
+      const el = document.createElement('div');
+      el.id = id;
+      el.className = 'stock-card';
+      grid.appendChild(el);
+    }
+    renderCard(s);
+  });
+  updateStats();
+}
+
+function updateStats() {
+  document.getElementById('stat-total').textContent = stocks.length;
+  const alertN = stocks.filter(s=>s.rsi!=null&&s.rsi<=threshold).length;
+  document.getElementById('stat-alert').textContent = alertN;
+  const badge = document.getElementById('alert-count-badge');
+  badge.textContent = alertN;
+  badge.style.display = alertN>0 ? 'inline-block' : 'none';
+}
+
+// ═══════════════════════════════════════════
+// 추가 / 삭제
+// ═══════════════════════════════════════════
+function addStock() {
+  const ticker = document.getElementById('input-ticker').value.trim().toUpperCase().replace(/[^A-Z0-9.^]/g,'');
+  const period = document.getElementById('input-period').value;
+  if (!ticker) { showToast('⚠','티커 없음','예: AAPL TSLA NVDA'); return; }
+  if (stocks.find(s=>s.ticker===ticker&&s.period===period)) {
+    showToast('ℹ','이미 있음',`${ticker}(${period}) 은 이미 목록에 있어요`); return;
+  }
+  const s = {ticker, period, rsi:null, price:null, prevClose:null, name:'', loading:true, error:null, lastUpdate:null};
+  stocks.push(s);
+  save();
+  renderAll();
+  loadStock(s);
+  document.getElementById('input-ticker').value = '';
+  document.getElementById('input-ticker').focus();
+}
+
+function removeStock(ticker, period) {
+  stocks = stocks.filter(s=>!(s.ticker===ticker&&s.period===period));
+  document.getElementById(`card-${ticker}-${period}`)?.remove();
+  save();
+  if (!stocks.length) document.getElementById('empty-state').style.display='block';
+  updateStats();
+}
+
+function save() {
+  localStorage.setItem('rsi_stocks', JSON.stringify(stocks.map(s=>({ticker:s.ticker,period:s.period}))));
+}
+
+// ═══════════════════════════════════════════
+// 임계값
+// ═══════════════════════════════════════════
+function updateThreshold(val) {
+  threshold = parseInt(val);
+  document.getElementById('threshold-display').textContent = threshold;
+  localStorage.setItem('rsi_threshold', threshold);
+  stocks.forEach(s=>renderCard(s));
+  updateStats();
+}
+
+// ═══════════════════════════════════════════
+// 새로고침
+// ═══════════════════════════════════════════
+function refreshAll() {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  Promise.all(stocks.map(s=>loadStock(s))).finally(()=>{ btn.disabled=false; });
+}
+
+function setupAutoRefresh() {
+  if (autoTimer) clearInterval(autoTimer);
+  const sec = parseInt(document.getElementById('input-interval').value);
+  const lbl = document.getElementById('next-refresh-label');
+  if (sec === 0) { lbl.textContent='자동 꺼짐'; return; }
+  let rem = sec;
+  const tick = () => { rem--; lbl.textContent=`${rem}초 후 업데이트`; if(rem<=0){rem=sec;refreshAll();} };
+  lbl.textContent = `${rem}초 후 업데이트`;
+  autoTimer = setInterval(tick, 1000);
+}
+
+// ═══════════════════════════════════════════
+// Service Worker 등록
+// ═══════════════════════════════════════════
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(e => console.log('SW reg fail:', e));
+  });
+}
+
+// ═══════════════════════════════════════════
+// 초기화
+// ═══════════════════════════════════════════
+(function init() {
+  const saved = JSON.parse(localStorage.getItem('rsi_stocks') || '[]');
+  if (saved.length === 0) {
+    // 기본 예시
+    ['AAPL','NVDA','TSLA'].forEach(ticker => {
+      stocks.push({ticker, period:'1d', rsi:null, price:null, prevClose:null, name:'', loading:true, error:null, lastUpdate:null});
+    });
+    save();
+  } else {
+    saved.forEach(({ticker, period}) => {
+      stocks.push({ticker, period, rsi:null, price:null, prevClose:null, name:'', loading:true, error:null, lastUpdate:null});
+    });
+  }
+  renderAll();
+  stocks.forEach(s => loadStock(s));
+  setupAutoRefresh();
+})();
+</script>
+</body>
+</html>
