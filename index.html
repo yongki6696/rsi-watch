@@ -119,7 +119,7 @@ main{max-width:700px;margin:0 auto;padding:20px 16px calc(28px + var(--safe-bot)
   <div class="logo"><div class="logo-dot"></div>RSI Watch</div>
   <div class="header-right">
     <span class="alert-badge" id="alert-count-badge">0</span>
-    <button class="btn btn-ghost" onclick="refreshAll()" id="refresh-btn">⟳ 새로고침</button>
+    <button class="btn btn-ghost" id="refresh-btn">⟳ 새로고침</button>
   </div>
 </header>
 
@@ -129,13 +129,13 @@ main{max-width:700px;margin:0 auto;padding:20px 16px calc(28px + var(--safe-bot)
   <!-- iOS PWA 안내 배너 -->
   <div id="pwa-banner" class="hidden">
     <span>📲 홈화면에 추가하려면: <strong>공유 → 홈 화면에 추가</strong></span>
-    <button class="btn btn-ghost" style="padding:6px 10px;font-size:12px" onclick="document.getElementById('pwa-banner').classList.add('hidden')">✕</button>
+    <button class="btn btn-ghost" id="pwa-close-btn" style="padding:6px 10px;font-size:12px">✕</button>
   </div>
 
   <!-- 알림 허용 배너 -->
   <div id="notif-banner" class="hidden">
     <span>🔔 RSI 경보를 알림으로 받으려면 허용해주세요</span>
-    <button class="btn btn-primary" style="padding:7px 12px;font-size:12px;white-space:nowrap" onclick="requestNotifPermission()">허용</button>
+    <button class="btn btn-primary" id="notif-allow-btn" style="padding:7px 12px;font-size:12px;white-space:nowrap">허용</button>
   </div>
 
   <!-- 요약 -->
@@ -156,7 +156,7 @@ main{max-width:700px;margin:0 auto;padding:20px 16px calc(28px + var(--safe-bot)
       <div class="field">
         <label>티커 심볼</label>
         <input type="text" id="input-ticker" placeholder="AAPL, NVDA…" maxlength="10"
-               onkeydown="if(event.key==='Enter')addStock()" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+               autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
       </div>
       <div class="field" style="max-width:110px">
         <label>기간</label>
@@ -178,7 +178,7 @@ main{max-width:700px;margin:0 auto;padding:20px 16px calc(28px + var(--safe-bot)
           <option value="1800">30분</option>
         </select>
       </div>
-      <button class="btn btn-primary" onclick="addStock()" style="padding:11px 20px;white-space:nowrap">+ 추가</button>
+      <button class="btn btn-primary" id="add-btn" style="padding:11px 20px;white-space:nowrap">+ 추가</button>
     </div>
   </div>
 
@@ -188,7 +188,7 @@ main{max-width:700px;margin:0 auto;padding:20px 16px calc(28px + var(--safe-bot)
       <span class="thr-label">🔴 RSI 알림 임계값 — 이하이면 경보</span>
       <span id="threshold-display">30</span>
     </div>
-    <input type="range" id="threshold-slider" min="10" max="50" value="30" oninput="updateThreshold(this.value)">
+    <input type="range" id="threshold-slider" min="10" max="50" value="30">
   </div>
 
   <!-- 목록 -->
@@ -536,6 +536,30 @@ function setupAutoRefresh() {
   lbl.textContent = `${rem}초 후 업데이트`;
   autoTimer = setInterval(tick, 1000);
 }
+
+// ═══════════════════════════════════════════
+// 버튼 이벤트 — iOS Safari onclick 대신 addEventListener
+// ═══════════════════════════════════════════
+function bindBtn(id, fn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  // touchend로 iOS 300ms 딜레이 제거
+  el.addEventListener('touchend', function(e) { e.preventDefault(); fn(); });
+  el.addEventListener('click', function(e) { fn(); });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  bindBtn('add-btn', addStock);
+  bindBtn('refresh-btn', refreshAll);
+  bindBtn('pwa-close-btn', function(){ document.getElementById('pwa-banner').classList.add('hidden'); });
+  bindBtn('notif-allow-btn', requestNotifPermission);
+
+  document.getElementById('input-ticker').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); addStock(); }
+  });
+  document.getElementById('input-interval').addEventListener('change', setupAutoRefresh);
+  document.getElementById('threshold-slider').addEventListener('input', function() { updateThreshold(this.value); });
+});
 
 // ═══════════════════════════════════════════
 // Service Worker 등록
