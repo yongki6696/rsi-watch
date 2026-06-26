@@ -101,7 +101,6 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 </style>
 </head>
 <body>
-
 <header>
   <div class="logo"><div class="dot"></div>RSI Watch</div>
   <div style="display:flex;align-items:center;gap:10px">
@@ -110,7 +109,6 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
   </div>
 </header>
 <div id="toasts"></div>
-
 <main>
   <div class="banner banner-blue hidden" id="pwa-banner">
     <span>📲 홈화면 앱: <strong>공유 → 홈 화면에 추가</strong></span>
@@ -120,7 +118,6 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
     <span>🔔 RSI 경보 알림을 받으려면 허용해주세요</span>
     <button class="btn btn-primary" id="btn-notif" style="padding:7px 12px;font-size:12px;white-space:nowrap">허용</button>
   </div>
-
   <div class="stats">
     <div class="stat">
       <div class="stat-label">감시 종목</div>
@@ -131,8 +128,8 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
       <div class="stat-big c-danger" id="s-alert">0</div>
     </div>
     <div class="stat">
-      <div class="stat-label">API 사용량 (오늘/800)</div>
-      <div class="stat-sm c-ok" id="s-api-text">0회 · 남은 800회</div>
+      <div class="stat-label">API 사용량 (오늘)</div>
+      <div class="stat-sm c-ok" id="s-api-text">0회 사용</div>
       <div class="api-bar-bg"><div class="api-bar-fill" id="api-bar" style="width:0%;background:var(--ok)"></div></div>
     </div>
     <div class="stat">
@@ -140,7 +137,6 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
       <div class="stat-sm c-muted" id="s-lastup">—</div>
     </div>
   </div>
-
   <div class="panel">
     <div class="row">
       <div class="field" style="flex:2">
@@ -151,9 +147,9 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
       <div class="field" style="flex:1">
         <div class="field-label">기간</div>
         <select id="inp-period">
-          <option value="1day">일봉</option>
-          <option value="1week">주봉</option>
-          <option value="1month">월봉</option>
+          <option value="D">일봉</option>
+          <option value="W">주봉</option>
+          <option value="M">월봉</option>
         </select>
       </div>
     </div>
@@ -171,7 +167,6 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
       <button class="btn btn-primary" id="btn-add" style="flex:1;height:46px">+ 추가</button>
     </div>
   </div>
-
   <div class="thr-panel">
     <div class="thr-top">
       <span class="thr-label">🔴 RSI 알림 임계값 — 이하면 경보</span>
@@ -179,7 +174,6 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
     </div>
     <input type="range" id="inp-threshold" min="10" max="50" value="30">
   </div>
-
   <div class="sec-header">
     <div class="sec-title">감시 목록</div>
     <div class="sec-sub" id="next-refresh"></div>
@@ -196,28 +190,35 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 <script>
 'use strict';
 
-var TD_KEY    = 'dcbc4a1fa0c9402480845046468f2f2e';
+// ══════════════════════════════════════════
+// 설정
+// ══════════════════════════════════════════
+var FH_KEY    = 'd8v4si1r01qrt65vbd8gd8v4si1r01qrt65vbd90'; // Finnhub — 분당 60회 무료
 var stocks    = [];
 var threshold = parseInt(localStorage.getItem('rsi_thr') || '30');
 var prevAlert = new Set(JSON.parse(localStorage.getItem('rsi_prev') || '[]'));
 var autoTimer = null;
 var autoRem   = 0;
 
-// ── 이전 형식(1d/1wk/1mo) → 새 형식(1day/1week/1month) 자동 변환 ──
+// ── 이전 형식 마이그레이션 (1d→D, 1day→D 등) ──
+function migratePeriod(p) {
+  var map = {'1d':'D','1wk':'W','1mo':'M','1day':'D','1week':'W','1month':'M'};
+  return map[p] || p;
+}
 function migrateStocks() {
-  var map = {'1d':'1day','1wk':'1week','1mo':'1month'};
   var saved = [];
   try { saved = JSON.parse(localStorage.getItem('rsi_stocks')||'[]'); } catch(e){}
   var changed = false;
   saved = saved.map(function(s){
-    if (map[s.period]) { s.period=map[s.period]; changed=true; }
+    var np = migratePeriod(s.period);
+    if (np !== s.period) { s.period = np; changed = true; }
     return s;
   });
   if (changed) localStorage.setItem('rsi_stocks', JSON.stringify(saved));
   return saved;
 }
 
-// ── API 사용량 ──
+// ── API 사용량 (Finnhub은 분당 60회, 일일 제한 없음) ──
 function getApiUsage() {
   var today = new Date().toISOString().slice(0,10);
   var d; try { d=JSON.parse(localStorage.getItem('rsi_api')||'{}'); } catch(e){ d={}; }
@@ -230,19 +231,17 @@ function addApiUsage(n) {
   renderApiUsage();
 }
 function renderApiUsage() {
-  var d=getApiUsage(); var used=d.count||0; var left=Math.max(0,800-used);
-  var pct=Math.min(used/800*100,100);
+  var d=getApiUsage(); var used=d.count||0;
   var el=document.getElementById('s-api-text');
   var bar=document.getElementById('api-bar');
   if(!el||!bar) return;
-  el.textContent=used+'회 사용 · 남은 '+left+'회';
-  if (pct<50){ bar.style.background='var(--ok)';     el.className='stat-sm c-ok'; }
-  else if(pct<80){ bar.style.background='var(--warn)'; el.className='stat-sm c-warn'; }
-  else { bar.style.background='var(--danger)'; el.className='stat-sm c-danger'; }
+  el.textContent=used+'회 사용 (분당 60회 가능)';
+  el.className='stat-sm c-ok';
+  // 하루 추정치 표시용 (참고값)
+  var pct=Math.min(used/500*100,100);
   bar.style.width=pct+'%';
+  bar.style.background=pct<70?'var(--ok)':pct<90?'var(--warn)':'var(--danger)';
 }
-
-// ── 마지막 업데이트 시각 ──
 function renderLastUpdate(t) {
   var el=document.getElementById('s-lastup'); if(!el) return;
   if(!t){ el.textContent='—'; el.className='stat-sm c-muted'; return; }
@@ -262,113 +261,95 @@ function toast(icon,title,msg,type,ms) {
 }
 
 // ══════════════════════════════════════════
-// 핵심: 배치 API — 모든 종목을 요청 2회로 처리
-// 종목 7개도 RSI 1번 + 시세 1번 = 총 2회만 소모!
+// RSI 직접 계산 (Wilder 스무딩 14기간)
+// Finnhub에서 캔들 데이터 받아서 계산
 // ══════════════════════════════════════════
+function calcRSI(closes) {
+  var c=closes.filter(function(v){ return v!=null&&!isNaN(v); });
+  var period=14;
+  if(c.length<period+1) return null;
+  var g=0,l=0;
+  for(var i=1;i<=period;i++){ var d=c[i]-c[i-1]; if(d>0)g+=d; else l-=d; }
+  var ag=g/period, al=l/period;
+  for(var i=period+1;i<c.length;i++){
+    var d=c[i]-c[i-1];
+    ag=(ag*(period-1)+(d>0?d:0))/period;
+    al=(al*(period-1)+(d<0?-d:0))/period;
+  }
+  if(al===0) return 100;
+  return Math.round((100-100/(1+ag/al))*100)/100;
+}
+
 // ══════════════════════════════════════════
-// 전역 요청 큐 — 분당 8회 제한 완벽 대응
-// 요청 사이 8초 간격 보장 (60초/8회 = 7.5초)
+// Finnhub API — 분당 60회 무료
+// 캔들 데이터로 RSI 직접 계산
 // ══════════════════════════════════════════
-var reqQueue   = [];
-var reqRunning = false;
-var REQ_GAP    = 8000; // 8초 간격
-
-function enqueue(fn) {
-  return new Promise(function(resolve, reject) {
-    reqQueue.push({ fn:fn, resolve:resolve, reject:reject });
-    drainQueue();
-  });
+function periodToFinnhub(p) {
+  // Finnhub resolution: D=일봉, W=주봉, M=월봉
+  return p; // D, W, M 그대로 사용
 }
 
-function drainQueue() {
-  if (reqRunning || reqQueue.length === 0) return;
-  reqRunning = true;
-  var item = reqQueue.shift();
-  item.fn()
-    .then(item.resolve)
-    .catch(item.reject)
-    .then(function() {
-      setTimeout(function() { reqRunning = false; drainQueue(); }, REQ_GAP);
-    });
-}
-
-// ── 배치 fetch: 기간 그룹 하나 처리 (RSI+시세 2회) ──
-function fetchGroup(period, tickers) {
-  return enqueue(function() {
-    var symbols  = tickers.join(',');
-    var rsiUrl   = 'https://api.twelvedata.com/rsi?symbol='+encodeURIComponent(symbols)
-                 + '&interval='+period+'&time_period=14&outputsize=1&apikey='+TD_KEY;
-    var quoteUrl = 'https://api.twelvedata.com/quote?symbol='+encodeURIComponent(symbols)
-                 + '&apikey='+TD_KEY;
-
-    return Promise.all([
-      fetch(rsiUrl).then(function(r){ return r.json(); }),
-      fetch(quoteUrl).then(function(r){ return r.json(); })
-    ]).then(function(res) {
-      addApiUsage(2);
-      var rsiData=res[0], quoteData=res[1], now=new Date();
-
-      tickers.forEach(function(ticker) {
-        var s = stocks.find(function(x){ return x.ticker===ticker&&x.period===period; });
-        if (!s) return;
-        // 배치: 여러 종목이면 {TICKER:{...}} 구조, 1개면 직접
-        var rsi   = tickers.length===1 ? rsiData   : (rsiData[ticker]   ||{});
-        var quote = tickers.length===1 ? quoteData : (quoteData[ticker] ||{});
-
-        if (rsi.code===429||quote.code===429) {
-          s.error='API 한도 초과'; s.loading=false; renderCard(s); return;
-        }
-        if (rsi.status==='error')   { s.error=rsi.message||'RSI 오류'; s.loading=false; renderCard(s); return; }
-        if (quote.status==='error') { s.error=quote.message||'시세 오류'; s.loading=false; renderCard(s); return; }
-        if (!rsi.values||!rsi.values[0]) { s.error='데이터 없음'; s.loading=false; renderCard(s); return; }
-
-        s.rsi=Math.round(parseFloat(rsi.values[0].rsi)*100)/100;
-        s.price=parseFloat(quote.close);
-        s.prevClose=parseFloat(quote.previous_close);
-        s.name=quote.name||'';
-        s.loading=false; s.error=null; s.lastUp=now;
-        renderCard(s); checkAlert(s);
-      });
-      renderLastUpdate(now); updateStats();
-    }).catch(function(e) {
-      tickers.forEach(function(ticker) {
-        var s=stocks.find(function(x){ return x.ticker===ticker&&x.period===period; });
-        if(s){ s.loading=false; s.error=e.message; renderCard(s); }
-      });
-    });
-  });
-}
-
-function refreshAll() {
-  if (!stocks.length) { toast('ℹ️','종목 없음','먼저 종목을 추가해주세요','info'); return; }
-  var btn=document.getElementById('btn-refresh');
-  btn.disabled=true; btn.textContent='로딩중…';
-
-  // 기간별 그룹화 → 각 그룹은 요청 2회만 소모
-  var groups={};
-  stocks.forEach(function(s){
-    if(!groups[s.period]) groups[s.period]=[];
-    groups[s.period].push(s.ticker);
-  });
-
-  var all = Object.keys(groups).map(function(period){
-    return fetchGroup(period, groups[period]);
-  });
-
-  Promise.all(all).then(function(){
-    btn.disabled=false; btn.textContent='⟳ 새로고침';
-    updateStats();
-  });
-}
-
-// ── 단일 종목 로드 (추가 시) — 큐 통해서 요청 ──
 function loadStock(s) {
   s.loading=true; s.error=null; renderCard(s);
-  return fetchGroup(s.period, [s.ticker]);
+
+  // Finnhub 캔들 기간 설정
+  var now   = Math.floor(Date.now()/1000);
+  var from;
+  if(s.period==='D')      from = now - 86400*365*2;   // 2년 (일봉 RSI 정확도)
+  else if(s.period==='W') from = now - 86400*365*5;   // 5년
+  else                    from = now - 86400*365*10;  // 10년
+
+  var candleUrl = 'https://finnhub.io/api/v1/stock/candle'
+    +'?symbol='+encodeURIComponent(s.ticker)
+    +'&resolution='+periodToFinnhub(s.period)
+    +'&from='+from+'&to='+now
+    +'&token='+FH_KEY;
+
+  var quoteUrl = 'https://finnhub.io/api/v1/quote'
+    +'?symbol='+encodeURIComponent(s.ticker)
+    +'&token='+FH_KEY;
+
+  return Promise.all([
+    fetch(candleUrl).then(function(r){ return r.json(); }),
+    fetch(quoteUrl).then(function(r){ return r.json(); })
+  ]).then(function(res){
+    addApiUsage(2);
+    var candle=res[0], quote=res[1];
+
+    // 에러 체크
+    if(candle.s==='no_data') throw new Error('데이터 없음 (티커 확인)');
+    if(!candle.c||candle.c.length<15) throw new Error('데이터 부족');
+
+    s.rsi       = calcRSI(candle.c);
+    s.price     = quote.c;      // 현재가
+    s.prevClose = quote.pc;     // 전일 종가
+    s.name      = '';
+    s.loading   = false;
+    s.error     = null;
+    s.lastUp    = new Date();
+    renderLastUpdate(s.lastUp);
+  }).catch(function(e){
+    s.loading=false; s.error=e.message;
+  }).then(function(){
+    renderCard(s); checkAlert(s); updateStats();
+  });
+}
+
+// ── 전체 새로고침 (종목마다 1초 간격) ──
+function refreshAll() {
+  if(!stocks.length){ toast('ℹ️','종목 없음','먼저 종목을 추가해주세요','info'); return; }
+  var btn=document.getElementById('btn-refresh');
+  btn.disabled=true; btn.textContent='로딩중…';
+  var idx=0;
+  function next(){
+    if(idx>=stocks.length){ btn.disabled=false; btn.textContent='⟳ 새로고침'; return; }
+    loadStock(stocks[idx++]).then(function(){ setTimeout(next,1000); }); // 1초 간격 (분당 60회 여유)
+  }
+  next();
 }
 
 // ── 알림 ──
-function checkAlert(s) {
+function checkAlert(s){
   if(s.rsi==null) return;
   var key=s.ticker+'_'+s.period;
   if(s.rsi<=threshold){
@@ -382,7 +363,7 @@ function checkAlert(s) {
     localStorage.setItem('rsi_prev',JSON.stringify(Array.from(prevAlert)));
   }
 }
-function fireAlert(s) {
+function fireAlert(s){
   if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
     try{ new Notification('🚨 '+s.ticker+' RSI 경보',{body:'RSI '+s.rsi+' ← 임계값 '+threshold+' 이하!',icon:'icon-192.png',tag:'rsi-'+s.ticker}); }catch(e){}
   }
@@ -401,9 +382,9 @@ function getBadge(v,err){
   return '<span class="badge b-high">과매수</span>';
 }
 function cardClass(v){ if(v==null)return ''; if(v<=threshold)return 's-alert'; if(v<=40)return 's-warn'; return ''; }
-function periodLabel(p){ return p==='1day'?'일봉':p==='1week'?'주봉':'월봉'; }
+function periodLabel(p){ return p==='D'?'일봉':p==='W'?'주봉':'월봉'; }
 
-function renderCard(s) {
+function renderCard(s){
   var el=document.getElementById('card-'+s.ticker+'-'+s.period); if(!el) return;
   var v=s.rsi, pct=v!=null?Math.min(v,100):0;
   var chg=(s.price&&s.prevClose)?((s.price-s.prevClose)/s.prevClose*100).toFixed(2):null;
@@ -418,7 +399,7 @@ function renderCard(s) {
     +'<div class="card-right">'+getBadge(v,s.error)+'<button class="btn btn-sm" data-ticker="'+s.ticker+'" data-period="'+s.period+'">✕</button></div></div>'
     +'<div class="card-body"><div>'+priceHTML+'</div><div><div class="rsi-label-sm">RSI(14) · '+periodLabel(s.period)+'</div>'+rsiHTML+'</div></div>'
     +'<div class="bar-wrap"><div class="bar-fill" style="width:'+pct+'%;background:'+barColor(v)+'"></div><div class="bar-mark" style="left:'+threshold+'%"></div></div>'
-    +'<div class="card-foot"><span>'+periodLabel(s.period)+'</span><span>'+footRight+'</span></div>';
+    +'<div class="card-foot"><span>'+periodLabel(s.period)+' · Finnhub</span><span>'+footRight+'</span></div>';
 }
 
 document.getElementById('cards').addEventListener('click',function(e){
@@ -426,7 +407,7 @@ document.getElementById('cards').addEventListener('click',function(e){
   removeStock(btn.dataset.ticker,btn.dataset.period);
 });
 
-function updateStats() {
+function updateStats(){
   document.getElementById('s-total').textContent=stocks.length;
   var n=stocks.filter(function(s){ return s.rsi!=null&&s.rsi<=threshold; }).length;
   document.getElementById('s-alert').textContent=n;
@@ -435,7 +416,7 @@ function updateStats() {
   renderApiUsage();
 }
 
-function addStock() {
+function addStock(){
   var raw=document.getElementById('inp-ticker').value.trim().toUpperCase().replace(/[^A-Z0-9.\-\^]/g,'');
   var period=document.getElementById('inp-period').value;
   if(!raw){ toast('⚠️','티커 없음','AAPL, TSLA, NVDA 같은 심볼을 입력하세요','info'); return; }
@@ -448,7 +429,7 @@ function addStock() {
   var el=document.createElement('div'); el.id='card-'+raw+'-'+period; el.className='card';
   document.getElementById('cards').appendChild(el);
   renderCard(s); updateStats();
-  toast('✅',raw+' 추가됨','데이터 로딩 중…','ok',3000);
+  toast('✅',raw+' 추가됨','Finnhub에서 로딩 중…','ok',3000);
   document.getElementById('inp-ticker').value='';
   loadStock(s);
 }
@@ -491,7 +472,7 @@ function requestNotif(){
 function bindBtn(id,fn){
   var el=document.getElementById(id); if(!el) return;
   var lock=false;
-  function run(e){ if(e.cancelable) e.preventDefault(); if(lock) return; lock=true; fn(); setTimeout(function(){ lock=false; },350); }
+  function run(e){ if(e.cancelable)e.preventDefault(); if(lock)return; lock=true; fn(); setTimeout(function(){ lock=false; },350); }
   el.addEventListener('touchend',run,{passive:false});
   el.addEventListener('click',run);
 }
@@ -499,7 +480,6 @@ bindBtn('btn-add',addStock);
 bindBtn('btn-refresh',refreshAll);
 bindBtn('btn-notif',requestNotif);
 bindBtn('btn-pwa-close',function(){ document.getElementById('pwa-banner').classList.add('hidden'); });
-
 document.getElementById('inp-ticker').addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); addStock(); } });
 document.getElementById('inp-interval').addEventListener('change',setupAutoRefresh);
 document.getElementById('inp-threshold').addEventListener('input',function(){ updateThreshold(this.value); });
@@ -530,7 +510,13 @@ function checkBanners(){
       document.getElementById('cards').appendChild(el); renderCard(s);
     });
     updateStats();
-    refreshAll(); // 배치로 한번에 로드
+    // 1초 간격으로 순차 로드
+    var i=0;
+    function nextLoad(){
+      if(i>=stocks.length) return;
+      loadStock(stocks[i++]).then(function(){ setTimeout(nextLoad,1000); });
+    }
+    nextLoad();
   }
   setupAutoRefresh();
 })();
