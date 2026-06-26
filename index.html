@@ -265,161 +265,106 @@ function toast(icon,title,msg,type,ms) {
 // 핵심: 배치 API — 모든 종목을 요청 2회로 처리
 // 종목 7개도 RSI 1번 + 시세 1번 = 총 2회만 소모!
 // ══════════════════════════════════════════
+// ══════════════════════════════════════════
+// 전역 요청 큐 — 분당 8회 제한 완벽 대응
+// 요청 사이 8초 간격 보장 (60초/8회 = 7.5초)
+// ══════════════════════════════════════════
+var reqQueue   = [];
+var reqRunning = false;
+var REQ_GAP    = 8000; // 8초 간격
+
+function enqueue(fn) {
+  return new Promise(function(resolve, reject) {
+    reqQueue.push({ fn:fn, resolve:resolve, reject:reject });
+    drainQueue();
+  });
+}
+
+function drainQueue() {
+  if (reqRunning || reqQueue.length === 0) return;
+  reqRunning = true;
+  var item = reqQueue.shift();
+  item.fn()
+    .then(item.resolve)
+    .catch(item.reject)
+    .then(function() {
+      setTimeout(function() { reqRunning = false; drainQueue(); }, REQ_GAP);
+    });
+}
+
+// ── 배치 fetch: 기간 그룹 하나 처리 (RSI+시세 2회) ──
+function fetchGroup(period, tickers) {
+  return enqueue(function() {
+    var symbols  = tickers.join(',');
+    var rsiUrl   = 'https://api.twelvedata.com/rsi?symbol='+encodeURIComponent(symbols)
+                 + '&interval='+period+'&time_period=14&outputsize=1&apikey='+TD_KEY;
+    var quoteUrl = 'https://api.twelvedata.com/quote?symbol='+encodeURIComponent(symbols)
+                 + '&apikey='+TD_KEY;
+
+    return Promise.all([
+      fetch(rsiUrl).then(function(r){ return r.json(); }),
+      fetch(quoteUrl).then(function(r){ return r.json(); })
+    ]).then(function(res) {
+      addApiUsage(2);
+      var rsiData=res[0], quoteData=res[1], now=new Date();
+
+      tickers.forEach(function(ticker) {
+        var s = stocks.find(function(x){ return x.ticker===ticker&&x.period===period; });
+        if (!s) return;
+        // 배치: 여러 종목이면 {TICKER:{...}} 구조, 1개면 직접
+        var rsi   = tickers.length===1 ? rsiData   : (rsiData[ticker]   ||{});
+        var quote = tickers.length===1 ? quoteData : (quoteData[ticker] ||{});
+
+        if (rsi.code===429||quote.code===429) {
+          s.error='API 한도 초과'; s.loading=false; renderCard(s); return;
+        }
+        if (rsi.status==='error')   { s.error=rsi.message||'RSI 오류'; s.loading=false; renderCard(s); return; }
+        if (quote.status==='error') { s.error=quote.message||'시세 오류'; s.loading=false; renderCard(s); return; }
+        if (!rsi.values||!rsi.values[0]) { s.error='데이터 없음'; s.loading=false; renderCard(s); return; }
+
+        s.rsi=Math.round(parseFloat(rsi.values[0].rsi)*100)/100;
+        s.price=parseFloat(quote.close);
+        s.prevClose=parseFloat(quote.previous_close);
+        s.name=quote.name||'';
+        s.loading=false; s.error=null; s.lastUp=now;
+        renderCard(s); checkAlert(s);
+      });
+      renderLastUpdate(now); updateStats();
+    }).catch(function(e) {
+      tickers.forEach(function(ticker) {
+        var s=stocks.find(function(x){ return x.ticker===ticker&&x.period===period; });
+        if(s){ s.loading=false; s.error=e.message; renderCard(s); }
+      });
+    });
+  });
+}
+
 function refreshAll() {
   if (!stocks.length) { toast('ℹ️','종목 없음','먼저 종목을 추가해주세요','info'); return; }
   var btn=document.getElementById('btn-refresh');
   btn.disabled=true; btn.textContent='로딩중…';
 
-  // 기간별로 그룹화 (같은 interval끼리 묶어서 배치 요청)
-  var groups = {};
+  // 기간별 그룹화 → 각 그룹은 요청 2회만 소모
+  var groups={};
   stocks.forEach(function(s){
-    if (!groups[s.period]) groups[s.period]=[];
+    if(!groups[s.period]) groups[s.period]=[];
     groups[s.period].push(s.ticker);
   });
 
-  var promises = [];
-  Object.keys(groups).forEach(function(period){
-    var tickers = groups[period];
-    var symbols = tickers.join(',');
-
-    var rsiUrl = 'https://api.twelvedata.com/rsi'
-      +'?symbol='+encodeURIComponent(symbols)
-      +'&interval='+period
-      +'&time_period=14'
-      +'&outputsize=1'
-      +'&apikey='+TD_KEY;
-
-    var quoteUrl = 'https://api.twelvedata.com/quote'
-      +'?symbol='+encodeURIComponent(symbols)
-      +'&apikey='+TD_KEY;
-
-    // 같은 기간 그룹은 요청 2회만 소모
-    var p = Promise.all([
-      fetch(rsiUrl).then(function(r){ return r.json(); }),
-      fetch(quoteUrl).then(function(r){ return r.json(); })
-    ]).then(function(res){
-      addApiUsage(2);
-      var rsiData   = res[0];
-      var quoteData = res[1];
-
-      tickers.forEach(function(ticker){
-        var s = stocks.find(function(x){ return x.ticker===ticker&&x.period===period; });
-        if (!s) return;
-
-        // 배치 응답: 종목 1개면 직접, 여러개면 {AAPL:{...}, TSLA:{...}} 형태
-        var rsi   = tickers.length===1 ? rsiData   : (rsiData[ticker]   || {});
-        var quote = tickers.length===1 ? quoteData : (quoteData[ticker] || {});
-
-        if (rsi.code===429||quote.code===429) { s.error='API 한도 초과'; s.loading=false; renderCard(s); return; }
-        if (rsi.status==='error')   { s.error=rsi.message||'RSI 오류'; s.loading=false; renderCard(s); return; }
-        if (quote.status==='error') { s.error=quote.message||'시세 오류'; s.loading=false; renderCard(s); return; }
-        if (!rsi.values||!rsi.values[0]) { s.error='데이터 없음 (티커 확인)'; s.loading=false; renderCard(s); return; }
-
-        s.rsi       = Math.round(parseFloat(rsi.values[0].rsi)*100)/100;
-        s.price     = parseFloat(quote.close);
-        s.prevClose = parseFloat(quote.previous_close);
-        s.name      = quote.name||'';
-        s.loading   = false;
-        s.error     = null;
-        s.lastUp    = new Date();
-        renderCard(s);
-        checkAlert(s);
-        renderLastUpdate(s.lastUp);
-      });
-    }).catch(function(e){
-      tickers.forEach(function(ticker){
-        var s=stocks.find(function(x){ return x.ticker===ticker&&x.period===period; });
-        if(s){ s.loading=false; s.error=e.message; renderCard(s); }
-      });
-    });
-    promises.push(p);
+  var all = Object.keys(groups).map(function(period){
+    return fetchGroup(period, groups[period]);
   });
 
-  // 기간 그룹이 여러 개면 1.5초 간격으로 순차 처리
-  var groupKeys = Object.keys(groups);
-  var gIdx = 0;
-  function nextGroup() {
-    if (gIdx >= groupKeys.length) {
-      btn.disabled=false; btn.textContent='⟳ 새로고침';
-      updateStats(); return;
-    }
-    var period = groupKeys[gIdx++];
-    var tickers = groups[period];
-    var symbols = tickers.join(',');
-
-    var rsiUrl = 'https://api.twelvedata.com/rsi'
-      +'?symbol='+encodeURIComponent(symbols)
-      +'&interval='+period+'&time_period=14&outputsize=1&apikey='+TD_KEY;
-    var quoteUrl = 'https://api.twelvedata.com/quote'
-      +'?symbol='+encodeURIComponent(symbols)+'&apikey='+TD_KEY;
-
-    Promise.all([
-      fetch(rsiUrl).then(function(r){ return r.json(); }),
-      fetch(quoteUrl).then(function(r){ return r.json(); })
-    ]).then(function(res){
-      addApiUsage(2);
-      var rsiData=res[0], quoteData=res[1];
-      var now=new Date();
-
-      tickers.forEach(function(ticker){
-        var s=stocks.find(function(x){ return x.ticker===ticker&&x.period===period; });
-        if(!s) return;
-        var rsi   = tickers.length===1 ? rsiData   : (rsiData[ticker]   ||{});
-        var quote = tickers.length===1 ? quoteData : (quoteData[ticker] ||{});
-
-        if(rsi.code===429||quote.code===429){ s.error='API 한도 초과 (분당 8회)'; s.loading=false; renderCard(s); return; }
-        if(rsi.status==='error')  { s.error=rsi.message||'RSI 오류'; s.loading=false; renderCard(s); return; }
-        if(quote.status==='error'){ s.error=quote.message||'시세 오류'; s.loading=false; renderCard(s); return; }
-        if(!rsi.values||!rsi.values[0]){ s.error='티커 없음'; s.loading=false; renderCard(s); return; }
-
-        s.rsi       = Math.round(parseFloat(rsi.values[0].rsi)*100)/100;
-        s.price     = parseFloat(quote.close);
-        s.prevClose = parseFloat(quote.previous_close);
-        s.name      = quote.name||'';
-        s.loading   = false; s.error=null; s.lastUp=now;
-        renderCard(s); checkAlert(s);
-      });
-      renderLastUpdate(now); updateStats();
-      setTimeout(nextGroup, 1500); // 기간 그룹 간 1.5초 간격
-    }).catch(function(e){
-      tickers.forEach(function(ticker){
-        var s=stocks.find(function(x){ return x.ticker===ticker&&x.period===period; });
-        if(s){ s.loading=false; s.error=e.message; renderCard(s); }
-      });
-      setTimeout(nextGroup,1500);
-    });
-  }
-  nextGroup();
+  Promise.all(all).then(function(){
+    btn.disabled=false; btn.textContent='⟳ 새로고침';
+    updateStats();
+  });
 }
 
-// ── 단일 종목 로드 (추가 시) ──
+// ── 단일 종목 로드 (추가 시) — 큐 통해서 요청 ──
 function loadStock(s) {
   s.loading=true; s.error=null; renderCard(s);
-  var rsiUrl='https://api.twelvedata.com/rsi?symbol='+encodeURIComponent(s.ticker)
-    +'&interval='+s.period+'&time_period=14&outputsize=1&apikey='+TD_KEY;
-  var quoteUrl='https://api.twelvedata.com/quote?symbol='+encodeURIComponent(s.ticker)+'&apikey='+TD_KEY;
-
-  return Promise.all([
-    fetch(rsiUrl).then(function(r){ return r.json(); }),
-    fetch(quoteUrl).then(function(r){ return r.json(); })
-  ]).then(function(res){
-    var rsi=res[0], quote=res[1];
-    addApiUsage(2);
-    if(rsi.code===429||quote.code===429) throw new Error('API 한도 초과 (분당 8회)');
-    if(rsi.status==='error')   throw new Error(rsi.message||'RSI 오류');
-    if(quote.status==='error') throw new Error(quote.message||'시세 오류');
-    if(!rsi.values||!rsi.values[0]) throw new Error('티커를 확인해주세요');
-    s.rsi=Math.round(parseFloat(rsi.values[0].rsi)*100)/100;
-    s.price=parseFloat(quote.close);
-    s.prevClose=parseFloat(quote.previous_close);
-    s.name=quote.name||'';
-    s.loading=false; s.lastUp=new Date();
-    renderLastUpdate(s.lastUp);
-  }).catch(function(e){
-    s.loading=false; s.error=e.message;
-  }).then(function(){
-    renderCard(s); checkAlert(s); updateStats();
-  });
+  return fetchGroup(s.period, [s.ticker]);
 }
 
 // ── 알림 ──
