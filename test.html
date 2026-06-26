@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>티커 지원 테스트</title>
+<style>
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:#090e1a; color:#e2e8f0; font-family:-apple-system,sans-serif; padding:20px; }
+h2 { font-size:16px; margin-bottom:16px; color:#94a3b8; }
+.row { display:flex; gap:10px; margin-bottom:14px; }
+input { flex:1; background:#141e2e; border:1px solid #1e2d45; border-radius:10px; padding:12px; color:#e2e8f0; font-size:15px; outline:none; -webkit-appearance:none; }
+input:focus { border-color:#3b82f6; }
+button { background:#3b82f6; color:#fff; border:none; border-radius:10px; padding:12px 18px; font-size:14px; font-weight:700; cursor:pointer; touch-action:manipulation; }
+button:active { opacity:0.7; transform:scale(0.96); }
+.result { margin-top:6px; }
+.item { background:#141e2e; border-radius:10px; padding:12px 14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border:1px solid #1e2d45; }
+.item.ok   { border-color:#22c55e; }
+.item.err  { border-color:#ef4444; }
+.item.load { border-color:#3b82f6; }
+.ticker-name { font-weight:700; font-size:15px; }
+.ticker-sub  { font-size:11px; color:#64748b; margin-top:2px; }
+.badge { font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; }
+.b-ok  { background:rgba(34,197,94,.2);  color:#22c55e; }
+.b-err { background:rgba(239,68,68,.2);  color:#ef4444; }
+.b-load{ background:rgba(59,130,246,.2); color:#3b82f6; }
+.rsi-val { font-size:20px; font-weight:700; color:#22c55e; }
+.preset { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+.preset button { background:#141e2e; border:1px solid #1e2d45; color:#94a3b8; font-size:12px; padding:7px 12px; border-radius:8px; }
+.preset button:active { background:#1e2d45; }
+.note { font-size:12px; color:#64748b; margin-bottom:14px; line-height:1.6; }
+</style>
+</head>
+<body>
+<h2>🔍 Twelve Data 티커 지원 테스트</h2>
+<p class="note">종목을 입력하면 Twelve Data 무료 API에서 RSI를 가져올 수 있는지 테스트합니다.</p>
+
+<div class="preset">
+  <button onclick="testTicker('NVDL')">NVDL</button>
+  <button onclick="testTicker('DRAM')">DRAM</button>
+  <button onclick="testTicker('QLD')">QLD</button>
+  <button onclick="testTicker('TSLL')">TSLL</button>
+  <button onclick="testTicker('SPCX')">SPCX</button>
+  <button onclick="testTicker('BITX')">BITX</button>
+  <button onclick="testTicker('TQQQ')">TQQQ</button>
+  <button onclick="testTicker('SOXL')">SOXL</button>
+  <button onclick="testTicker('NVDA')">NVDA</button>
+  <button onclick="testTicker('AAPL')">AAPL</button>
+</div>
+
+<div class="row">
+  <input id="inp" type="text" placeholder="티커 입력 (예: NVDL)" autocapitalize="characters" autocorrect="off">
+  <button id="btn-test">테스트</button>
+</div>
+
+<div class="result" id="result"></div>
+
+<script>
+var TD_KEY = 'dcbc4a1fa0c9402480845046468f2f2e';
+var tested = {};
+
+function testTicker(ticker) {
+  ticker = ticker.toUpperCase().trim();
+  if (!ticker) return;
+  if (tested[ticker]) return;
+  tested[ticker] = true;
+
+  var result = document.getElementById('result');
+  var item = document.createElement('div');
+  item.id = 'item-' + ticker;
+  item.className = 'item load';
+  item.innerHTML = '<div><div class="ticker-name">' + ticker + '</div><div class="ticker-sub">확인 중...</div></div>'
+    + '<span class="badge b-load">⏳ 로딩</span>';
+  result.insertBefore(item, result.firstChild);
+
+  var url = 'https://api.twelvedata.com/rsi?symbol=' + ticker
+    + '&interval=1day&time_period=14&outputsize=1&apikey=' + TD_KEY;
+
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var el = document.getElementById('item-' + ticker);
+      if (d.status === 'error') {
+        el.className = 'item err';
+        el.innerHTML = '<div><div class="ticker-name">' + ticker + '</div>'
+          + '<div class="ticker-sub" style="color:#ef4444">' + (d.message||'지원 안 됨') + '</div></div>'
+          + '<span class="badge b-err">❌ 미지원</span>';
+      } else if (d.values && d.values[0]) {
+        var rsi = parseFloat(d.values[0].rsi).toFixed(2);
+        el.className = 'item ok';
+        el.innerHTML = '<div><div class="ticker-name">' + ticker + '</div>'
+          + '<div class="ticker-sub" style="color:#22c55e">RSI 데이터 정상 수신</div></div>'
+          + '<div style="text-align:right"><div class="rsi-val">' + rsi + '</div>'
+          + '<span class="badge b-ok">✅ 지원</span></div>';
+      } else {
+        el.className = 'item err';
+        el.innerHTML = '<div><div class="ticker-name">' + ticker + '</div>'
+          + '<div class="ticker-sub" style="color:#f59e0b">응답 형식 이상</div></div>'
+          + '<span class="badge b-err">⚠ 불명</span>';
+      }
+    })
+    .catch(function(e) {
+      var el = document.getElementById('item-' + ticker);
+      if (el) {
+        el.className = 'item err';
+        el.innerHTML = '<div><div class="ticker-name">' + ticker + '</div>'
+          + '<div class="ticker-sub" style="color:#ef4444">네트워크 오류</div></div>'
+          + '<span class="badge b-err">❌ 오류</span>';
+      }
+    });
+}
+
+// 버튼 바인딩
+var btn = document.getElementById('btn-test');
+function runTest() {
+  var val = document.getElementById('inp').value.trim().toUpperCase();
+  if (!val) return;
+  tested = {}; // 같은 티커 재테스트 허용
+  testTicker(val);
+  document.getElementById('inp').value = '';
+}
+btn.addEventListener('touchend', function(e) { e.preventDefault(); runTest(); }, {passive:false});
+btn.addEventListener('click', runTest);
+document.getElementById('inp').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); runTest(); }
+});
+</script>
+</body>
+</html>
