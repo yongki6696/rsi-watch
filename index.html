@@ -17,27 +17,14 @@
   --warn:#f59e0b; --ok:#22c55e; --text:#e2e8f0; --muted:#64748b;
 }
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
-body {
-  background:var(--bg); color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
-  min-height:100vh; overscroll-behavior:none;
-}
-header {
-  display:flex; align-items:center; justify-content:space-between;
-  padding:calc(env(safe-area-inset-top) + 14px) 18px 14px;
-  background:var(--surface); border-bottom:1px solid var(--border);
-  position:sticky; top:0; z-index:100;
-}
+body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif; min-height:100vh; overscroll-behavior:none; }
+
+header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 14px) 18px 14px; background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:100; }
 .logo { display:flex; align-items:center; gap:8px; font-size:18px; font-weight:700; }
 .dot { width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent); animation:blink 2s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
-.btn {
-  display:inline-flex; align-items:center; justify-content:center;
-  border:none; border-radius:10px; cursor:pointer;
-  font-size:14px; font-weight:600;
-  transition:transform .1s, opacity .15s;
-  -webkit-appearance:none; user-select:none; touch-action:manipulation;
-}
+
+.btn { display:inline-flex; align-items:center; justify-content:center; border:none; border-radius:10px; cursor:pointer; font-size:14px; font-weight:600; transition:transform .1s, opacity .15s; -webkit-appearance:none; user-select:none; touch-action:manipulation; }
 .btn:active { transform:scale(0.93); opacity:0.75; }
 .btn-primary { background:var(--accent); color:#fff; padding:12px 20px; }
 .btn-ghost { background:rgba(255,255,255,0.07); color:var(--text); border:1px solid var(--border); padding:9px 14px; font-size:13px; }
@@ -45,76 +32,94 @@ header {
 .btn-sm { background:rgba(239,68,68,0.15); color:var(--danger); padding:6px 10px; font-size:12px; border-radius:7px; }
 .btn-sm:active { background:rgba(239,68,68,0.3); }
 .alert-badge { background:var(--danger); color:#fff; font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; display:none; }
+
 main { max-width:680px; margin:0 auto; padding:18px 16px calc(env(safe-area-inset-bottom) + 28px); }
+
 .banner { border-radius:12px; padding:12px 14px; margin-bottom:14px; font-size:13px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
-.banner-blue { background:rgba(59,130,246,.1); border:1px solid rgba(59,130,246,.25); }
-.banner-yellow { background:rgba(245,158,11,.1); border:1px solid rgba(245,158,11,.25); }
+.banner-blue   { background:rgba(59,130,246,.1);  border:1px solid rgba(59,130,246,.25); }
+.banner-yellow { background:rgba(245,158,11,.1);  border:1px solid rgba(245,158,11,.25); }
 .hidden { display:none !important; }
+
+/* ── 통계 4칸 ── */
 .stats { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:16px; }
 .stat { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; }
-.stat-label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.7px; margin-bottom:4px; }
-.stat-num { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; }
-.c-text{color:var(--text)} .c-danger{color:var(--danger)} .c-warn{color:var(--warn)} .c-ok{color:var(--ok)} .c-purple{color:#a78bfa} .c-muted{color:var(--muted)}
+.stat-label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.7px; margin-bottom:5px; }
+.stat-big { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; }
+.stat-sm  { font-size:13px; font-weight:600; line-height:1.5; padding-top:3px; }
+.api-bar-bg   { height:5px; background:var(--border); border-radius:3px; margin-top:8px; overflow:hidden; }
+.api-bar-fill { height:100%; border-radius:3px; transition:width .5s ease; background:var(--ok); }
+
+/* ── 입력 ── */
 .panel { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:14px; }
-.row { display:flex; gap:10px; margin-bottom:10px; }
+.row   { display:flex; gap:10px; margin-bottom:10px; }
 .field { display:flex; flex-direction:column; gap:5px; flex:1; }
 .field-label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
-.field input, .field select {
-  background:var(--bg); border:1px solid var(--border); border-radius:9px;
-  padding:12px; color:var(--text); font-size:15px;
-  outline:none; width:100%; -webkit-appearance:none; appearance:none;
-}
+.field input, .field select { background:var(--bg); border:1px solid var(--border); border-radius:9px; padding:12px; color:var(--text); font-size:15px; outline:none; width:100%; -webkit-appearance:none; appearance:none; }
 .field input:focus, .field select:focus { border-color:var(--accent); }
 .field input::placeholder { color:var(--muted); }
+
+/* ── 임계값 ── */
 .thr-panel { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:18px; }
-.thr-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.thr-top   { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
 .thr-label { font-size:12px; color:var(--muted); }
-.thr-val { font-size:22px; font-weight:700; color:var(--danger); font-variant-numeric:tabular-nums; }
+.thr-val   { font-size:22px; font-weight:700; color:var(--danger); font-variant-numeric:tabular-nums; }
 input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
+
+/* ── 섹션 헤더 ── */
 .sec-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
-.sec-title { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; }
-.sec-sub { font-size:10px; color:var(--muted); }
-.empty { text-align:center; padding:48px 20px; }
-.empty-icon { font-size:42px; margin-bottom:12px; }
+.sec-title  { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; }
+.sec-sub    { font-size:10px; color:var(--muted); }
+
+/* ── 빈 상태 ── */
+.empty       { text-align:center; padding:48px 20px; }
+.empty-icon  { font-size:42px; margin-bottom:12px; }
 .empty-title { font-size:16px; font-weight:600; color:var(--text); margin-bottom:6px; }
-.empty-desc { font-size:13px; color:var(--muted); line-height:1.6; }
+.empty-desc  { font-size:13px; color:var(--muted); line-height:1.6; }
+
+/* ── 카드 ── */
 .cards { display:flex; flex-direction:column; gap:12px; }
 .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; transition:border-color .2s, box-shadow .2s; }
 .card.s-alert { border-color:var(--danger); box-shadow:0 0 0 1px var(--danger),0 0 18px rgba(239,68,68,.12); }
 .card.s-warn  { border-color:var(--warn);   box-shadow:0 0 0 1px var(--warn),0 0 18px rgba(245,158,11,.08); }
-.card-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
-.ticker { font-size:20px; font-weight:700; letter-spacing:.3px; }
-.cname  { font-size:11px; color:var(--muted); margin-top:2px; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.card-top   { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
+.ticker     { font-size:20px; font-weight:700; letter-spacing:.3px; }
+.cname      { font-size:11px; color:var(--muted); margin-top:2px; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .card-right { display:flex; align-items:center; gap:8px; }
-.badge { padding:3px 8px; border-radius:20px; font-size:10px; font-weight:700; text-transform:uppercase; }
-.b-alert{background:rgba(239,68,68,.2);color:var(--danger)}
-.b-warn{background:rgba(245,158,11,.2);color:var(--warn)}
-.b-ok{background:rgba(34,197,94,.15);color:var(--ok)}
-.b-high{background:rgba(167,139,250,.15);color:#a78bfa}
-.b-load{background:rgba(100,116,139,.15);color:var(--muted)}
-.b-err{background:rgba(239,68,68,.1);color:var(--danger)}
-.card-body { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:12px; }
-.price-main { font-size:22px; font-weight:700; }
-.price-chg  { font-size:12px; margin-top:2px; }
+
+.badge  { padding:3px 8px; border-radius:20px; font-size:10px; font-weight:700; text-transform:uppercase; }
+.b-alert{ background:rgba(239,68,68,.2);    color:var(--danger); }
+.b-warn { background:rgba(245,158,11,.2);   color:var(--warn); }
+.b-ok   { background:rgba(34,197,94,.15);   color:var(--ok); }
+.b-high { background:rgba(167,139,250,.15); color:#a78bfa; }
+.b-load { background:rgba(100,116,139,.15); color:var(--muted); }
+.b-err  { background:rgba(239,68,68,.1);    color:var(--danger); }
+
+.card-body    { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:12px; }
+.price-main   { font-size:22px; font-weight:700; }
+.price-chg    { font-size:12px; margin-top:2px; }
 .rsi-label-sm { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px; text-align:right; }
-.rsi-big { font-size:32px; font-weight:700; line-height:1; text-align:right; }
-.bar-wrap { position:relative; height:6px; background:var(--border); border-radius:3px; margin-bottom:10px; overflow:visible; }
-.bar-fill { height:100%; border-radius:3px; transition:width .5s ease; }
-.bar-mark { position:absolute; top:-4px; width:2px; height:14px; background:var(--danger); border-radius:1px; opacity:.65; }
+.rsi-big      { font-size:32px; font-weight:700; line-height:1; text-align:right; }
+
+.bar-wrap  { position:relative; height:6px; background:var(--border); border-radius:3px; margin-bottom:10px; overflow:visible; }
+.bar-fill  { height:100%; border-radius:3px; transition:width .5s ease; }
+.bar-mark  { position:absolute; top:-4px; width:2px; height:14px; background:var(--danger); border-radius:1px; opacity:.65; }
 .card-foot { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); border-top:1px solid var(--border); padding-top:9px; }
-.spin { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spinning .7s linear infinite; vertical-align:middle; }
-@keyframes spinning { to{transform:rotate(360deg)} }
+
+.c-text{color:var(--text)} .c-danger{color:var(--danger)} .c-warn{color:var(--warn)} .c-ok{color:var(--ok)} .c-purple{color:#a78bfa} .c-muted{color:var(--muted)}
+
+.spin { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle; }
+@keyframes sp { to{transform:rotate(360deg)} }
+
 #toasts { position:fixed; top:calc(env(safe-area-inset-top)+72px); right:14px; left:14px; z-index:999; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
 .toast { background:#180808; border:1px solid var(--danger); border-radius:12px; padding:12px 14px; display:flex; gap:10px; align-items:flex-start; box-shadow:0 4px 20px rgba(239,68,68,.2); animation:tin .2s ease; pointer-events:auto; }
 .toast.info { background:#08101a; border-color:var(--accent); box-shadow:0 4px 20px rgba(59,130,246,.15); }
 .toast.ok   { background:#081408; border-color:var(--ok);     box-shadow:0 4px 20px rgba(34,197,94,.12); }
 @keyframes tin { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
-.t-icon { font-size:16px; flex-shrink:0; margin-top:1px; }
+.t-icon  { font-size:16px; flex-shrink:0; margin-top:1px; }
 .t-title { font-size:13px; font-weight:700; color:var(--danger); }
 .toast.info .t-title { color:var(--accent); }
 .toast.ok   .t-title { color:var(--ok); }
-.t-msg { font-size:11px; color:var(--muted); margin-top:2px; }
-.api-limit { background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.2); border-radius:10px; padding:10px 14px; margin-bottom:14px; font-size:12px; color:var(--warn); display:none; }
+.t-msg   { font-size:11px; color:var(--muted); margin-top:2px; }
 </style>
 </head>
 <body>
@@ -131,20 +136,36 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 
 <main>
   <div class="banner banner-blue hidden" id="pwa-banner">
-    <span>📲 홈화면 앱으로: <strong>공유 → 홈 화면에 추가</strong></span>
+    <span>📲 홈화면 앱: <strong>공유 → 홈 화면에 추가</strong></span>
     <button class="btn btn-ghost" id="btn-pwa-close" style="padding:5px 9px;font-size:12px">✕</button>
   </div>
   <div class="banner banner-yellow hidden" id="notif-banner">
     <span>🔔 RSI 경보 알림을 받으려면 허용해주세요</span>
     <button class="btn btn-primary" id="btn-notif" style="padding:7px 12px;font-size:12px;white-space:nowrap">허용</button>
   </div>
-  <div class="api-limit" id="api-limit">⚠ Twelve Data 무료 플랜: 하루 800회 / 분당 8회 제한. 종목이 많으면 순차적으로 로드돼요.</div>
 
+  <!-- 통계 4칸 -->
   <div class="stats">
-    <div class="stat"><div class="stat-label">감시 종목</div><div class="stat-num c-text" id="s-total">0</div></div>
-    <div class="stat"><div class="stat-label">RSI 경보</div><div class="stat-num c-danger" id="s-alert">0</div></div>
+    <div class="stat">
+      <div class="stat-label">감시 종목</div>
+      <div class="stat-big c-text" id="s-total">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">RSI 경보</div>
+      <div class="stat-big c-danger" id="s-alert">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">API 사용량 (오늘/800)</div>
+      <div class="stat-sm c-ok" id="s-api-text">0회 · 남은 800회</div>
+      <div class="api-bar-bg"><div class="api-bar-fill" id="api-bar" style="width:0%"></div></div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">마지막 업데이트</div>
+      <div class="stat-sm c-muted" id="s-lastup">—</div>
+    </div>
   </div>
 
+  <!-- 입력 패널 -->
   <div class="panel">
     <div class="row">
       <div class="field" style="flex:2">
@@ -176,6 +197,7 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
     </div>
   </div>
 
+  <!-- 임계값 -->
   <div class="thr-panel">
     <div class="thr-top">
       <span class="thr-label">🔴 RSI 알림 임계값 — 이하면 경보</span>
@@ -184,6 +206,7 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
     <input type="range" id="inp-threshold" min="10" max="50" value="30">
   </div>
 
+  <!-- 감시 목록 -->
   <div class="sec-header">
     <div class="sec-title">감시 목록</div>
     <div class="sec-sub" id="next-refresh"></div>
@@ -201,7 +224,7 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 'use strict';
 
 // ══════════════════════════════════════════
-// 설정
+// 설정 & 상태
 // ══════════════════════════════════════════
 var TD_KEY    = 'dcbc4a1fa0c9402480845046468f2f2e';
 var stocks    = [];
@@ -210,18 +233,82 @@ var prevAlert = new Set(JSON.parse(localStorage.getItem('rsi_prev') || '[]'));
 var autoTimer = null;
 var autoRem   = 0;
 
+// ── localStorage 저장 형식 마이그레이션 ──
+// 이전 버전(1d/1wk/1mo) → 새 버전(1day/1week/1month) 자동 변환
+function migrateStocks() {
+  var map = { '1d':'1day', '1wk':'1week', '1mo':'1month' };
+  var saved = [];
+  try { saved = JSON.parse(localStorage.getItem('rsi_stocks') || '[]'); } catch(e) {}
+  var changed = false;
+  saved = saved.map(function(s) {
+    if (map[s.period]) { s.period = map[s.period]; changed = true; }
+    return s;
+  });
+  if (changed) localStorage.setItem('rsi_stocks', JSON.stringify(saved));
+  return saved;
+}
+
+// ══════════════════════════════════════════
+// API 사용량 추적 (날짜별)
+// ══════════════════════════════════════════
+function getApiUsage() {
+  var today = new Date().toISOString().slice(0, 10);
+  var data;
+  try { data = JSON.parse(localStorage.getItem('rsi_api') || '{}'); } catch(e) { data = {}; }
+  if (data.date !== today) data = { date: today, count: 0 };
+  return data;
+}
+function addApiUsage(n) {
+  var data = getApiUsage();
+  data.count += (n || 1);
+  localStorage.setItem('rsi_api', JSON.stringify(data));
+  renderApiUsage();
+}
+function renderApiUsage() {
+  var data  = getApiUsage();
+  var used  = data.count || 0;
+  var left  = Math.max(0, 800 - used);
+  var pct   = Math.min(used / 800 * 100, 100);
+  var el    = document.getElementById('s-api-text');
+  var bar   = document.getElementById('api-bar');
+  if (!el || !bar) return;
+  el.textContent = used + '회 사용 · 남은 ' + left + '회';
+  bar.style.width = pct + '%';
+  // 색상
+  if (pct < 50) {
+    bar.style.background = 'var(--ok)';
+    el.className = 'stat-sm c-ok';
+  } else if (pct < 80) {
+    bar.style.background = 'var(--warn)';
+    el.className = 'stat-sm c-warn';
+  } else {
+    bar.style.background = 'var(--danger)';
+    el.className = 'stat-sm c-danger';
+  }
+}
+
+// ══════════════════════════════════════════
+// 마지막 업데이트 시각
+// ══════════════════════════════════════════
+function renderLastUpdate(t) {
+  var el = document.getElementById('s-lastup');
+  if (!el) return;
+  if (!t) { el.textContent = '—'; el.className = 'stat-sm c-muted'; return; }
+  el.textContent = t.toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  el.className = 'stat-sm c-text';
+}
+
 // ══════════════════════════════════════════
 // 토스트
 // ══════════════════════════════════════════
 function toast(icon, title, msg, type, ms) {
-  ms   = ms   || 5000;
-  type = type || 'alert';
+  ms = ms || 5000; type = type || 'alert';
   var c = document.getElementById('toasts');
   var d = document.createElement('div');
   d.className = 'toast' + (type==='info'?' info':type==='ok'?' ok':'');
   d.innerHTML = '<div class="t-icon">'+icon+'</div><div><div class="t-title">'+title+'</div><div class="t-msg">'+msg+'</div></div>';
   c.insertBefore(d, c.firstChild);
-  setTimeout(function(){
+  setTimeout(function() {
     d.style.opacity='0'; d.style.transition='opacity .35s';
     setTimeout(function(){ d.parentNode && d.parentNode.removeChild(d); }, 380);
   }, ms);
@@ -229,45 +316,46 @@ function toast(icon, title, msg, type, ms) {
 
 // ══════════════════════════════════════════
 // Twelve Data API 호출
+// period 값: 1day / 1week / 1month (Twelve Data 공식 포맷)
 // ══════════════════════════════════════════
 function loadStock(s) {
   s.loading = true; s.error = null;
   renderCard(s);
 
-  var rsiUrl   = 'https://api.twelvedata.com/rsi'
-               + '?symbol='      + encodeURIComponent(s.ticker)
-               + '&interval='    + s.period
-               + '&time_period=14'
-               + '&outputsize=1'
-               + '&apikey='      + TD_KEY;
+  var rsiUrl = 'https://api.twelvedata.com/rsi'
+    + '?symbol='     + encodeURIComponent(s.ticker)
+    + '&interval='   + s.period        // 1day / 1week / 1month
+    + '&time_period=14'
+    + '&outputsize=1'
+    + '&apikey='     + TD_KEY;
 
   var quoteUrl = 'https://api.twelvedata.com/quote'
-               + '?symbol='  + encodeURIComponent(s.ticker)
-               + '&apikey='  + TD_KEY;
+    + '?symbol='  + encodeURIComponent(s.ticker)
+    + '&apikey='  + TD_KEY;
 
   return Promise.all([
-    fetch(rsiUrl).then(function(r){ return r.json(); }),
+    fetch(rsiUrl).then(function(r)  { return r.json(); }),
     fetch(quoteUrl).then(function(r){ return r.json(); })
   ])
   .then(function(res) {
-    var rsiData   = res[0];
-    var quoteData = res[1];
+    var rsi   = res[0];
+    var quote = res[1];
 
-    // API 한도 초과 감지
-    if (rsiData.code === 429 || quoteData.code === 429) {
-      document.getElementById('api-limit').style.display = 'block';
-      throw new Error('API 한도 초과 — 잠시 후 재시도');
-    }
-    if (rsiData.status === 'error')   throw new Error(rsiData.message || 'RSI 오류');
-    if (quoteData.status === 'error') throw new Error(quoteData.message || '시세 오류');
-    if (!rsiData.values || !rsiData.values[0]) throw new Error('RSI 데이터 없음 (티커 확인)');
+    addApiUsage(2); // 요청 2회 소모
 
-    s.rsi       = Math.round(parseFloat(rsiData.values[0].rsi) * 100) / 100;
-    s.price     = parseFloat(quoteData.close);
-    s.prevClose = parseFloat(quoteData.previous_close);
-    s.name      = quoteData.name || '';
+    // 에러 처리
+    if (rsi.code === 429 || quote.code === 429) throw new Error('API 한도 초과 — 잠시 후 재시도');
+    if (rsi.status   === 'error') throw new Error(rsi.message   || 'RSI 오류');
+    if (quote.status === 'error') throw new Error(quote.message || '시세 오류');
+    if (!rsi.values  || !rsi.values[0]) throw new Error('데이터 없음 (티커 확인)');
+
+    s.rsi       = Math.round(parseFloat(rsi.values[0].rsi) * 100) / 100;
+    s.price     = parseFloat(quote.close);
+    s.prevClose = parseFloat(quote.previous_close);
+    s.name      = quote.name || '';
     s.loading   = false;
     s.lastUp    = new Date();
+    renderLastUpdate(s.lastUp);
   })
   .catch(function(e) {
     s.loading = false;
@@ -327,11 +415,11 @@ function barColor(v) {
   return '#a78bfa';
 }
 function getBadge(v, err) {
-  if (err)   return '<span class="badge b-err">오류</span>';
+  if (err)     return '<span class="badge b-err">오류</span>';
   if (v==null) return '<span class="badge b-load"><span class="spin"></span></span>';
   if (v<=threshold) return '<span class="badge b-alert">🚨 경보</span>';
-  if (v<=40) return '<span class="badge b-warn">⚠ 주의</span>';
-  if (v<=60) return '<span class="badge b-ok">정상</span>';
+  if (v<=40)   return '<span class="badge b-warn">⚠ 주의</span>';
+  if (v<=60)   return '<span class="badge b-ok">정상</span>';
   return '<span class="badge b-high">과매수</span>';
 }
 function cardClass(v) {
@@ -351,40 +439,40 @@ function renderCard(s) {
   var pct = v!=null ? Math.min(v,100) : 0;
   var chg = (s.price && s.prevClose)
     ? ((s.price-s.prevClose)/s.prevClose*100).toFixed(2) : null;
-  var isUp = chg && parseFloat(chg) >= 0;
+  var isUp = chg && parseFloat(chg)>=0;
   var chgHTML = chg
-    ? '<div class="price-chg '+(isUp?'c-ok':'c-danger')+'">'+(isUp?'+':'')+chg+'%</div>'
-    : '';
+    ? '<div class="price-chg '+(isUp?'c-ok':'c-danger')+'">'+(isUp?'+':'')+chg+'%</div>' : '';
   var priceHTML = s.price
     ? '<div class="price-main">$'+s.price.toFixed(2)+'</div>'+chgHTML
-    : (s.loading ? '<div class="price-main"><span class="spin"></span></div>' : '<div class="price-main c-muted">—</div>');
+    : (s.loading?'<div class="price-main"><span class="spin"></span></div>':'<div class="price-main c-muted">—</div>');
   var rsiHTML = v!=null
     ? '<div class="rsi-big '+rsiColor(v)+'">'+v+'</div>'
-    : (s.loading ? '<div class="rsi-big"><span class="spin"></span></div>' : '<div class="rsi-big c-muted">—</div>');
+    : (s.loading?'<div class="rsi-big"><span class="spin"></span></div>':'<div class="rsi-big c-muted">—</div>');
+  var timeStr = s.lastUp
+    ? '🕐 '+s.lastUp.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
   var footRight = s.error
     ? '<span class="c-danger">⚠ '+s.error+'</span>'
-    : (s.lastUp ? s.lastUp.toLocaleTimeString('ko-KR') : '');
+    : timeStr;
 
   el.className = 'card '+cardClass(v);
   el.innerHTML =
     '<div class="card-top">'
-    + '<div><div class="ticker">'+s.ticker+'</div>'
-    + (s.name?'<div class="cname">'+s.name+'</div>':'')+'</div>'
-    + '<div class="card-right">'+getBadge(v,s.error)
-    + '<button class="btn btn-sm" data-ticker="'+s.ticker+'" data-period="'+s.period+'">✕</button>'
-    + '</div></div>'
-    + '<div class="card-body">'
-    + '<div>'+priceHTML+'</div>'
-    + '<div><div class="rsi-label-sm">RSI(14) · '+periodLabel(s.period)+'</div>'+rsiHTML+'</div>'
-    + '</div>'
-    + '<div class="bar-wrap">'
-    + '<div class="bar-fill" style="width:'+pct+'%;background:'+barColor(v)+'"></div>'
-    + '<div class="bar-mark" style="left:'+threshold+'%"></div>'
-    + '</div>'
-    + '<div class="card-foot"><span>Twelve Data</span><span>'+footRight+'</span></div>';
+    +'<div><div class="ticker">'+s.ticker+'</div>'
+    +(s.name?'<div class="cname">'+s.name+'</div>':'')+'</div>'
+    +'<div class="card-right">'+getBadge(v,s.error)
+    +'<button class="btn btn-sm" data-ticker="'+s.ticker+'" data-period="'+s.period+'">✕</button>'
+    +'</div></div>'
+    +'<div class="card-body">'
+    +'<div>'+priceHTML+'</div>'
+    +'<div><div class="rsi-label-sm">RSI(14) · '+periodLabel(s.period)+'</div>'+rsiHTML+'</div>'
+    +'</div>'
+    +'<div class="bar-wrap">'
+    +'<div class="bar-fill" style="width:'+pct+'%;background:'+barColor(v)+'"></div>'
+    +'<div class="bar-mark" style="left:'+threshold+'%"></div>'
+    +'</div>'
+    +'<div class="card-foot"><span>'+periodLabel(s.period)+'</span><span>'+footRight+'</span></div>';
 }
 
-// 삭제 — 이벤트 위임
 document.getElementById('cards').addEventListener('click', function(e) {
   var btn = e.target.closest('[data-ticker]');
   if (!btn) return;
@@ -396,10 +484,11 @@ document.getElementById('cards').addEventListener('click', function(e) {
 // ══════════════════════════════════════════
 function updateStats() {
   document.getElementById('s-total').textContent = stocks.length;
-  var n = stocks.filter(function(s){ return s.rsi!=null && s.rsi<=threshold; }).length;
+  var n = stocks.filter(function(s){ return s.rsi!=null&&s.rsi<=threshold; }).length;
   document.getElementById('s-alert').textContent = n;
   var b = document.getElementById('alert-badge');
-  b.textContent = n; b.style.display = n>0?'inline-block':'none';
+  b.textContent=n; b.style.display=n>0?'inline-block':'none';
+  renderApiUsage();
 }
 
 // ══════════════════════════════════════════
@@ -407,53 +496,50 @@ function updateStats() {
 // ══════════════════════════════════════════
 function addStock() {
   var raw    = document.getElementById('inp-ticker').value.trim().toUpperCase().replace(/[^A-Z0-9.\-\^]/g,'');
-  var period = document.getElementById('inp-period').value;
+  var period = document.getElementById('inp-period').value; // 1day / 1week / 1month
   if (!raw) { toast('⚠️','티커 없음','AAPL, TSLA, NVDA 같은 심볼을 입력하세요','info'); return; }
-  if (stocks.find(function(s){ return s.ticker===raw && s.period===period; })) {
+  if (stocks.find(function(s){ return s.ticker===raw&&s.period===period; })) {
     toast('ℹ️','이미 있음',raw+'('+periodLabel(period)+') 은 이미 목록에 있어요','info'); return;
   }
-  var s = { ticker:raw, period:period, rsi:null, price:null, prevClose:null, name:'', loading:true, error:null, lastUp:null };
+  var s = {ticker:raw,period:period,rsi:null,price:null,prevClose:null,name:'',loading:true,error:null,lastUp:null};
   stocks.push(s);
   save();
-  document.getElementById('empty').style.display = 'none';
-  var el = document.createElement('div');
-  el.id = 'card-'+raw+'-'+period;
-  el.className = 'card';
+  document.getElementById('empty').style.display='none';
+  var el=document.createElement('div');
+  el.id='card-'+raw+'-'+period; el.className='card';
   document.getElementById('cards').appendChild(el);
-  renderCard(s);
-  updateStats();
-  toast('✅', raw+' 추가됨', 'Twelve Data에서 로딩 중…', 'ok', 3000);
-  document.getElementById('inp-ticker').value = '';
+  renderCard(s); updateStats();
+  toast('✅',raw+' 추가됨','Twelve Data에서 로딩 중…','ok',3000);
+  document.getElementById('inp-ticker').value='';
   loadStock(s);
 }
 
 function removeStock(ticker, period) {
-  stocks = stocks.filter(function(s){ return !(s.ticker===ticker && s.period===period); });
-  var el = document.getElementById('card-'+ticker+'-'+period);
-  if (el) el.parentNode.removeChild(el);
+  stocks=stocks.filter(function(s){ return !(s.ticker===ticker&&s.period===period); });
+  var el=document.getElementById('card-'+ticker+'-'+period);
+  if(el) el.parentNode.removeChild(el);
   save();
-  if (!stocks.length) document.getElementById('empty').style.display = 'block';
+  if(!stocks.length) document.getElementById('empty').style.display='block';
   updateStats();
 }
 
 function save() {
   localStorage.setItem('rsi_stocks', JSON.stringify(
-    stocks.map(function(s){ return {ticker:s.ticker, period:s.period}; })
+    stocks.map(function(s){ return {ticker:s.ticker,period:s.period}; })
   ));
 }
 
 // ══════════════════════════════════════════
-// 새로고침
+// 새로고침 — 1.2초 간격 순차 로드 (분당 8회 제한 안전하게)
 // ══════════════════════════════════════════
 function refreshAll() {
   if (!stocks.length) { toast('ℹ️','종목 없음','먼저 종목을 추가해주세요','info'); return; }
-  var btn = document.getElementById('btn-refresh');
-  btn.disabled = true; btn.textContent = '로딩중…';
-  // 분당 8회 제한 → 0.5초 간격으로 순차 로드
-  var idx = 0;
+  var btn=document.getElementById('btn-refresh');
+  btn.disabled=true; btn.textContent='로딩중…';
+  var idx=0;
   function next() {
-    if (idx >= stocks.length) { btn.disabled=false; btn.textContent='⟳ 새로고침'; return; }
-    loadStock(stocks[idx++]).then(function(){ setTimeout(next, 500); });
+    if (idx>=stocks.length) { btn.disabled=false; btn.textContent='⟳ 새로고침'; return; }
+    loadStock(stocks[idx++]).then(function(){ setTimeout(next, 1200); }); // 1.2초 간격
   }
   next();
 }
@@ -463,27 +549,25 @@ function refreshAll() {
 // ══════════════════════════════════════════
 function setupAutoRefresh() {
   if (autoTimer) clearInterval(autoTimer);
-  var sec = parseInt(document.getElementById('inp-interval').value);
-  var lbl = document.getElementById('next-refresh');
+  var sec=parseInt(document.getElementById('inp-interval').value);
+  var lbl=document.getElementById('next-refresh');
   if (sec===0) { lbl.textContent='자동 꺼짐'; return; }
-  autoRem = sec;
-  lbl.textContent = autoRem+'초 후 업데이트';
-  autoTimer = setInterval(function(){
+  autoRem=sec; lbl.textContent=autoRem+'초 후 업데이트';
+  autoTimer=setInterval(function(){
     autoRem--;
-    lbl.textContent = autoRem+'초 후 업데이트';
-    if (autoRem<=0) { autoRem=sec; refreshAll(); }
-  }, 1000);
+    lbl.textContent=autoRem+'초 후 업데이트';
+    if(autoRem<=0){ autoRem=sec; refreshAll(); }
+  },1000);
 }
 
 // ══════════════════════════════════════════
 // 임계값
 // ══════════════════════════════════════════
 function updateThreshold(val) {
-  threshold = parseInt(val);
-  document.getElementById('thr-display').textContent = threshold;
-  localStorage.setItem('rsi_thr', threshold);
-  stocks.forEach(function(s){ renderCard(s); });
-  updateStats();
+  threshold=parseInt(val);
+  document.getElementById('thr-display').textContent=threshold;
+  localStorage.setItem('rsi_thr',threshold);
+  stocks.forEach(function(s){ renderCard(s); }); updateStats();
 }
 
 // ══════════════════════════════════════════
@@ -492,49 +576,45 @@ function updateThreshold(val) {
 function requestNotif() {
   if (typeof Notification==='undefined') {
     toast('ℹ️','알림 미지원','화면 토스트로 알려드립니다','info');
-    document.getElementById('notif-banner').classList.add('hidden');
-    return;
+    document.getElementById('notif-banner').classList.add('hidden'); return;
   }
   Notification.requestPermission().then(function(p){
     document.getElementById('notif-banner').classList.add('hidden');
-    if (p==='granted') toast('✅','알림 허용','RSI 경보를 알림으로 받습니다','ok');
+    if(p==='granted') toast('✅','알림 허용','RSI 경보를 알림으로 받습니다','ok');
     else toast('ℹ️','알림 거부','화면 토스트로 알려드립니다','info');
   });
 }
 
 // ══════════════════════════════════════════
-// 버튼 바인딩 (touchend + click, iOS 대응)
+// 버튼 바인딩 (iOS touchend + click)
 // ══════════════════════════════════════════
 function bindBtn(id, fn) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  var lock = false;
+  var el=document.getElementById(id); if(!el) return;
+  var lock=false;
   function run(e) {
-    if (e.cancelable) e.preventDefault();
-    if (lock) return; lock = true;
-    fn();
-    setTimeout(function(){ lock=false; }, 350);
+    if(e.cancelable) e.preventDefault();
+    if(lock) return; lock=true; fn();
+    setTimeout(function(){ lock=false; },350);
   }
-  el.addEventListener('touchend', run, {passive:false});
-  el.addEventListener('click',    run);
+  el.addEventListener('touchend',run,{passive:false});
+  el.addEventListener('click',run);
 }
-
 bindBtn('btn-add',       addStock);
 bindBtn('btn-refresh',   refreshAll);
 bindBtn('btn-notif',     requestNotif);
 bindBtn('btn-pwa-close', function(){ document.getElementById('pwa-banner').classList.add('hidden'); });
 
-document.getElementById('inp-ticker').addEventListener('keydown', function(e){
-  if (e.key==='Enter') { e.preventDefault(); addStock(); }
+document.getElementById('inp-ticker').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){ e.preventDefault(); addStock(); }
 });
 document.getElementById('inp-interval').addEventListener('change', setupAutoRefresh);
-document.getElementById('inp-threshold').addEventListener('input', function(){ updateThreshold(this.value); });
+document.getElementById('inp-threshold').addEventListener('input',function(){ updateThreshold(this.value); });
 
 // ══════════════════════════════════════════
 // Service Worker
 // ══════════════════════════════════════════
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function(){
+  window.addEventListener('load',function(){
     navigator.serviceWorker.register('./sw.js').catch(function(){});
   });
 }
@@ -543,44 +623,43 @@ if ('serviceWorker' in navigator) {
 // 배너
 // ══════════════════════════════════════════
 function checkBanners() {
-  var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  var isStandalone = (window.navigator.standalone===true) || window.matchMedia('(display-mode: standalone)').matches;
-  if (isIOS && !isStandalone) document.getElementById('pwa-banner').classList.remove('hidden');
-  if (typeof Notification!=='undefined' && Notification.permission==='default')
+  var isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  var isStandalone=(window.navigator.standalone===true)||window.matchMedia('(display-mode: standalone)').matches;
+  if(isIOS&&!isStandalone) document.getElementById('pwa-banner').classList.remove('hidden');
+  if(typeof Notification!=='undefined'&&Notification.permission==='default')
     document.getElementById('notif-banner').classList.remove('hidden');
-  if (stocks.length > 3) document.getElementById('api-limit').style.display = 'block';
 }
 
 // ══════════════════════════════════════════
 // 초기화
 // ══════════════════════════════════════════
 (function init(){
-  document.getElementById('inp-threshold').value = threshold;
-  document.getElementById('thr-display').textContent = threshold;
+  document.getElementById('inp-threshold').value=threshold;
+  document.getElementById('thr-display').textContent=threshold;
   checkBanners();
+  renderApiUsage();
+  renderLastUpdate(null);
 
-  var saved = [];
-  try { saved = JSON.parse(localStorage.getItem('rsi_stocks')||'[]'); } catch(e){}
+  var saved = migrateStocks(); // 이전 형식 자동 변환
 
-  if (saved.length > 0) {
-    document.getElementById('empty').style.display = 'none';
+  if (saved.length>0) {
+    document.getElementById('empty').style.display='none';
     saved.forEach(function(item){
-      var s = {ticker:item.ticker, period:item.period,
-               rsi:null, price:null, prevClose:null,
-               name:'', loading:true, error:null, lastUp:null};
+      var s={ticker:item.ticker,period:item.period,
+             rsi:null,price:null,prevClose:null,
+             name:'',loading:true,error:null,lastUp:null};
       stocks.push(s);
-      var el = document.createElement('div');
-      el.id = 'card-'+s.ticker+'-'+s.period;
-      el.className = 'card';
+      var el=document.createElement('div');
+      el.id='card-'+s.ticker+'-'+s.period; el.className='card';
       document.getElementById('cards').appendChild(el);
       renderCard(s);
     });
     updateStats();
-    // 0.5초 간격으로 순차 로드 (API 한도 보호)
-    var i = 0;
-    function nextLoad() {
-      if (i >= stocks.length) return;
-      loadStock(stocks[i++]).then(function(){ setTimeout(nextLoad, 500); });
+    // 1.2초 간격 순차 로드
+    var i=0;
+    function nextLoad(){
+      if(i>=stocks.length) return;
+      loadStock(stocks[i++]).then(function(){ setTimeout(nextLoad,1200); });
     }
     nextLoad();
   }
