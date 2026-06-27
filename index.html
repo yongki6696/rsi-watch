@@ -179,6 +179,10 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; heig
 .mini-chart { width:100%; height:56px; margin:10px 0 4px; display:block; }
 .mini-chart path.line { fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 .mini-chart path.area { stroke:none; }
+.chart-legend { display:flex; gap:12px; margin-bottom:6px; }
+.chart-legend span { font-size:10px; color:var(--muted); display:flex; align-items:center; gap:4px; }
+.legend-line { display:inline-block; width:16px; height:2px; border-radius:1px; }
+.legend-dash { display:inline-block; width:16px; height:0; border-top:2px dashed #f59e0b; }
 
 /* ── 스피너 ── */
 .spin { display:inline-block; width:15px; height:15px; border:2px solid var(--border); border-top-color:var(--accent2); border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle; }
@@ -442,7 +446,7 @@ function loadStock(s) {
     s.price    = valid[valid.length-1];
     s.prevClose= valid[valid.length-2];
     s.name     = (chart.meta&&(chart.meta.longName||chart.meta.shortName))||'';
-    s.chartData = valid.slice(-60);
+    s.chartData = valid.slice(-180); // MA120 계산용 180일 저장
     s.loading  = false; s.error=null; s.lastUp=new Date();
     renderLastUpdate(s.lastUp);
   })
@@ -502,26 +506,53 @@ function pLabel(p){ return p==='1d'?'일봉':p==='1wk'?'주봉':'월봉'; }
 // ── 미니차트 SVG 생성 ──
 function makeMiniChart(data, color) {
   if (!data || data.length < 2) return "";
-  var W = 320, H = 56, PAD = 4;
-  var min = Math.min.apply(null, data);
-  var max = Math.max.apply(null, data);
-  var range = max - min || 1;
-  var pts = data.map(function(v, i) {
-    var x = PAD + (i / (data.length - 1)) * (W - PAD * 2);
-    var y = H - PAD - ((v - min) / range) * (H - PAD * 2);
-    return x.toFixed(1) + "," + y.toFixed(1);
-  });
-  var linePath = "M" + pts.join("L");
-  var areaPath = "M" + PAD + "," + H + " L" + pts.join("L") + " L" + (W - PAD) + "," + H + " Z";
-  var gradId = "g" + Math.random().toString(36).slice(2, 7);
-  return "<svg class=\"mini-chart\" viewBox=\"0 0 " + W + " " + H + "\" preserveAspectRatio=\"none\">"
-    + "<defs><linearGradient id=\"" + gradId + "\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">"
-    + "<stop offset=\"0%\" stop-color=\"" + color + "\" stop-opacity=\"0.25\"/>"
-    + "<stop offset=\"100%\" stop-color=\"" + color + "\" stop-opacity=\"0.02\"/>"
-    + "</linearGradient></defs>"
-    + "<path class=\"area\" d=\"" + areaPath + "\" fill=\"url(#" + gradId + ")\" />"
-    + "<path class=\"line\" d=\"" + linePath + "\" stroke=\"" + color + "\" />"
-    + "</svg>";
+
+  // 표시 구간: 최근 60일
+  var display = data.slice(-60);
+  var W = 320, H = 60, PAD = 4;
+
+  // 가격 범위: 표시 구간 기준
+  var minP = Math.min.apply(null, display);
+  var maxP = Math.max.apply(null, display);
+  var range = maxP - minP || 1;
+
+  function toX(i, len) { return PAD + (i / (len - 1)) * (W - PAD * 2); }
+  function toY(v)       { return H - PAD - ((v - minP) / range) * (H - PAD * 2); }
+
+  // 종가 라인
+  var pts = display.map(function(v, i) { return toX(i, display.length).toFixed(1) + ',' + toY(v).toFixed(1); });
+  var linePath = 'M' + pts.join('L');
+  var areaPath = 'M' + PAD + ',' + H + ' L' + pts.join('L') + ' L' + (W - PAD) + ',' + H + ' Z';
+
+  // MA120 계산 — 전체 180일 데이터 사용, 최근 60일 구간만 표시
+  var maLine = '';
+  if (data.length >= 120) {
+    var maPts = [];
+    for (var i = 0; i < display.length; i++) {
+      // display[i]는 data[data.length - display.length + i]
+      var dataIdx = data.length - display.length + i;
+      if (dataIdx >= 119) {
+        var sum = 0;
+        for (var j = dataIdx - 119; j <= dataIdx; j++) sum += data[j];
+        var maVal = sum / 120;
+        maPts.push(toX(i, display.length).toFixed(1) + ',' + toY(maVal).toFixed(1));
+      }
+    }
+    if (maPts.length >= 2) {
+      maLine = '<path d="M' + maPts.join('L') + '" fill="none" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3,2" stroke-linecap="round"/>';
+    }
+  }
+
+  var gradId = 'g' + Math.random().toString(36).slice(2, 7);
+  return '<svg class="mini-chart" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">'
+    + '<defs><linearGradient id="' + gradId + '" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.2"/>'
+    + '<stop offset="100%" stop-color="' + color + '" stop-opacity="0.01"/>'
+    + '</linearGradient></defs>'
+    + '<path class="area" d="' + areaPath + '" fill="url(#' + gradId + ')" />'
+    + '<path class="line" d="' + linePath + '" stroke="' + color + '" />'
+    + maLine
+    + '</svg>';
 }
 
 function renderCard(s){
@@ -542,7 +573,13 @@ function renderCard(s){
   // 미니차트 색상 — 등락에 따라
   var chartColor = (s.chartData&&s.chartData.length>=2&&s.chartData[s.chartData.length-1]>=s.chartData[0])
     ? '#22c55e' : '#ef4444';
-  var chartHTML = s.chartData ? makeMiniChart(s.chartData, chartColor) : '';
+  var legendHTML = s.chartData && s.chartData.length >= 120
+    ? '<div class="chart-legend">'
+    + '<span><span class="legend-line" style="background:' + chartColor + '"></span>종가</span>'
+    + '<span><span class="legend-dash"></span>MA120</span>'
+    + '</div>'
+    : '<div class="chart-legend"><span><span class="legend-line" style="background:' + chartColor + '"></span>종가</span></div>';
+  var chartHTML = s.chartData ? (legendHTML + makeMiniChart(s.chartData, chartColor)) : '';
 
   el.className='card '+cardCls(v);
   el.innerHTML=
