@@ -40,8 +40,6 @@ main { max-width:680px; margin:0 auto; padding:18px 16px calc(env(safe-area-inse
 .stat-label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.7px; margin-bottom:5px; }
 .stat-big { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; }
 .stat-sm  { font-size:13px; font-weight:600; line-height:1.5; padding-top:3px; }
-.api-bar-bg   { height:5px; background:var(--border); border-radius:3px; margin-top:8px; overflow:hidden; }
-.api-bar-fill { height:100%; border-radius:3px; transition:width .5s ease; }
 .panel { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:14px; }
 .row   { display:flex; gap:10px; margin-bottom:10px; }
 .field { display:flex; flex-direction:column; gap:5px; flex:1; }
@@ -128,13 +126,12 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
       <div class="stat-big c-danger" id="s-alert">0</div>
     </div>
     <div class="stat">
-      <div class="stat-label">API 사용량 (오늘)</div>
-      <div class="stat-sm c-ok" id="s-api-text">0회 사용</div>
-      <div class="api-bar-bg"><div class="api-bar-fill" id="api-bar" style="width:0%;background:var(--ok)"></div></div>
-    </div>
-    <div class="stat">
       <div class="stat-label">마지막 업데이트</div>
       <div class="stat-sm c-muted" id="s-lastup">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">데이터 소스</div>
+      <div class="stat-sm c-ok" style="padding-top:3px">Yahoo Finance</div>
     </div>
   </div>
   <div class="panel">
@@ -147,9 +144,9 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
       <div class="field" style="flex:1">
         <div class="field-label">기간</div>
         <select id="inp-period">
-          <option value="D">일봉</option>
-          <option value="W">주봉</option>
-          <option value="M">월봉</option>
+          <option value="1d">일봉</option>
+          <option value="1wk">주봉</option>
+          <option value="1mo">월봉</option>
         </select>
       </div>
     </div>
@@ -190,19 +187,15 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 <script>
 'use strict';
 
-// ══════════════════════════════════════════
-// 설정
-// ══════════════════════════════════════════
-var FH_KEY    = 'd8v4si1r01qrt65vbd8gd8v4si1r01qrt65vbd90'; // Finnhub — 분당 60회 무료
 var stocks    = [];
 var threshold = parseInt(localStorage.getItem('rsi_thr') || '30');
 var prevAlert = new Set(JSON.parse(localStorage.getItem('rsi_prev') || '[]'));
 var autoTimer = null;
 var autoRem   = 0;
 
-// ── 이전 형식 마이그레이션 (1d→D, 1day→D 등) ──
+// ── 기간 마이그레이션 (1day→1d 등 이전 형식 통일) ──
 function migratePeriod(p) {
-  var map = {'1d':'D','1wk':'W','1mo':'M','1day':'D','1week':'W','1month':'M'};
+  var map = {'1day':'1d','1week':'1wk','1month':'1mo','D':'1d','W':'1wk','M':'1mo'};
   return map[p] || p;
 }
 function migrateStocks() {
@@ -218,156 +211,152 @@ function migrateStocks() {
   return saved;
 }
 
-// ── API 사용량 (Finnhub은 분당 60회, 일일 제한 없음) ──
-function getApiUsage() {
-  var today = new Date().toISOString().slice(0,10);
-  var d; try { d=JSON.parse(localStorage.getItem('rsi_api')||'{}'); } catch(e){ d={}; }
-  if (d.date!==today) d={date:today,count:0};
-  return d;
-}
-function addApiUsage(n) {
-  var d=getApiUsage(); d.count+=(n||1);
-  localStorage.setItem('rsi_api',JSON.stringify(d));
-  renderApiUsage();
-}
-function renderApiUsage() {
-  var d=getApiUsage(); var used=d.count||0;
-  var el=document.getElementById('s-api-text');
-  var bar=document.getElementById('api-bar');
-  if(!el||!bar) return;
-  el.textContent=used+'회 사용 (분당 60회 가능)';
-  el.className='stat-sm c-ok';
-  // 하루 추정치 표시용 (참고값)
-  var pct=Math.min(used/500*100,100);
-  bar.style.width=pct+'%';
-  bar.style.background=pct<70?'var(--ok)':pct<90?'var(--warn)':'var(--danger)';
-}
+// ── 마지막 업데이트 ──
 function renderLastUpdate(t) {
-  var el=document.getElementById('s-lastup'); if(!el) return;
-  if(!t){ el.textContent='—'; el.className='stat-sm c-muted'; return; }
-  el.textContent=t.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  el.className='stat-sm c-text';
+  var el = document.getElementById('s-lastup'); if (!el) return;
+  if (!t) { el.textContent = '—'; el.className = 'stat-sm c-muted'; return; }
+  el.textContent = t.toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  el.className = 'stat-sm c-text';
 }
 
 // ── 토스트 ──
-function toast(icon,title,msg,type,ms) {
-  ms=ms||5000; type=type||'alert';
-  var c=document.getElementById('toasts');
-  var d=document.createElement('div');
-  d.className='toast'+(type==='info'?' info':type==='ok'?' ok':'');
-  d.innerHTML='<div class="t-icon">'+icon+'</div><div><div class="t-title">'+title+'</div><div class="t-msg">'+msg+'</div></div>';
-  c.insertBefore(d,c.firstChild);
-  setTimeout(function(){ d.style.opacity='0'; d.style.transition='opacity .35s'; setTimeout(function(){ d.parentNode&&d.parentNode.removeChild(d); },380); },ms);
+function toast(icon, title, msg, type, ms) {
+  ms = ms||5000; type = type||'alert';
+  var c = document.getElementById('toasts');
+  var d = document.createElement('div');
+  d.className = 'toast'+(type==='info'?' info':type==='ok'?' ok':'');
+  d.innerHTML = '<div class="t-icon">'+icon+'</div><div><div class="t-title">'+title+'</div><div class="t-msg">'+msg+'</div></div>';
+  c.insertBefore(d, c.firstChild);
+  setTimeout(function(){ d.style.opacity='0'; d.style.transition='opacity .35s'; setTimeout(function(){ d.parentNode&&d.parentNode.removeChild(d); },380); }, ms);
 }
 
 // ══════════════════════════════════════════
-// RSI 직접 계산 (Wilder 스무딩 14기간)
-// Finnhub에서 캔들 데이터 받아서 계산
+// Yahoo Finance — 프록시 4개 자동 폴백
+// 캐시 방지: URL에 타임스탬프 추가
 // ══════════════════════════════════════════
+var RANGE_MAP = {'1d':'2y', '1wk':'5y', '1mo':'10y'};
+
+function buildYahooUrl(ticker, period) {
+  var ts = '&_t=' + Date.now(); // 캐시 방지
+  return 'https://query1.finance.yahoo.com/v8/finance/chart/'
+    + encodeURIComponent(ticker)
+    + '?interval=' + period
+    + '&range=' + RANGE_MAP[period]
+    + ts;
+}
+
+// 프록시 목록 — 순서대로 시도
+var PROXIES = [
+  function(u){ return 'https://corsproxy.io/?url=' + encodeURIComponent(u); },
+  function(u){ return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); },
+  function(u){ return 'https://api.allorigins.win/get?url=' + encodeURIComponent(u); },
+  function(u){ return 'https://thingproxy.freeboard.io/fetch/' + u; },
+];
+
+function fetchYahoo(ticker, period) {
+  var yahooUrl = buildYahooUrl(ticker, period);
+  return tryProxy(yahooUrl, 0);
+}
+
+function tryProxy(yahooUrl, idx) {
+  if (idx >= PROXIES.length) return Promise.reject(new Error('데이터 로드 실패'));
+  var url = PROXIES[idx](yahooUrl);
+  return fetch(url, {
+    headers: {'User-Agent': 'Mozilla/5.0'},
+    signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined
+  })
+  .then(function(r) {
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    return r.text();
+  })
+  .then(function(txt) {
+    // allorigins /get 는 {contents:"..."} 래핑
+    var obj;
+    try { obj = JSON.parse(txt); } catch(e) { throw new Error('파싱 실패'); }
+    if (obj && obj.contents) {
+      try { obj = JSON.parse(obj.contents); } catch(e) {}
+    }
+    if (!obj || !obj.chart || !obj.chart.result) throw new Error('데이터 없음');
+    return obj;
+  })
+  .catch(function(e) {
+    return tryProxy(yahooUrl, idx + 1);
+  });
+}
+
+// ── RSI 계산 (Wilder 스무딩, 14기간) ──
 function calcRSI(closes) {
-  var c=closes.filter(function(v){ return v!=null&&!isNaN(v); });
-  var period=14;
-  if(c.length<period+1) return null;
-  var g=0,l=0;
-  for(var i=1;i<=period;i++){ var d=c[i]-c[i-1]; if(d>0)g+=d; else l-=d; }
-  var ag=g/period, al=l/period;
-  for(var i=period+1;i<c.length;i++){
-    var d=c[i]-c[i-1];
-    ag=(ag*(period-1)+(d>0?d:0))/period;
-    al=(al*(period-1)+(d<0?-d:0))/period;
+  var c = closes.filter(function(v){ return v != null && !isNaN(v); });
+  var period = 14;
+  if (c.length < period + 1) return null;
+  var g = 0, l = 0;
+  for (var i = 1; i <= period; i++) { var d = c[i]-c[i-1]; if(d>0) g+=d; else l-=d; }
+  var ag = g/period, al = l/period;
+  for (var i = period+1; i < c.length; i++) {
+    var d = c[i]-c[i-1];
+    ag = (ag*(period-1)+(d>0?d:0))/period;
+    al = (al*(period-1)+(d<0?-d:0))/period;
   }
-  if(al===0) return 100;
-  return Math.round((100-100/(1+ag/al))*100)/100;
+  if (al === 0) return 100;
+  return Math.round((100 - 100/(1+ag/al)) * 100) / 100;
 }
 
-// ══════════════════════════════════════════
-// Finnhub API — 분당 60회 무료
-// 캔들 데이터로 RSI 직접 계산
-// ══════════════════════════════════════════
-function periodToFinnhub(p) {
-  // Finnhub resolution: D=일봉, W=주봉, M=월봉
-  return p; // D, W, M 그대로 사용
-}
-
+// ── 단일 종목 로드 ──
 function loadStock(s) {
-  s.loading=true; s.error=null; renderCard(s);
-
-  // Finnhub 캔들 기간 설정
-  var now   = Math.floor(Date.now()/1000);
-  var from;
-  if(s.period==='D')      from = now - 86400*365*2;   // 2년 (일봉 RSI 정확도)
-  else if(s.period==='W') from = now - 86400*365*5;   // 5년
-  else                    from = now - 86400*365*10;  // 10년
-
-  var candleUrl = 'https://finnhub.io/api/v1/stock/candle'
-    +'?symbol='+encodeURIComponent(s.ticker)
-    +'&resolution='+periodToFinnhub(s.period)
-    +'&from='+from+'&to='+now
-    +'&token='+FH_KEY;
-
-  var quoteUrl = 'https://finnhub.io/api/v1/quote'
-    +'?symbol='+encodeURIComponent(s.ticker)
-    +'&token='+FH_KEY;
-
-  return Promise.all([
-    fetch(candleUrl).then(function(r){ return r.json(); }),
-    fetch(quoteUrl).then(function(r){ return r.json(); })
-  ]).then(function(res){
-    addApiUsage(2);
-    var candle=res[0], quote=res[1];
-
-    // 에러 체크
-    if(candle.s==='no_data') throw new Error('데이터 없음 (티커 확인)');
-    if(!candle.c||candle.c.length<15) throw new Error('데이터 부족');
-
-    s.rsi       = calcRSI(candle.c);
-    s.price     = quote.c;      // 현재가
-    s.prevClose = quote.pc;     // 전일 종가
-    s.name      = '';
-    s.loading   = false;
-    s.error     = null;
-    s.lastUp    = new Date();
+  s.loading = true; s.error = null; renderCard(s);
+  return fetchYahoo(s.ticker, s.period)
+  .then(function(data) {
+    var chart  = data.chart.result[0];
+    var closes = chart.indicators.quote[0].close;
+    s.rsi      = calcRSI(closes);
+    var valid  = closes.filter(function(v){ return v != null; });
+    s.price    = valid[valid.length - 1];
+    s.prevClose= valid[valid.length - 2];
+    s.name     = chart.meta && (chart.meta.longName || chart.meta.shortName) || '';
+    s.loading  = false; s.error = null; s.lastUp = new Date();
     renderLastUpdate(s.lastUp);
-  }).catch(function(e){
-    s.loading=false; s.error=e.message;
-  }).then(function(){
+  })
+  .catch(function(e) {
+    s.loading = false; s.error = e.message;
+  })
+  .then(function() {
     renderCard(s); checkAlert(s); updateStats();
   });
 }
 
-// ── 전체 새로고침 (종목마다 1초 간격) ──
+// ── 전체 새로고침 (1초 간격) ──
 function refreshAll() {
-  if(!stocks.length){ toast('ℹ️','종목 없음','먼저 종목을 추가해주세요','info'); return; }
-  var btn=document.getElementById('btn-refresh');
-  btn.disabled=true; btn.textContent='로딩중…';
-  var idx=0;
-  function next(){
-    if(idx>=stocks.length){ btn.disabled=false; btn.textContent='⟳ 새로고침'; return; }
-    loadStock(stocks[idx++]).then(function(){ setTimeout(next,1000); }); // 1초 간격 (분당 60회 여유)
+  if (!stocks.length) { toast('ℹ️','종목 없음','먼저 종목을 추가해주세요','info'); return; }
+  var btn = document.getElementById('btn-refresh');
+  btn.disabled = true; btn.textContent = '로딩중…';
+  var idx = 0;
+  function next() {
+    if (idx >= stocks.length) { btn.disabled=false; btn.textContent='⟳ 새로고침'; return; }
+    loadStock(stocks[idx++]).then(function(){ setTimeout(next, 1000); });
   }
   next();
 }
 
 // ── 알림 ──
-function checkAlert(s){
-  if(s.rsi==null) return;
-  var key=s.ticker+'_'+s.period;
-  if(s.rsi<=threshold){
-    if(!prevAlert.has(key)){
+function checkAlert(s) {
+  if (s.rsi == null) return;
+  var key = s.ticker+'_'+s.period;
+  if (s.rsi <= threshold) {
+    if (!prevAlert.has(key)) {
       prevAlert.add(key);
-      localStorage.setItem('rsi_prev',JSON.stringify(Array.from(prevAlert)));
+      localStorage.setItem('rsi_prev', JSON.stringify(Array.from(prevAlert)));
       fireAlert(s);
     }
   } else {
     prevAlert.delete(key);
-    localStorage.setItem('rsi_prev',JSON.stringify(Array.from(prevAlert)));
+    localStorage.setItem('rsi_prev', JSON.stringify(Array.from(prevAlert)));
   }
 }
-function fireAlert(s){
-  if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
-    try{ new Notification('🚨 '+s.ticker+' RSI 경보',{body:'RSI '+s.rsi+' ← 임계값 '+threshold+' 이하!',icon:'icon-192.png',tag:'rsi-'+s.ticker}); }catch(e){}
+function fireAlert(s) {
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try { new Notification('🚨 '+s.ticker+' RSI 경보',{body:'RSI '+s.rsi+' ← 임계값 '+threshold+' 이하!',icon:'icon-192.png',tag:'rsi-'+s.ticker}); } catch(e){}
   }
-  toast('🚨',s.ticker+' RSI 경보','RSI '+s.rsi+' — 임계값 '+threshold+' 이하 진입!','alert',8000);
+  toast('🚨', s.ticker+' RSI 경보', 'RSI '+s.rsi+' — 임계값 '+threshold+' 이하 진입!', 'alert', 8000);
 }
 
 // ── 카드 렌더링 ──
@@ -382,140 +371,136 @@ function getBadge(v,err){
   return '<span class="badge b-high">과매수</span>';
 }
 function cardClass(v){ if(v==null)return ''; if(v<=threshold)return 's-alert'; if(v<=40)return 's-warn'; return ''; }
-function periodLabel(p){ return p==='D'?'일봉':p==='W'?'주봉':'월봉'; }
+function periodLabel(p){ return p==='1d'?'일봉':p==='1wk'?'주봉':'월봉'; }
 
-function renderCard(s){
-  var el=document.getElementById('card-'+s.ticker+'-'+s.period); if(!el) return;
-  var v=s.rsi, pct=v!=null?Math.min(v,100):0;
-  var chg=(s.price&&s.prevClose)?((s.price-s.prevClose)/s.prevClose*100).toFixed(2):null;
-  var isUp=chg&&parseFloat(chg)>=0;
-  var chgHTML=chg?'<div class="price-chg '+(isUp?'c-ok':'c-danger')+'">'+(isUp?'+':'')+chg+'%</div>':'';
-  var priceHTML=s.price?'<div class="price-main">$'+s.price.toFixed(2)+'</div>'+chgHTML:(s.loading?'<div class="price-main"><span class="spin"></span></div>':'<div class="price-main c-muted">—</div>');
-  var rsiHTML=v!=null?'<div class="rsi-big '+rsiColor(v)+'">'+v+'</div>':(s.loading?'<div class="rsi-big"><span class="spin"></span></div>':'<div class="rsi-big c-muted">—</div>');
-  var timeStr=s.lastUp?'🕐 '+s.lastUp.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
-  var footRight=s.error?'<span class="c-danger">⚠ '+s.error+'</span>':timeStr;
-  el.className='card '+cardClass(v);
-  el.innerHTML='<div class="card-top"><div><div class="ticker">'+s.ticker+'</div>'+(s.name?'<div class="cname">'+s.name+'</div>':'')+'</div>'
+function renderCard(s) {
+  var el = document.getElementById('card-'+s.ticker+'-'+s.period); if(!el) return;
+  var v = s.rsi, pct = v!=null?Math.min(v,100):0;
+  var chg = (s.price&&s.prevClose)?((s.price-s.prevClose)/s.prevClose*100).toFixed(2):null;
+  var isUp = chg&&parseFloat(chg)>=0;
+  var chgHTML = chg?'<div class="price-chg '+(isUp?'c-ok':'c-danger')+'">'+(isUp?'+':'')+chg+'%</div>':'';
+  var priceHTML = s.price?'<div class="price-main">$'+s.price.toFixed(2)+'</div>'+chgHTML:(s.loading?'<div class="price-main"><span class="spin"></span></div>':'<div class="price-main c-muted">—</div>');
+  var rsiHTML = v!=null?'<div class="rsi-big '+rsiColor(v)+'">'+v+'</div>':(s.loading?'<div class="rsi-big"><span class="spin"></span></div>':'<div class="rsi-big c-muted">—</div>');
+  var timeStr = s.lastUp?'🕐 '+s.lastUp.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
+  var footRight = s.error?'<span class="c-danger">⚠ '+s.error+'</span>':timeStr;
+  el.className = 'card '+cardClass(v);
+  el.innerHTML =
+    '<div class="card-top"><div><div class="ticker">'+s.ticker+'</div>'+(s.name?'<div class="cname">'+s.name+'</div>':'')+'</div>'
     +'<div class="card-right">'+getBadge(v,s.error)+'<button class="btn btn-sm" data-ticker="'+s.ticker+'" data-period="'+s.period+'">✕</button></div></div>'
     +'<div class="card-body"><div>'+priceHTML+'</div><div><div class="rsi-label-sm">RSI(14) · '+periodLabel(s.period)+'</div>'+rsiHTML+'</div></div>'
     +'<div class="bar-wrap"><div class="bar-fill" style="width:'+pct+'%;background:'+barColor(v)+'"></div><div class="bar-mark" style="left:'+threshold+'%"></div></div>'
-    +'<div class="card-foot"><span>'+periodLabel(s.period)+' · Finnhub</span><span>'+footRight+'</span></div>';
+    +'<div class="card-foot"><span>'+periodLabel(s.period)+' · Yahoo Finance</span><span>'+footRight+'</span></div>';
 }
 
-document.getElementById('cards').addEventListener('click',function(e){
-  var btn=e.target.closest('[data-ticker]'); if(!btn) return;
-  removeStock(btn.dataset.ticker,btn.dataset.period);
+document.getElementById('cards').addEventListener('click', function(e){
+  var btn = e.target.closest('[data-ticker]'); if(!btn) return;
+  removeStock(btn.dataset.ticker, btn.dataset.period);
 });
 
-function updateStats(){
-  document.getElementById('s-total').textContent=stocks.length;
-  var n=stocks.filter(function(s){ return s.rsi!=null&&s.rsi<=threshold; }).length;
-  document.getElementById('s-alert').textContent=n;
-  var b=document.getElementById('alert-badge');
-  b.textContent=n; b.style.display=n>0?'inline-block':'none';
-  renderApiUsage();
+function updateStats() {
+  document.getElementById('s-total').textContent = stocks.length;
+  var n = stocks.filter(function(s){ return s.rsi!=null&&s.rsi<=threshold; }).length;
+  document.getElementById('s-alert').textContent = n;
+  var b = document.getElementById('alert-badge');
+  b.textContent = n; b.style.display = n>0?'inline-block':'none';
 }
 
-function addStock(){
-  var raw=document.getElementById('inp-ticker').value.trim().toUpperCase().replace(/[^A-Z0-9.\-\^]/g,'');
-  var period=document.getElementById('inp-period').value;
-  if(!raw){ toast('⚠️','티커 없음','AAPL, TSLA, NVDA 같은 심볼을 입력하세요','info'); return; }
-  if(stocks.find(function(s){ return s.ticker===raw&&s.period===period; })){
+function addStock() {
+  var raw = document.getElementById('inp-ticker').value.trim().toUpperCase().replace(/[^A-Z0-9.\-\^]/g,'');
+  var period = document.getElementById('inp-period').value;
+  if (!raw) { toast('⚠️','티커 없음','AAPL, TSLA, NVDA 같은 심볼을 입력하세요','info'); return; }
+  if (stocks.find(function(s){ return s.ticker===raw&&s.period===period; })) {
     toast('ℹ️','이미 있음',raw+'('+periodLabel(period)+') 은 이미 있어요','info'); return;
   }
-  var s={ticker:raw,period:period,rsi:null,price:null,prevClose:null,name:'',loading:true,error:null,lastUp:null};
+  var s = {ticker:raw,period:period,rsi:null,price:null,prevClose:null,name:'',loading:true,error:null,lastUp:null};
   stocks.push(s); save();
-  document.getElementById('empty').style.display='none';
-  var el=document.createElement('div'); el.id='card-'+raw+'-'+period; el.className='card';
+  document.getElementById('empty').style.display = 'none';
+  var el = document.createElement('div'); el.id='card-'+raw+'-'+period; el.className='card';
   document.getElementById('cards').appendChild(el);
   renderCard(s); updateStats();
-  toast('✅',raw+' 추가됨','Finnhub에서 로딩 중…','ok',3000);
-  document.getElementById('inp-ticker').value='';
+  toast('✅', raw+' 추가됨', '데이터 로딩 중…', 'ok', 3000);
+  document.getElementById('inp-ticker').value = '';
   loadStock(s);
 }
 
-function removeStock(ticker,period){
-  stocks=stocks.filter(function(s){ return !(s.ticker===ticker&&s.period===period); });
-  var el=document.getElementById('card-'+ticker+'-'+period);
-  if(el) el.parentNode.removeChild(el);
+function removeStock(ticker, period) {
+  stocks = stocks.filter(function(s){ return !(s.ticker===ticker&&s.period===period); });
+  var el = document.getElementById('card-'+ticker+'-'+period);
+  if (el) el.parentNode.removeChild(el);
   save();
-  if(!stocks.length) document.getElementById('empty').style.display='block';
+  if (!stocks.length) document.getElementById('empty').style.display = 'block';
   updateStats();
 }
-function save(){ localStorage.setItem('rsi_stocks',JSON.stringify(stocks.map(function(s){ return {ticker:s.ticker,period:s.period}; }))); }
+function save() { localStorage.setItem('rsi_stocks', JSON.stringify(stocks.map(function(s){ return {ticker:s.ticker,period:s.period}; }))); }
 
-function setupAutoRefresh(){
-  if(autoTimer) clearInterval(autoTimer);
-  var sec=parseInt(document.getElementById('inp-interval').value);
-  var lbl=document.getElementById('next-refresh');
-  if(sec===0){ lbl.textContent='자동 꺼짐'; return; }
-  autoRem=sec; lbl.textContent=autoRem+'초 후 업데이트';
-  autoTimer=setInterval(function(){ autoRem--; lbl.textContent=autoRem+'초 후 업데이트'; if(autoRem<=0){ autoRem=sec; refreshAll(); } },1000);
+function setupAutoRefresh() {
+  if (autoTimer) clearInterval(autoTimer);
+  var sec = parseInt(document.getElementById('inp-interval').value);
+  var lbl = document.getElementById('next-refresh');
+  if (sec===0) { lbl.textContent='자동 꺼짐'; return; }
+  autoRem = sec; lbl.textContent = autoRem+'초 후 업데이트';
+  autoTimer = setInterval(function(){ autoRem--; lbl.textContent=autoRem+'초 후 업데이트'; if(autoRem<=0){ autoRem=sec; refreshAll(); } }, 1000);
 }
 
-function updateThreshold(val){
-  threshold=parseInt(val);
-  document.getElementById('thr-display').textContent=threshold;
-  localStorage.setItem('rsi_thr',threshold);
+function updateThreshold(val) {
+  threshold = parseInt(val);
+  document.getElementById('thr-display').textContent = threshold;
+  localStorage.setItem('rsi_thr', threshold);
   stocks.forEach(function(s){ renderCard(s); }); updateStats();
 }
 
-function requestNotif(){
-  if(typeof Notification==='undefined'){ toast('ℹ️','알림 미지원','화면 토스트로 알려드립니다','info'); document.getElementById('notif-banner').classList.add('hidden'); return; }
+function requestNotif() {
+  if (typeof Notification==='undefined') { toast('ℹ️','알림 미지원','화면 토스트로 알려드립니다','info'); document.getElementById('notif-banner').classList.add('hidden'); return; }
   Notification.requestPermission().then(function(p){
     document.getElementById('notif-banner').classList.add('hidden');
-    if(p==='granted') toast('✅','알림 허용','RSI 경보를 알림으로 받습니다','ok');
+    if (p==='granted') toast('✅','알림 허용','RSI 경보를 알림으로 받습니다','ok');
     else toast('ℹ️','알림 거부','화면 토스트로 알려드립니다','info');
   });
 }
 
-function bindBtn(id,fn){
-  var el=document.getElementById(id); if(!el) return;
-  var lock=false;
+function bindBtn(id, fn) {
+  var el = document.getElementById(id); if(!el) return;
+  var lock = false;
   function run(e){ if(e.cancelable)e.preventDefault(); if(lock)return; lock=true; fn(); setTimeout(function(){ lock=false; },350); }
-  el.addEventListener('touchend',run,{passive:false});
-  el.addEventListener('click',run);
+  el.addEventListener('touchend', run, {passive:false});
+  el.addEventListener('click', run);
 }
-bindBtn('btn-add',addStock);
-bindBtn('btn-refresh',refreshAll);
-bindBtn('btn-notif',requestNotif);
-bindBtn('btn-pwa-close',function(){ document.getElementById('pwa-banner').classList.add('hidden'); });
-document.getElementById('inp-ticker').addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); addStock(); } });
-document.getElementById('inp-interval').addEventListener('change',setupAutoRefresh);
-document.getElementById('inp-threshold').addEventListener('input',function(){ updateThreshold(this.value); });
+bindBtn('btn-add', addStock);
+bindBtn('btn-refresh', refreshAll);
+bindBtn('btn-notif', requestNotif);
+bindBtn('btn-pwa-close', function(){ document.getElementById('pwa-banner').classList.add('hidden'); });
+document.getElementById('inp-ticker').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); addStock(); } });
+document.getElementById('inp-interval').addEventListener('change', setupAutoRefresh);
+document.getElementById('inp-threshold').addEventListener('input', function(){ updateThreshold(this.value); });
 
-if('serviceWorker' in navigator){
-  window.addEventListener('load',function(){ navigator.serviceWorker.register('./sw.js').catch(function(){}); });
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){ navigator.serviceWorker.register('./sw.js').catch(function(){}); });
 }
 
-function checkBanners(){
-  var isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  var isSA=(window.navigator.standalone===true)||window.matchMedia('(display-mode: standalone)').matches;
-  if(isIOS&&!isSA) document.getElementById('pwa-banner').classList.remove('hidden');
-  if(typeof Notification!=='undefined'&&Notification.permission==='default') document.getElementById('notif-banner').classList.remove('hidden');
+function checkBanners() {
+  var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  var isSA = (window.navigator.standalone===true)||window.matchMedia('(display-mode: standalone)').matches;
+  if (isIOS&&!isSA) document.getElementById('pwa-banner').classList.remove('hidden');
+  if (typeof Notification!=='undefined'&&Notification.permission==='default') document.getElementById('notif-banner').classList.remove('hidden');
 }
 
 (function init(){
-  document.getElementById('inp-threshold').value=threshold;
-  document.getElementById('thr-display').textContent=threshold;
-  checkBanners(); renderApiUsage(); renderLastUpdate(null);
+  document.getElementById('inp-threshold').value = threshold;
+  document.getElementById('thr-display').textContent = threshold;
+  checkBanners(); renderLastUpdate(null);
 
-  var saved=migrateStocks();
-  if(saved.length>0){
-    document.getElementById('empty').style.display='none';
+  var saved = migrateStocks();
+  if (saved.length > 0) {
+    document.getElementById('empty').style.display = 'none';
     saved.forEach(function(item){
-      var s={ticker:item.ticker,period:item.period,rsi:null,price:null,prevClose:null,name:'',loading:true,error:null,lastUp:null};
+      var s = {ticker:item.ticker,period:item.period,rsi:null,price:null,prevClose:null,name:'',loading:true,error:null,lastUp:null};
       stocks.push(s);
-      var el=document.createElement('div'); el.id='card-'+s.ticker+'-'+s.period; el.className='card';
+      var el = document.createElement('div'); el.id='card-'+s.ticker+'-'+s.period; el.className='card';
       document.getElementById('cards').appendChild(el); renderCard(s);
     });
     updateStats();
-    // 1초 간격으로 순차 로드
-    var i=0;
-    function nextLoad(){
-      if(i>=stocks.length) return;
-      loadStock(stocks[i++]).then(function(){ setTimeout(nextLoad,1000); });
-    }
+    var i = 0;
+    function nextLoad(){ if(i>=stocks.length) return; loadStock(stocks[i++]).then(function(){ setTimeout(nextLoad,1000); }); }
     nextLoad();
   }
   setupAutoRefresh();
