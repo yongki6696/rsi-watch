@@ -175,6 +175,11 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; heig
 /* ── 색상 ── */
 .c-white{color:#fff} .c-danger{color:var(--danger)} .c-warn{color:var(--warn)} .c-ok{color:var(--ok)} .c-purple{color:#a78bfa} .c-muted{color:var(--muted)} .c-text2{color:var(--text2)}
 
+/* ── 미니차트 ── */
+.mini-chart { width:100%; height:56px; margin:10px 0 4px; display:block; }
+.mini-chart path.line { fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.mini-chart path.area { stroke:none; }
+
 /* ── 스피너 ── */
 .spin { display:inline-block; width:15px; height:15px; border:2px solid var(--border); border-top-color:var(--accent2); border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle; }
 @keyframes sp { to{transform:rotate(360deg)} }
@@ -437,6 +442,7 @@ function loadStock(s) {
     s.price    = valid[valid.length-1];
     s.prevClose= valid[valid.length-2];
     s.name     = (chart.meta&&(chart.meta.longName||chart.meta.shortName))||'';
+    s.chartData = valid.slice(-60);
     s.loading  = false; s.error=null; s.lastUp=new Date();
     renderLastUpdate(s.lastUp);
   })
@@ -493,6 +499,31 @@ function getBadge(v,err){
 function cardCls(v){ if(v==null)return ''; if(v<=threshold)return 's-alert'; if(v<=40)return 's-warn'; return ''; }
 function pLabel(p){ return p==='1d'?'일봉':p==='1wk'?'주봉':'월봉'; }
 
+// ── 미니차트 SVG 생성 ──
+function makeMiniChart(data, color) {
+  if (!data || data.length < 2) return "";
+  var W = 320, H = 56, PAD = 4;
+  var min = Math.min.apply(null, data);
+  var max = Math.max.apply(null, data);
+  var range = max - min || 1;
+  var pts = data.map(function(v, i) {
+    var x = PAD + (i / (data.length - 1)) * (W - PAD * 2);
+    var y = H - PAD - ((v - min) / range) * (H - PAD * 2);
+    return x.toFixed(1) + "," + y.toFixed(1);
+  });
+  var linePath = "M" + pts.join("L");
+  var areaPath = "M" + PAD + "," + H + " L" + pts.join("L") + " L" + (W - PAD) + "," + H + " Z";
+  var gradId = "g" + Math.random().toString(36).slice(2, 7);
+  return "<svg class=\"mini-chart\" viewBox=\"0 0 " + W + " " + H + "\" preserveAspectRatio=\"none\">"
+    + "<defs><linearGradient id=\"" + gradId + "\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">"
+    + "<stop offset=\"0%\" stop-color=\"" + color + "\" stop-opacity=\"0.25\"/>"
+    + "<stop offset=\"100%\" stop-color=\"" + color + "\" stop-opacity=\"0.02\"/>"
+    + "</linearGradient></defs>"
+    + "<path class=\"area\" d=\"" + areaPath + "\" fill=\"url(#" + gradId + ")\" />"
+    + "<path class=\"line\" d=\"" + linePath + "\" stroke=\"" + color + "\" />"
+    + "</svg>";
+}
+
 function renderCard(s){
   var el=document.getElementById('card-'+s.ticker+'-'+s.period); if(!el) return;
   var v=s.rsi, pct=v!=null?Math.min(v,100):0;
@@ -508,6 +539,11 @@ function renderCard(s){
   var timeStr=s.lastUp?'🕐 '+s.lastUp.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
   var footRight=s.error?'<span class="c-danger">⚠ '+s.error+'</span>':timeStr;
 
+  // 미니차트 색상 — 등락에 따라
+  var chartColor = (s.chartData&&s.chartData.length>=2&&s.chartData[s.chartData.length-1]>=s.chartData[0])
+    ? '#22c55e' : '#ef4444';
+  var chartHTML = s.chartData ? makeMiniChart(s.chartData, chartColor) : '';
+
   el.className='card '+cardCls(v);
   el.innerHTML=
     '<div class="card-top">'
@@ -519,9 +555,10 @@ function renderCard(s){
     +'<div>'+priceHTML+'</div>'
     +'<div><div class="rsi-label-sm">RSI(14) · '+pLabel(s.period)+'</div>'+rsiHTML+'</div>'
     +'</div>'
+    + chartHTML
     +'<div class="bar-wrap"><div class="bar-fill" style="width:'+pct+'%;background:'+barColor(v)+'"></div>'
     +'<div class="bar-mark" style="left:'+threshold+'%"></div></div>'
-    +'<div class="card-foot"><span>'+pLabel(s.period)+'</span><span>'+footRight+'</span></div>';
+    +'<div class="card-foot"><span>'+pLabel(s.period)+' · 최근 60일</span><span>'+footRight+'</span></div>';
 }
 
 // 삭제 — 이벤트 위임
