@@ -1,11 +1,11 @@
 {
-  "name": "RSI Watch",
-  "short_name": "RSI Watch",
-  "description": "미국 주식 RSI 알림 앱",
+  "name": "용기주식비법",
+  "short_name": "용기주식비법",
+  "description": "RSI 기반 미국 주식 알림 앱",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#090e1a",
-  "theme_color": "#090e1a",
+  "background_color": "#080808",
+  "theme_color": "#080808",
   "orientation": "portrait",
   "icons": [
     {
@@ -19,6 +19,11 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
     }
   ]
 }
