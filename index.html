@@ -105,7 +105,7 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 .ticker { font-size:21px; font-weight:700; letter-spacing:.2px; }
 .cname  { font-size:11px; color:var(--text2); margin-top:3px; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .card-right { display:flex; align-items:center; gap:8px; }
-.badge { padding:3px 9px; border-radius:20px; font-size:10px; font-weight:700; text-transform:uppercase; }
+.badge { padding:5px 12px; border-radius:12px; font-size:16px; font-weight:800; }
 .b-alert{ background:rgba(239,68,68,.18); color:#ff6b6b; }
 .b-warn { background:rgba(245,158,11,.18); color:#fbbf24; }
 .b-ok   { background:rgba(34,197,94,.15);  color:#4ade80; }
@@ -361,9 +361,10 @@ function checkAlert(s){
       prevAlert.add(key);
       localStorage.setItem('rsi_prev',JSON.stringify(Array.from(prevAlert)));
       if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
-        try{new Notification('🚨 '+s.ticker+' RSI 경보',{body:'RSI '+s.rsi+' ← 임계값 '+threshold+' 이하!',icon:'apple-touch-icon.png',tag:'rsi-'+s.ticker});}catch(e){}
+        var nm=s.rsi<20?'풀매수! 🚀':'강력매수! 🔥'; try{new Notification(nm+' '+s.ticker,{body:'RSI '+s.rsi,icon:'apple-touch-icon.png',tag:'rsi-'+s.ticker});}catch(e){}
       }
-      toast('🚨',s.ticker+' RSI 경보','RSI '+s.rsi+' — 임계값 '+threshold+' 이하 진입!','alert',8000);
+      var alertMsg = s.rsi<20 ? '풀매수! 🚀 RSI '+s.rsi : '강력매수! 🔥 RSI '+s.rsi;
+      toast('🚨',s.ticker+' RSI 알림', alertMsg,'alert',8000);
     }
   } else {
     prevAlert.delete(key);
@@ -401,17 +402,17 @@ function makeMiniChart(data,color){
 }
 
 // ── 카드 렌더 ──
-function rsiColor(v){if(v==null)return 'c-muted';if(v<=threshold)return 'c-danger';if(v<=40)return 'c-warn';if(v<=60)return 'c-ok';return 'c-purple';}
-function barColor(v){if(v==null)return '#242424';if(v<=threshold)return '#ef4444';if(v<=40)return '#f59e0b';if(v<=60)return '#22c55e';return '#a78bfa';}
+function rsiColor(v){if(v==null)return 'c-muted';if(v<20)return 'c-danger';if(v<=30)return 'c-warn';if(v<=70)return 'c-ok';return 'c-purple';}
+function barColor(v){if(v==null)return '#242424';if(v<20)return '#ef4444';if(v<=30)return '#f59e0b';if(v<=70)return '#22c55e';return '#a78bfa';}
 function getBadge(v,err){
   if(err) return '<span class="badge b-err">오류</span>';
   if(v==null) return '<span class="badge b-load"><span class="spin"></span></span>';
-  if(v<=threshold) return '<span class="badge b-alert">🚨 경보</span>';
-  if(v<=40) return '<span class="badge b-warn">⚠ 주의</span>';
-  if(v<=60) return '<span class="badge b-ok">정상</span>';
-  return '<span class="badge b-high">과매수</span>';
+  if(v<20)  return '<span class="badge b-alert">풀매수! 🚀</span>';
+  if(v<=30) return '<span class="badge b-warn">강력매수! 🔥</span>';
+  if(v<=70) return '<span class="badge b-ok">절대참아! 🧐</span>';
+  return '<span class="badge b-high">분할매도! 🥸</span>';
 }
-function cardCls(v){if(v==null)return '';if(v<=threshold)return 's-alert';if(v<=40)return 's-warn';return '';}
+function cardCls(v){if(v==null)return '';if(v<20)return 's-alert';if(v<=30)return 's-warn';return '';}
 function pLabel(p){return p==='1d'?'일봉':p==='1wk'?'주봉':'월봉';}
 
 function renderCard(s){
@@ -436,8 +437,14 @@ function renderCard(s){
   el.innerHTML=
     '<div class="drag-handle">⠿</div>'
     +'<div class="card-top">'
-    +'<div><div class="ticker">'+s.ticker+'</div>'+(s.name?'<div class="cname">'+s.name+'</div>':'')+'</div>'
-    +'<div class="card-right">'+getBadge(v,s.error)
+    +'<div>'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">'
+    +'<div class="ticker">'+s.ticker+'</div>'
+    +getBadge(v,s.error)
+    +'</div>'
+    +(s.name?'<div class="cname">'+s.name+'</div>':'')
+    +'</div>'
+    +'<div class="card-right">'
     +'<button class="btn-del" data-ticker="'+s.ticker+'" data-period="'+s.period+'">✕</button>'
     +'</div></div>'
     +'<div class="card-body"><div>'+priceHTML+'</div>'
