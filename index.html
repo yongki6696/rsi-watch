@@ -20,18 +20,23 @@
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
 body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif; min-height:100vh; overscroll-behavior:none; }
 
-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top)+20px) 20px 18px; background:var(--bg); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:100; }
+header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:calc(env(safe-area-inset-top) + 16px) 18px 14px;
+  background:var(--bg); border-bottom:1px solid var(--border);
+  position:fixed; top:0; left:0; right:0; z-index:200;
+}
 .logo { display:flex; align-items:center; gap:9px; }
 .logo-dot { width:8px; height:8px; border-radius:50%; background:var(--accent2); box-shadow:0 0 8px var(--accent2); animation:blink 2s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
 .logo-title { font-size:17px; font-weight:700; letter-spacing:-.3px; }
 .hdr-right { display:flex; align-items:center; gap:8px; }
-.btn-hdr { display:flex; align-items:center; gap:6px; background:var(--card2); border:1px solid var(--border); border-radius:20px; padding:10px 16px; color:var(--text); font-size:13px; font-weight:600; cursor:pointer; touch-action:manipulation; -webkit-appearance:none; transition:background .15s,transform .1s; min-height:42px; }
+.btn-hdr { display:flex; align-items:center; gap:6px; background:var(--card2); border:1px solid var(--border); border-radius:22px; padding:10px 18px; color:var(--text); font-size:13px; font-weight:600; cursor:pointer; touch-action:manipulation; -webkit-appearance:none; transition:background .15s,transform .1s; min-height:44px; }
 .btn-hdr:active { background:#222; transform:scale(0.96); }
 .btn-hdr.edit-active { color:var(--ok); border-color:var(--ok); }
-.alert-badge { background:var(--danger); color:#fff; font-size:11px; font-weight:700; padding:4px 9px; border-radius:20px; display:none; min-height:30px; line-height:22px; }
+.alert-badge { background:var(--danger); color:#fff; font-size:11px; font-weight:700; padding:2px 7px; border-radius:20px; display:none; }
 
-main { max-width:680px; margin:0 auto; padding:20px 16px calc(env(safe-area-inset-bottom)+60px); }
+main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 80px) 16px calc(env(safe-area-inset-bottom) + 60px); }
 .banner { border-radius:12px; padding:11px 14px; margin-bottom:14px; font-size:13px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .banner-blue   { background:rgba(37,99,235,.12); border:1px solid rgba(37,99,235,.3); }
 .banner-yellow { background:rgba(245,158,11,.1);  border:1px solid rgba(245,158,11,.25); }
@@ -92,9 +97,9 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 .drag-handle:active { cursor:grabbing; }
 
 /* 편집 모드 */
-body.edit-mode .drag-handle { display:flex; }
-body.edit-mode .card { padding-left:48px; }
-body.edit-mode .card { cursor:default; }
+.drag-handle { display:flex; }
+.card { padding-left:48px; }
+
 
 .card-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
 .ticker { font-size:21px; font-weight:700; letter-spacing:.2px; }
@@ -146,7 +151,7 @@ body.edit-mode .card { cursor:default; }
 
 /* 편집모드 힌트 배너 */
 .edit-hint { background:rgba(37,99,235,.1); border:1px solid rgba(37,99,235,.25); border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:var(--accent2); display:none; }
-body.edit-mode .edit-hint { display:block; }
+.edit-hint { display:block; }
 </style>
 </head>
 <body>
@@ -158,7 +163,7 @@ body.edit-mode .edit-hint { display:block; }
   </div>
   <div class="hdr-right">
     <span class="alert-badge" id="alert-badge">0</span>
-    <button class="btn-hdr" id="btn-edit">편집</button>
+    
     <button class="btn-hdr" id="btn-refresh">⟳ 새로고침</button>
   </div>
 </header>
@@ -184,7 +189,7 @@ body.edit-mode .edit-hint { display:block; }
     <div class="row">
       <div class="field" style="flex:2">
         <div class="field-label">티커 심볼</div>
-        <input id="inp-ticker" type="text" placeholder="AAPL" maxlength="10"
+        <input id="inp-ticker" type="text" placeholder="AAPL" maxlength="20"
                autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
       </div>
       <div class="field" style="flex:1">
@@ -244,7 +249,7 @@ var threshold = parseInt(localStorage.getItem('rsi_thr') || '30');
 var prevAlert = new Set(JSON.parse(localStorage.getItem('rsi_prev') || '[]'));
 var autoTimer = null;
 var autoRem   = 0;
-var editMode  = false;
+var editMode  = true; // 항상 드래그 가능
 
 // ── 저장/로드 ──
 function save() {
@@ -578,15 +583,7 @@ document.addEventListener('mouseup',function(){
 });
 
 // ── 편집 모드 ──
-function toggleEdit(){
-  editMode=!editMode;
-  var btn=document.getElementById('btn-edit');
-  btn.textContent=editMode?'완료':'편집';
-  if(editMode) btn.classList.add('edit-active');
-  else btn.classList.remove('edit-active');
-  if(editMode) document.body.classList.add('edit-mode');
-  else document.body.classList.remove('edit-mode');
-}
+// toggleEdit 제거 - 항상 드래그 가능
 
 // ── 자동 새로고침 ──
 function setupAutoRefresh(){
@@ -633,7 +630,7 @@ function bindBtn(id,fn){
 }
 bindBtn('btn-add',addStock);
 bindBtn('btn-refresh',refreshAll);
-bindBtn('btn-edit',toggleEdit);
+
 bindBtn('btn-notif',requestNotif);
 bindBtn('btn-pwa-close',function(){document.getElementById('pwa-banner').classList.add('hidden');});
 document.getElementById('inp-ticker').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();addStock();}});
@@ -655,6 +652,7 @@ function checkBanners(){
   document.getElementById('thr-display').textContent=threshold;
   checkBanners();
   loadStocksFromStorage();
+  document.body.classList.add('edit-mode');
   renderAll(); updateStats(); renderLastUpdate(null);
   var i=0;
   function nextLoad(){if(i>=stocks.length)return;loadStock(stocks[i++]).then(function(){setTimeout(nextLoad,800);});}
