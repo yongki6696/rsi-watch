@@ -361,12 +361,22 @@ function findPivots(arr,win,type){
   }
   return res;
 }
-function detectDivergence(closes){
-  var recent=closes.slice(-90); if(recent.length<30) return null;
+function detectDivergence(closes, timestamps){
+  var recent=closes.slice(-90);
+  var recentTs=timestamps?timestamps.slice(-90):null;
+  if(recent.length<30) return null;
   var rsi=calcRSISeries(recent); if(rsi.length<20) return null;
   var off=recent.length-rsi.length;
   var price=recent.slice(off);
+  var priceTs=recentTs?recentTs.slice(off):null;
   var win=3;
+
+  function idxToDate(idx){
+    if(!priceTs||!priceTs[idx]) return null;
+    var d=new Date(priceTs[idx]*1000);
+    return (d.getMonth()+1)+'/'+d.getDate();
+  }
+
   // 상승 다이버전스
   var pLows=findPivots(price,win,'low'), rLows=findPivots(rsi,win,'low');
   if(pLows.length>=2&&rLows.length>=2){
@@ -375,8 +385,15 @@ function detectDivergence(closes){
       var rl1=null,rl2=null;
       for(var i=0;i<rLows.length;i++){if(Math.abs(rLows[i].idx-pl1.idx)<=win*2)rl1=rLows[i];}
       for(var i=0;i<rLows.length;i++){if(Math.abs(rLows[i].idx-pl2.idx)<=win*2)rl2=rLows[i];}
-      if(rl1&&rl2&&rl2.val>rl1.val*1.002)
-        return {type:'bull',label:'📈 상승 다이버전스',desc:'가격↓ RSI↑ — 반등 가능성'};
+      if(rl1&&rl2&&rl2.val>rl1.val*1.002){
+        var d1=idxToDate(pl1.idx), d2=idxToDate(pl2.idx);
+        var dateStr=d1&&d2?d1+' → '+d2:'';
+        return {type:'bull',label:'📈 상승 다이버전스',
+          desc:'가격↓ RSI↑ — 반등 가능성',
+          date:dateStr,
+          rsi1:Math.round(rl1.val*10)/10, rsi2:Math.round(rl2.val*10)/10,
+          price1:Math.round(pl1.val*100)/100, price2:Math.round(pl2.val*100)/100};
+      }
     }
   }
   // 하락 다이버전스
@@ -387,17 +404,32 @@ function detectDivergence(closes){
       var rh1=null,rh2=null;
       for(var i=0;i<rHighs.length;i++){if(Math.abs(rHighs[i].idx-ph1.idx)<=win*2)rh1=rHighs[i];}
       for(var i=0;i<rHighs.length;i++){if(Math.abs(rHighs[i].idx-ph2.idx)<=win*2)rh2=rHighs[i];}
-      if(rh1&&rh2&&rh2.val<rh1.val*0.998)
-        return {type:'bear',label:'📉 하락 다이버전스',desc:'가격↑ RSI↓ — 하락 가능성'};
+      if(rh1&&rh2&&rh2.val<rh1.val*0.998){
+        var d1=idxToDate(ph1.idx), d2=idxToDate(ph2.idx);
+        var dateStr=d1&&d2?d1+' → '+d2:'';
+        return {type:'bear',label:'📉 하락 다이버전스',
+          desc:'가격↑ RSI↓ — 하락 가능성',
+          date:dateStr,
+          rsi1:Math.round(rh1.val*10)/10, rsi2:Math.round(rh2.val*10)/10,
+          price1:Math.round(ph1.val*100)/100, price2:Math.round(ph2.val*100)/100};
+      }
     }
   }
   return null;
 }
 function getDivHTML(s){
   if(!s.chartData||s.chartData.length<30) return '';
-  var div=detectDivergence(s.chartData); if(!div) return '';
+  var div=detectDivergence(s.chartData, s.timestamps); if(!div) return '';
   var cls=div.type==='bull'?'div-bull':'div-bear';
-  return '<div class="div-badge '+cls+'">'+div.label+' <span style="font-weight:400;opacity:.8">'+div.desc+'</span></div>';
+  var dateInfo=div.date?'<span style="opacity:.65;font-weight:400;font-size:11px;margin-left:4px">'+div.date+'</span>':'';
+  var rsiInfo='<div style="font-size:11px;opacity:.7;font-weight:400;margin-top:3px">'
+    +'RSI '+div.rsi1+' → '+div.rsi2
+    +(div.date?' &nbsp;|&nbsp; 가격 $'+div.price1+' → $'+div.price2:'')
+    +'</div>';
+  return '<div class="div-badge '+cls+'" style="flex-direction:column;align-items:flex-start">'
+    +'<div>'+div.label+dateInfo+'&nbsp;<span style="font-weight:400;font-size:11px;opacity:.8">'+div.desc+'</span></div>'
+    +rsiInfo
+    +'</div>';
 }
 
 function loadStock(s){
@@ -411,6 +443,9 @@ function loadStock(s){
     s.price=valid[valid.length-1]; s.prevClose=valid[valid.length-2];
     s.name=(chart.meta&&(chart.meta.longName||chart.meta.shortName))||'';
     s.chartData=valid.slice(-180);
+    // 타임스탬프 저장 (다이버전스 날짜 표시용)
+    var ts=chart.timestamp||[];
+    s.timestamps=ts.slice(-180);
     s.loading=false; s.error=null; s.lastUp=new Date();
     renderLastUpdate(s.lastUp);
   })
