@@ -133,6 +133,13 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 .btn-del:active { background:rgba(239,68,68,.25); }
 
 .c-white{color:#fff} .c-danger{color:var(--danger)} .c-warn{color:var(--warn)} .c-ok{color:var(--ok)} .c-purple{color:#a78bfa} .c-muted{color:var(--muted)}
+.div-badge {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:5px 12px; border-radius:10px; font-size:12px; font-weight:700;
+  margin-top:8px; width:100%;
+}
+.div-bull { background:rgba(34,197,94,.15); color:#4ade80; border:1px solid rgba(34,197,94,.3); }
+.div-bear { background:rgba(239,68,68,.15);  color:#ff6b6b; border:1px solid rgba(239,68,68,.3); }
 .spin { display:inline-block; width:15px; height:15px; border:2px solid var(--border); border-top-color:var(--accent2); border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle; }
 @keyframes sp { to{transform:rotate(360deg)} }
 
@@ -323,6 +330,76 @@ function calcRSI(closes){
   if(al===0) return 100;
   return Math.round((100-100/(1+ag/al))*100)/100;
 }
+
+// ══════════════════════════════════════════
+// 다이버전스 감지 (참고용)
+// ══════════════════════════════════════════
+function calcRSISeries(closes) {
+  var arr = closes.filter(function(v){ return v!=null&&!isNaN(v); });
+  var p=14; if(arr.length<p+1) return [];
+  var g=0,l=0;
+  for(var i=1;i<=p;i++){var d=arr[i]-arr[i-1];if(d>0)g+=d;else l-=d;}
+  var ag=g/p,al=l/p,series=[];
+  for(var i=p+1;i<arr.length;i++){
+    var d=arr[i]-arr[i-1];
+    ag=(ag*(p-1)+(d>0?d:0))/p;
+    al=(al*(p-1)+(d<0?-d:0))/p;
+    series.push(al===0?100:Math.round((100-100/(1+ag/al))*100)/100);
+  }
+  return series;
+}
+function findPivots(arr,win,type){
+  var res=[];
+  for(var i=win;i<arr.length-win;i++){
+    var ok=true;
+    for(var j=i-win;j<=i+win;j++){
+      if(j===i) continue;
+      if(type==='low'  && arr[j]<=arr[i]){ok=false;break;}
+      if(type==='high' && arr[j]>=arr[i]){ok=false;break;}
+    }
+    if(ok) res.push({idx:i,val:arr[i]});
+  }
+  return res;
+}
+function detectDivergence(closes){
+  var recent=closes.slice(-90); if(recent.length<30) return null;
+  var rsi=calcRSISeries(recent); if(rsi.length<20) return null;
+  var off=recent.length-rsi.length;
+  var price=recent.slice(off);
+  var win=3;
+  // 상승 다이버전스
+  var pLows=findPivots(price,win,'low'), rLows=findPivots(rsi,win,'low');
+  if(pLows.length>=2&&rLows.length>=2){
+    var pl1=pLows[pLows.length-2],pl2=pLows[pLows.length-1];
+    if(pl2.val<pl1.val*0.998&&pl2.idx>=price.length-20){
+      var rl1=null,rl2=null;
+      for(var i=0;i<rLows.length;i++){if(Math.abs(rLows[i].idx-pl1.idx)<=win*2)rl1=rLows[i];}
+      for(var i=0;i<rLows.length;i++){if(Math.abs(rLows[i].idx-pl2.idx)<=win*2)rl2=rLows[i];}
+      if(rl1&&rl2&&rl2.val>rl1.val*1.002)
+        return {type:'bull',label:'📈 상승 다이버전스',desc:'가격↓ RSI↑ — 반등 가능성'};
+    }
+  }
+  // 하락 다이버전스
+  var pHighs=findPivots(price,win,'high'),rHighs=findPivots(rsi,win,'high');
+  if(pHighs.length>=2&&rHighs.length>=2){
+    var ph1=pHighs[pHighs.length-2],ph2=pHighs[pHighs.length-1];
+    if(ph2.val>ph1.val*1.002&&ph2.idx>=price.length-20){
+      var rh1=null,rh2=null;
+      for(var i=0;i<rHighs.length;i++){if(Math.abs(rHighs[i].idx-ph1.idx)<=win*2)rh1=rHighs[i];}
+      for(var i=0;i<rHighs.length;i++){if(Math.abs(rHighs[i].idx-ph2.idx)<=win*2)rh2=rHighs[i];}
+      if(rh1&&rh2&&rh2.val<rh1.val*0.998)
+        return {type:'bear',label:'📉 하락 다이버전스',desc:'가격↑ RSI↓ — 하락 가능성'};
+    }
+  }
+  return null;
+}
+function getDivHTML(s){
+  if(!s.chartData||s.chartData.length<30) return '';
+  var div=detectDivergence(s.chartData); if(!div) return '';
+  var cls=div.type==='bull'?'div-bull':'div-bear';
+  return '<div class="div-badge '+cls+'">'+div.label+' <span style="font-weight:400;opacity:.8">'+div.desc+'</span></div>';
+}
+
 function loadStock(s){
   s.loading=true; s.error=null; renderCard(s);
   return fetchYahoo(s.ticker,s.period)
@@ -432,6 +509,7 @@ function renderCard(s){
       +(s.chartData.length>=120?'<span><span class="legend-dash"></span>MA120</span>':'')+'</div>';
   }
   var chartHTML=s.chartData?(legendHTML+makeMiniChart(s.chartData,chartColor)):'';
+  var divHTML=getDivHTML(s);
 
   el.className='card '+cardCls(v);
   el.innerHTML=
@@ -450,6 +528,7 @@ function renderCard(s){
     +'<div class="card-body"><div>'+priceHTML+'</div>'
     +'<div><div class="rsi-label-sm">RSI(14) · '+pLabel(s.period)+'</div>'+rsiHTML+'</div></div>'
     +chartHTML
+    +divHTML
     +'<div class="bar-wrap"><div class="bar-fill" style="width:'+pct+'%;background:'+barColor(v)+'"></div>'
     +'<div class="bar-mark" style="left:'+threshold+'%"></div></div>'
     +'<div class="card-foot"><span>'+pLabel(s.period)+' · 최근 60일</span><span>'+footRight+'</span></div>';
