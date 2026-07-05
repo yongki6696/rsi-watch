@@ -107,7 +107,7 @@ body.edit-mode .card { cursor:default; }
 .ticker { font-size:21px; font-weight:700; letter-spacing:.2px; }
 .cname  { font-size:11px; color:var(--text2); margin-top:3px; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .card-right { display:flex; align-items:center; gap:8px; }
-.badge { padding:3px 9px; border-radius:20px; font-size:10px; font-weight:700; text-transform:uppercase; }
+.badge { padding:5px 13px; border-radius:12px; font-size:18px; font-weight:800; }
 .b-alert{ background:rgba(239,68,68,.18); color:#ff6b6b; }
 .b-warn { background:rgba(245,158,11,.18); color:#fbbf24; }
 .b-ok   { background:rgba(34,197,94,.15);  color:#4ade80; }
@@ -185,7 +185,7 @@ body.edit-mode .edit-hint { display:block; }
     </div>
     <span class="alert-badge" id="alert-badge">0</span>
     <button class="btn-hdr" id="btn-edit">편집</button>
-    <button class="btn-hdr" id="btn-refresh">⟳</button>
+    <button class="btn-hdr" id="btn-refresh">⟳ 새로고침</button>
   </div>
 </header>
 <div id="toasts"></div>
@@ -552,8 +552,14 @@ function renderCard(s){
   el.innerHTML=
     '<div class="drag-handle">⠿</div>'
     +'<div class="card-top">'
-    +'<div><div class="ticker">'+s.ticker+'</div>'+(s.name?'<div class="cname">'+s.name+'</div>':'')+'</div>'
-    +'<div class="card-right">'+getBadge(v,s.error)
+    +'<div style="flex:1">'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +'<div class="ticker">'+s.ticker+'</div>'
+    +getBadge(v,s.error)
+    +'</div>'
+    +(s.name?'<div class="cname">'+s.name+'</div>':'')
+    +'</div>'
+    +'<div class="card-right">'
     +'<button class="btn-del" data-ticker="'+s.ticker+'" data-period="'+s.period+'">✕</button>'
     +'</div></div>'
     +'<div class="card-body"><div>'+priceHTML+'</div>'
@@ -716,20 +722,28 @@ function toggleEdit(){
 // 방문자 카운터 (이중 백업 — 절대 초기화 안됨)
 // ══════════════════════════════════════
 (function initVisitors(){
-  var today = new Date().toISOString().slice(0,10);
-  // 누적: 두 키에 백업해서 더 큰 값 사용
+  // 오늘 날짜 (한국 시간 기준 자정 초기화)
+  var now = new Date();
+  var kst = new Date(now.getTime() + 9*60*60*1000); // UTC+9
+  var today = kst.toISOString().slice(0,10);
+
+  // ── 누적 방문자: 이중 백업, 절대 초기화 안됨 ──
   var k1='rst_total', k2='rst_total_bak';
   var v1=parseInt(localStorage.getItem(k1)||'0');
   var v2=parseInt(localStorage.getItem(k2)||'0');
   var total=Math.max(v1,v2)+1;
-  localStorage.setItem(k1,total);
-  localStorage.setItem(k2,total);
-  // 오늘 방문자
+  localStorage.setItem(k1,String(total));
+  localStorage.setItem(k2,String(total));
+
+  // ── 오늘 방문자: 날짜가 바뀌면 자동 초기화 ──
   var td=null;
   try{td=JSON.parse(localStorage.getItem('rst_today')||'null');}catch(e){}
-  if(!td||td.date!==today) td={date:today,count:0};
+  if(!td||td.date!==today){
+    td={date:today,count:0}; // 자정 넘으면 0으로 초기화
+  }
   td.count++;
   localStorage.setItem('rst_today',JSON.stringify(td));
+
   function fmt(n){return n>=10000?(n/10000).toFixed(1)+'만':n.toLocaleString();}
   var et=document.getElementById('v-today');
   var el=document.getElementById('v-total');
