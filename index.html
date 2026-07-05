@@ -20,18 +20,18 @@
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
 body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif; min-height:100vh; overscroll-behavior:none; }
 
-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 22px) 18px 16px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; min-height:calc(env(safe-area-inset-top) + 68px); }
+header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 12px) 18px 12px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; }
 .logo { display:flex; align-items:center; gap:9px; }
 .logo-dot { width:8px; height:8px; border-radius:50%; background:var(--accent2); box-shadow:0 0 8px var(--accent2); animation:blink 2s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
 .logo-title { font-size:17px; font-weight:700; letter-spacing:-.3px; }
-.hdr-right { display:flex; align-items:center; gap:8px; }
-.btn-hdr { display:flex; align-items:center; gap:6px; background:var(--card2); border:1px solid var(--border); border-radius:20px; padding:8px 14px; color:var(--text); font-size:13px; font-weight:600; cursor:pointer; touch-action:manipulation; -webkit-appearance:none; transition:background .15s,transform .1s; }
+.hdr-right { display:flex; align-items:center; gap:6px; }
+.btn-hdr { display:flex; align-items:center; justify-content:center; gap:5px; background:var(--card2); border:1px solid var(--border); border-radius:18px; padding:8px 13px; color:var(--text); font-size:13px; font-weight:600; cursor:pointer; touch-action:manipulation; -webkit-appearance:none; transition:background .15s,transform .1s; min-height:36px; white-space:nowrap; }
 .btn-hdr:active { background:#222; transform:scale(0.96); }
 .btn-hdr.edit-active { color:var(--ok); border-color:var(--ok); }
 .alert-badge { background:var(--danger); color:#fff; font-size:11px; font-weight:700; padding:2px 7px; border-radius:20px; display:none; }
 
-main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 90px) 16px calc(env(safe-area-inset-bottom) + 60px); }
+main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 70px) 16px calc(env(safe-area-inset-bottom) + 60px); }
 .banner { border-radius:12px; padding:11px 14px; margin-bottom:14px; font-size:13px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .banner-blue   { background:rgba(37,99,235,.12); border:1px solid rgba(37,99,235,.3); }
 .banner-yellow { background:rgba(245,158,11,.1);  border:1px solid rgba(245,158,11,.25); }
@@ -59,7 +59,7 @@ main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 9
 .thr-val { font-size:24px; font-weight:700; color:var(--danger); }
 input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 
-.sec-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 22px) 18px 16px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; min-height:calc(env(safe-area-inset-top) + 68px); }
+.sec-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 12px) 18px 12px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; }
 .sec-title { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.9px; }
 .sec-sub   { font-size:10px; color:var(--muted); }
 
@@ -84,16 +84,18 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 
 /* 드래그 핸들 (편집모드에서만 보임) */
 .drag-handle {
-  position:absolute; left:0; top:0; bottom:0; width:40px;
-  display:none; align-items:center; justify-content:center;
-  color:var(--muted); font-size:18px; border-radius:16px 0 0 16px;
-  cursor:grab; touch-action:none;
+  position:absolute; left:0; top:50%; transform:translateY(-50%);
+  width:32px; height:44px;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--muted); font-size:16px;
+  cursor:grab; touch-action:none; opacity:.5;
 }
-.drag-handle:active { cursor:grabbing; }
+.drag-handle:active { cursor:grabbing; opacity:1; }
 
 /* 편집 모드 */
 body.edit-mode .drag-handle { display:flex; }
-body.edit-mode .card { padding-left:48px; }
+.card { padding-left:40px; }
+body.edit-mode .card { padding-left:40px; }
 body.edit-mode .card { cursor:default; }
 
 .card-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
@@ -108,7 +110,7 @@ body.edit-mode .card { cursor:default; }
 .b-load { background:rgba(80,80,80,.2);    color:var(--muted); }
 .b-err  { background:rgba(239,68,68,.1);   color:var(--danger); }
 .card-body { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:14px; }
-.price-main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 90px) 16px calc(env(safe-area-inset-bottom) + 60px); }
+.price-main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 70px) 16px calc(env(safe-area-inset-bottom) + 60px); }
 .price-chg  { font-size:12px; margin-top:3px; }
 .rsi-label-sm { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px; text-align:right; }
 .rsi-big { font-size:36px; font-weight:700; line-height:1; text-align:right; }
@@ -135,7 +137,21 @@ body.edit-mode .card { cursor:default; }
 }
 .div-bull { background:rgba(34,197,94,.15); color:#4ade80; border:1px solid rgba(34,197,94,.3); }
 .div-bear { background:rgba(239,68,68,.15);  color:#ff6b6b; border:1px solid rgba(239,68,68,.3); }
-.spin { display:inline-block; width:15px; height:15px; border:2px solid var(--border); border-top-color:var(--accent2); border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle; }
+
+/* ── 면책 문구 ── */
+.disclaimer {
+  margin-top: 32px;
+  padding: 16px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.disclaimer p { margin-bottom: 6px; }
+.disclaimer p:last-child { margin-bottom: 0; }
+.spin { display:inline-block; width:15px; height:15px; flex-shrink:0; border:2px solid var(--border); border-top-color:var(--accent2); border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle; }
 @keyframes sp { to{transform:rotate(360deg)} }
 
 #toasts { position:fixed; top:calc(env(safe-area-inset-top)+76px); right:16px; left:16px; z-index:999; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
@@ -154,6 +170,15 @@ body.edit-mode .card { cursor:default; }
 /* 편집모드 힌트 배너 */
 .edit-hint { background:rgba(37,99,235,.1); border:1px solid rgba(37,99,235,.25); border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:var(--accent2); display:none; }
 body.edit-mode .edit-hint { display:block; }
+
+/* ── 면책 문구 ── */
+.disclaimer {
+  margin-top:28px; padding:14px 16px;
+  background:rgba(255,255,255,.03); border:1px solid var(--border);
+  border-radius:12px; font-size:11px; color:var(--muted); line-height:1.7;
+}
+.disclaimer p { margin-bottom:6px; }
+.disclaimer p:last-child { margin-bottom:0; }
 </style>
 </head>
 <body>
@@ -164,17 +189,13 @@ body.edit-mode .edit-hint { display:block; }
     <div class="logo-title">RSIngTime</div>
   </div>
   <div class="hdr-right">
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;margin-right:2px">
-      <span style="font-size:10px;color:var(--text2);font-family:monospace;line-height:1" id="v-today">—</span>
-      <span style="font-size:8px;color:var(--muted);letter-spacing:.3px;line-height:1">today</span>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;margin-right:4px">
-      <span style="font-size:10px;color:var(--text2);font-family:monospace;line-height:1" id="v-total">—</span>
-      <span style="font-size:8px;color:var(--muted);letter-spacing:.3px;line-height:1">total</span>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:0px;line-height:1.2">
+      <span style="font-size:9px;color:var(--muted)">오늘 <span id="v-today" style="color:var(--text2)">—</span></span>
+      <span style="font-size:9px;color:var(--muted)">누적 <span id="v-total" style="color:var(--text2)">—</span></span>
     </div>
     <span class="alert-badge" id="alert-badge">0</span>
     <button class="btn-hdr" id="btn-edit">편집</button>
-    <button class="btn-hdr" id="btn-refresh">⟳ 새로고침</button>
+    <button class="btn-hdr" id="btn-refresh">⟳</button>
   </div>
 </header>
 <div id="toasts"></div>
@@ -247,6 +268,12 @@ body.edit-mode .edit-hint { display:block; }
       <div class="empty-title">감시할 종목을 추가하세요</div>
       <div class="empty-desc">티커 심볼 입력 후 + 추가 버튼을 눌러주세요<br>RSI가 임계값 이하로 내려가면 즉시 알림이 옵니다</div>
     </div>
+  </div>
+
+  <!-- 면책 문구 -->
+  <div class="disclaimer">
+    <p>⚠️ 투자 판단에 대한 책임은 본인에게 있으며, 본 서비스는 기술적 지표 분석 결과만을 제공할 뿐 투자를 권유하지 않습니다.</p>
+    <p>📊 본 서비스에서 제공하는 RSI 신호 및 다이버전스 정보는 단순 기술적 지표 분석 결과이며, 투자 권유나 추천이 아닙니다. 모든 투자의 책임은 투자자 본인에게 있습니다.</p>
   </div>
 </main>
 
