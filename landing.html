@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="용기주식비법 — 미국 주식 RSI 실시간 알림 서비스. 레버리지 ETF, 개별주 RSI 모니터링과 다이버전스 감지.">
-<meta property="og:title" content="용기주식비법">
+<meta name="description" content="RSIngTime — 미국 주식 RSI 실시간 알림 서비스. 레버리지 ETF, 개별주 RSI 모니터링과 다이버전스 감지.">
+<meta property="og:title" content="RSIngTime">
 <meta property="og:description" content="미국 주식 RSI 실시간 알림 — 풀매수·강력매수 신호를 놓치지 마세요">
 <meta property="og:image" content="icon-512.png">
-<title>용기주식비법 — 미국 주식 RSI 알림</title>
+<title>RSIngTime — 미국 주식 RSI 알림</title>
 
 <!-- Google Analytics (나중에 G-XXXXXXXXXX 자리에 본인 GA4 ID 넣으세요) -->
 <!--
@@ -253,7 +253,7 @@ footer { padding:48px 40px; border-top:1px solid var(--border); display:flex; ju
 <nav>
   <a href="#" class="nav-logo">
     <div class="nav-dot"></div>
-    용기주식비법
+    RSIngTime
   </a>
   <div class="nav-links">
     <a href="#features">기능</a>
@@ -308,12 +308,26 @@ footer { padding:48px 40px; border-top:1px solid var(--border); display:flex; ju
   <!-- 앱 미리보기 -->
   <div class="app-preview">
     <div class="preview-header">
-      <div class="preview-logo"><div class="preview-dot"></div>용기주식비법</div>
+      <div class="preview-logo"><div class="preview-dot"></div>RSIngTime</div>
       <span style="font-size:12px;color:var(--muted)">⟳ 실시간</span>
     </div>
     <div class="preview-stat">
       <div class="ps"><div class="ps-label">감시 종목</div><div class="ps-val">10</div></div>
       <div class="ps"><div class="ps-label">RSI 경보</div><div class="ps-val" style="color:var(--red)">2</div></div>
+    </div>
+    <div class="preview-card alert" style="border-color:#ff4444;box-shadow:0 0 16px rgba(255,68,68,.2)">
+      <div class="pc-top">
+        <div>
+          <div class="pc-ticker">TSLL</div>
+          <div style="font-size:11px;color:var(--text2)">Direxion 2x TSLA</div>
+        </div>
+        <span class="pc-badge red">풀매수! 🚀</span>
+      </div>
+      <div class="pc-body">
+        <div><div class="pc-price">$11.24</div><div class="pc-chg">▼-5.8%</div></div>
+        <div><div class="pc-rsi-label">RSI(14) · 일봉</div><div class="pc-rsi red" style="font-size:34px">16.3</div></div>
+      </div>
+      <div class="pc-bar"><div class="pc-bar-fill" style="width:16.3%;background:#ef4444"></div></div>
     </div>
     <div class="preview-card alert">
       <div class="pc-top">
@@ -407,7 +421,7 @@ footer { padding:48px 40px; border-top:1px solid var(--border); display:flex; ju
     <div>
       <div class="section-label">RSI GUIDE</div>
       <div class="section-title">RSI 수치별 신호</div>
-      <p class="section-sub" style="margin-bottom:32px">용기주식비법만의 4단계 매매 신호로 타이밍을 잡으세요.</p>
+      <p class="section-sub" style="margin-bottom:32px">RSIngTime만의 4단계 매매 신호로 타이밍을 잡으세요.</p>
 
       <table class="rsi-table">
         <thead>
@@ -529,7 +543,7 @@ footer { padding:48px 40px; border-top:1px solid var(--border); display:flex; ju
 <section class="cta-section">
   <h2>지금 바로 시작하세요</h2>
   <p>가입 없이, 무료로, 지금 바로.</p>
-  <a href="index.html" class="btn-primary" style="display:inline-flex;margin:0 auto">📱 용기주식비법 앱 열기</a>
+  <a href="index.html" class="btn-primary" style="display:inline-flex;margin:0 auto">📱 RSIngTime 앱 열기</a>
 </section>
 
 <!-- ── 하단 광고 배너 ── -->
@@ -541,7 +555,7 @@ footer { padding:48px 40px; border-top:1px solid var(--border); display:flex; ju
 <footer>
   <div class="footer-logo">
     <div class="nav-dot"></div>
-    용기주식비법
+    RSIngTime
   </div>
   <p class="footer-note">
     본 서비스는 투자 참고용 정보를 제공하며, 투자 권유가 아닙니다.
@@ -562,14 +576,14 @@ footer { padding:48px 40px; border-top:1px solid var(--border); display:flex; ju
   var today = new Date().toISOString().slice(0,10);
 
   // 누적 방문자
-  var total = parseInt(localStorage.getItem('yk_total_visits') || '0') + 1;
-  localStorage.setItem('yk_total_visits', total);
+  // index.html과 같은 키 사용해서 방문자 수 공유
+  var total = parseInt(localStorage.getItem('rst_total') || '0') + 1;
+  localStorage.setItem('rst_total', total);
 
-  // 오늘 방문자
-  var todayData = JSON.parse(localStorage.getItem('yk_today_visits') || '{"date":"","count":0}');
+  var todayData = JSON.parse(localStorage.getItem('rst_today') || '{"date":"","count":0}');
   if (todayData.date !== today) todayData = {date:today, count:0};
   todayData.count++;
-  localStorage.setItem('yk_today_visits', JSON.stringify(todayData));
+  localStorage.setItem('rst_today', JSON.stringify(todayData));
 
   function fmt(n) {
     if (n >= 10000) return (n/10000).toFixed(1) + '만';

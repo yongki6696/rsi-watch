@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="용기주식비법">
+<meta name="apple-mobile-web-app-title" content="RSIngTime">
 <meta name="theme-color" content="#000000">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>용기주식비법</title>
+<title>RSIngTime</title>
 <style>
 :root {
   --bg:#000; --surface:#0a0a0a; --card:#111; --card2:#181818;
@@ -20,23 +20,18 @@
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
 body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif; min-height:100vh; overscroll-behavior:none; }
 
-header {
-  display:flex; align-items:center; justify-content:space-between;
-  padding:calc(env(safe-area-inset-top) + 16px) 18px 14px;
-  background:var(--bg); border-bottom:1px solid var(--border);
-  position:fixed; top:0; left:0; right:0; z-index:200;
-}
+header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top)+16px) 20px 16px; background:var(--bg); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:100; }
 .logo { display:flex; align-items:center; gap:9px; }
 .logo-dot { width:8px; height:8px; border-radius:50%; background:var(--accent2); box-shadow:0 0 8px var(--accent2); animation:blink 2s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
 .logo-title { font-size:17px; font-weight:700; letter-spacing:-.3px; }
 .hdr-right { display:flex; align-items:center; gap:8px; }
-.btn-hdr { display:flex; align-items:center; gap:6px; background:var(--card2); border:1px solid var(--border); border-radius:22px; padding:10px 18px; color:var(--text); font-size:13px; font-weight:600; cursor:pointer; touch-action:manipulation; -webkit-appearance:none; transition:background .15s,transform .1s; min-height:44px; }
+.btn-hdr { display:flex; align-items:center; gap:6px; background:var(--card2); border:1px solid var(--border); border-radius:20px; padding:8px 14px; color:var(--text); font-size:13px; font-weight:600; cursor:pointer; touch-action:manipulation; -webkit-appearance:none; transition:background .15s,transform .1s; }
 .btn-hdr:active { background:#222; transform:scale(0.96); }
 .btn-hdr.edit-active { color:var(--ok); border-color:var(--ok); }
 .alert-badge { background:var(--danger); color:#fff; font-size:11px; font-weight:700; padding:2px 7px; border-radius:20px; display:none; }
 
-main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 80px) 16px calc(env(safe-area-inset-bottom) + 60px); }
+main { max-width:680px; margin:0 auto; padding:20px 16px calc(env(safe-area-inset-bottom)+36px); }
 .banner { border-radius:12px; padding:11px 14px; margin-bottom:14px; font-size:13px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .banner-blue   { background:rgba(37,99,235,.12); border:1px solid rgba(37,99,235,.3); }
 .banner-yellow { background:rgba(245,158,11,.1);  border:1px solid rgba(245,158,11,.25); }
@@ -97,15 +92,15 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 .drag-handle:active { cursor:grabbing; }
 
 /* 편집 모드 */
-.drag-handle { display:flex; }
-.card { padding-left:48px; }
-
+body.edit-mode .drag-handle { display:flex; }
+body.edit-mode .card { padding-left:48px; }
+body.edit-mode .card { cursor:default; }
 
 .card-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
 .ticker { font-size:21px; font-weight:700; letter-spacing:.2px; }
 .cname  { font-size:11px; color:var(--text2); margin-top:3px; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .card-right { display:flex; align-items:center; gap:8px; }
-.badge { padding:5px 12px; border-radius:12px; font-size:16px; font-weight:800; }
+.badge { padding:3px 9px; border-radius:20px; font-size:10px; font-weight:700; text-transform:uppercase; }
 .b-alert{ background:rgba(239,68,68,.18); color:#ff6b6b; }
 .b-warn { background:rgba(245,158,11,.18); color:#fbbf24; }
 .b-ok   { background:rgba(34,197,94,.15);  color:#4ade80; }
@@ -133,13 +128,6 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 .btn-del:active { background:rgba(239,68,68,.25); }
 
 .c-white{color:#fff} .c-danger{color:var(--danger)} .c-warn{color:var(--warn)} .c-ok{color:var(--ok)} .c-purple{color:#a78bfa} .c-muted{color:var(--muted)}
-.div-badge {
-  display:inline-flex; align-items:center; gap:5px;
-  padding:5px 12px; border-radius:10px; font-size:12px; font-weight:700;
-  margin-top:8px; width:100%;
-}
-.div-bull { background:rgba(34,197,94,.15); color:#4ade80; border:1px solid rgba(34,197,94,.3); }
-.div-bear { background:rgba(239,68,68,.15);  color:#ff6b6b; border:1px solid rgba(239,68,68,.3); }
 .spin { display:inline-block; width:15px; height:15px; border:2px solid var(--border); border-top-color:var(--accent2); border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle; }
 @keyframes sp { to{transform:rotate(360deg)} }
 
@@ -158,7 +146,7 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 
 /* 편집모드 힌트 배너 */
 .edit-hint { background:rgba(37,99,235,.1); border:1px solid rgba(37,99,235,.25); border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:var(--accent2); display:none; }
-.edit-hint { display:block; }
+body.edit-mode .edit-hint { display:block; }
 </style>
 </head>
 <body>
@@ -166,11 +154,11 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 <header>
   <div class="logo">
     <div class="logo-dot"></div>
-    <div class="logo-title">용기주식비법</div>
+    <div class="logo-title">RSIngTime</div>
   </div>
   <div class="hdr-right">
     <span class="alert-badge" id="alert-badge">0</span>
-    
+    <button class="btn-hdr" id="btn-edit">편집</button>
     <button class="btn-hdr" id="btn-refresh">⟳ 새로고침</button>
   </div>
 </header>
@@ -189,6 +177,8 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
   <div class="stats">
     <div class="stat"><div class="stat-label">감시 종목</div><div class="stat-big c-white" id="s-total">0</div></div>
     <div class="stat"><div class="stat-label">RSI 경보</div><div class="stat-big c-danger" id="s-alert">0</div></div>
+    <div class="stat"><div class="stat-label">오늘 방문자</div><div class="stat-big" style="color:var(--accent2);font-size:22px" id="v-today">—</div></div>
+    <div class="stat"><div class="stat-label">누적 방문자</div><div class="stat-big" style="color:var(--accent2);font-size:22px" id="v-total">—</div></div>
     <div class="stat" style="grid-column:span 2"><div class="stat-label">마지막 업데이트</div><div class="stat-sm c-muted" id="s-lastup" style="padding-top:4px">—</div></div>
   </div>
 
@@ -196,7 +186,7 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
     <div class="row">
       <div class="field" style="flex:2">
         <div class="field-label">티커 심볼</div>
-        <input id="inp-ticker" type="text" placeholder="AAPL" maxlength="20"
+        <input id="inp-ticker" type="text" placeholder="AAPL" maxlength="10"
                autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
       </div>
       <div class="field" style="flex:1">
@@ -256,7 +246,7 @@ var threshold = parseInt(localStorage.getItem('rsi_thr') || '30');
 var prevAlert = new Set(JSON.parse(localStorage.getItem('rsi_prev') || '[]'));
 var autoTimer = null;
 var autoRem   = 0;
-var editMode  = true; // 항상 드래그 가능
+var editMode  = false;
 
 // ── 저장/로드 ──
 function save() {
@@ -330,108 +320,6 @@ function calcRSI(closes){
   if(al===0) return 100;
   return Math.round((100-100/(1+ag/al))*100)/100;
 }
-
-// ══════════════════════════════════════════
-// 다이버전스 감지 (참고용)
-// ══════════════════════════════════════════
-function calcRSISeries(closes) {
-  var arr = closes.filter(function(v){ return v!=null&&!isNaN(v); });
-  var p=14; if(arr.length<p+1) return [];
-  var g=0,l=0;
-  for(var i=1;i<=p;i++){var d=arr[i]-arr[i-1];if(d>0)g+=d;else l-=d;}
-  var ag=g/p,al=l/p,series=[];
-  for(var i=p+1;i<arr.length;i++){
-    var d=arr[i]-arr[i-1];
-    ag=(ag*(p-1)+(d>0?d:0))/p;
-    al=(al*(p-1)+(d<0?-d:0))/p;
-    series.push(al===0?100:Math.round((100-100/(1+ag/al))*100)/100);
-  }
-  return series;
-}
-function findPivots(arr,win,type){
-  var res=[];
-  for(var i=win;i<arr.length-win;i++){
-    var ok=true;
-    for(var j=i-win;j<=i+win;j++){
-      if(j===i) continue;
-      if(type==='low'  && arr[j]<=arr[i]){ok=false;break;}
-      if(type==='high' && arr[j]>=arr[i]){ok=false;break;}
-    }
-    if(ok) res.push({idx:i,val:arr[i]});
-  }
-  return res;
-}
-function detectDivergence(closes, timestamps){
-  var recent=closes.slice(-90);
-  var recentTs=timestamps?timestamps.slice(-90):null;
-  if(recent.length<30) return null;
-  var rsi=calcRSISeries(recent); if(rsi.length<20) return null;
-  var off=recent.length-rsi.length;
-  var price=recent.slice(off);
-  var priceTs=recentTs?recentTs.slice(off):null;
-  var win=3;
-
-  function idxToDate(idx){
-    if(!priceTs||!priceTs[idx]) return null;
-    var d=new Date(priceTs[idx]*1000);
-    return (d.getMonth()+1)+'/'+d.getDate();
-  }
-
-  // 상승 다이버전스
-  var pLows=findPivots(price,win,'low'), rLows=findPivots(rsi,win,'low');
-  if(pLows.length>=2&&rLows.length>=2){
-    var pl1=pLows[pLows.length-2],pl2=pLows[pLows.length-1];
-    if(pl2.val<pl1.val*0.998&&pl2.idx>=price.length-20){
-      var rl1=null,rl2=null;
-      for(var i=0;i<rLows.length;i++){if(Math.abs(rLows[i].idx-pl1.idx)<=win*2)rl1=rLows[i];}
-      for(var i=0;i<rLows.length;i++){if(Math.abs(rLows[i].idx-pl2.idx)<=win*2)rl2=rLows[i];}
-      if(rl1&&rl2&&rl2.val>rl1.val*1.002){
-        var d1=idxToDate(pl1.idx), d2=idxToDate(pl2.idx);
-        var dateStr=d1&&d2?d1+' → '+d2:'';
-        return {type:'bull',label:'📈 상승 다이버전스',
-          desc:'가격↓ RSI↑ — 반등 가능성',
-          date:dateStr,
-          rsi1:Math.round(rl1.val*10)/10, rsi2:Math.round(rl2.val*10)/10,
-          price1:Math.round(pl1.val*100)/100, price2:Math.round(pl2.val*100)/100};
-      }
-    }
-  }
-  // 하락 다이버전스
-  var pHighs=findPivots(price,win,'high'),rHighs=findPivots(rsi,win,'high');
-  if(pHighs.length>=2&&rHighs.length>=2){
-    var ph1=pHighs[pHighs.length-2],ph2=pHighs[pHighs.length-1];
-    if(ph2.val>ph1.val*1.002&&ph2.idx>=price.length-20){
-      var rh1=null,rh2=null;
-      for(var i=0;i<rHighs.length;i++){if(Math.abs(rHighs[i].idx-ph1.idx)<=win*2)rh1=rHighs[i];}
-      for(var i=0;i<rHighs.length;i++){if(Math.abs(rHighs[i].idx-ph2.idx)<=win*2)rh2=rHighs[i];}
-      if(rh1&&rh2&&rh2.val<rh1.val*0.998){
-        var d1=idxToDate(ph1.idx), d2=idxToDate(ph2.idx);
-        var dateStr=d1&&d2?d1+' → '+d2:'';
-        return {type:'bear',label:'📉 하락 다이버전스',
-          desc:'가격↑ RSI↓ — 하락 가능성',
-          date:dateStr,
-          rsi1:Math.round(rh1.val*10)/10, rsi2:Math.round(rh2.val*10)/10,
-          price1:Math.round(ph1.val*100)/100, price2:Math.round(ph2.val*100)/100};
-      }
-    }
-  }
-  return null;
-}
-function getDivHTML(s){
-  if(!s.chartData||s.chartData.length<30) return '';
-  var div=detectDivergence(s.chartData, s.timestamps); if(!div) return '';
-  var cls=div.type==='bull'?'div-bull':'div-bear';
-  var dateInfo=div.date?'<span style="opacity:.65;font-weight:400;font-size:11px;margin-left:4px">'+div.date+'</span>':'';
-  var rsiInfo='<div style="font-size:11px;opacity:.7;font-weight:400;margin-top:3px">'
-    +'RSI '+div.rsi1+' → '+div.rsi2
-    +(div.date?' &nbsp;|&nbsp; 가격 $'+div.price1+' → $'+div.price2:'')
-    +'</div>';
-  return '<div class="div-badge '+cls+'" style="flex-direction:column;align-items:flex-start">'
-    +'<div>'+div.label+dateInfo+'&nbsp;<span style="font-weight:400;font-size:11px;opacity:.8">'+div.desc+'</span></div>'
-    +rsiInfo
-    +'</div>';
-}
-
 function loadStock(s){
   s.loading=true; s.error=null; renderCard(s);
   return fetchYahoo(s.ticker,s.period)
@@ -443,9 +331,6 @@ function loadStock(s){
     s.price=valid[valid.length-1]; s.prevClose=valid[valid.length-2];
     s.name=(chart.meta&&(chart.meta.longName||chart.meta.shortName))||'';
     s.chartData=valid.slice(-180);
-    // 타임스탬프 저장 (다이버전스 날짜 표시용)
-    var ts=chart.timestamp||[];
-    s.timestamps=ts.slice(-180);
     s.loading=false; s.error=null; s.lastUp=new Date();
     renderLastUpdate(s.lastUp);
   })
@@ -473,10 +358,9 @@ function checkAlert(s){
       prevAlert.add(key);
       localStorage.setItem('rsi_prev',JSON.stringify(Array.from(prevAlert)));
       if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
-        var nm=s.rsi<20?'풀매수! 🚀':'강력매수! 🔥'; try{new Notification(nm+' '+s.ticker,{body:'RSI '+s.rsi,icon:'apple-touch-icon.png',tag:'rsi-'+s.ticker});}catch(e){}
+        try{new Notification('🚨 '+s.ticker+' RSI 경보',{body:'RSI '+s.rsi+' ← 임계값 '+threshold+' 이하!',icon:'apple-touch-icon.png',tag:'rsi-'+s.ticker});}catch(e){}
       }
-      var alertMsg = s.rsi<20 ? '풀매수! 🚀 RSI '+s.rsi : '강력매수! 🔥 RSI '+s.rsi;
-      toast('🚨',s.ticker+' RSI 알림', alertMsg,'alert',8000);
+      toast('🚨',s.ticker+' RSI 경보','RSI '+s.rsi+' — 임계값 '+threshold+' 이하 진입!','alert',8000);
     }
   } else {
     prevAlert.delete(key);
@@ -514,17 +398,17 @@ function makeMiniChart(data,color){
 }
 
 // ── 카드 렌더 ──
-function rsiColor(v){if(v==null)return 'c-muted';if(v<20)return 'c-danger';if(v<=30)return 'c-warn';if(v<=70)return 'c-ok';return 'c-purple';}
-function barColor(v){if(v==null)return '#242424';if(v<20)return '#ef4444';if(v<=30)return '#f59e0b';if(v<=70)return '#22c55e';return '#a78bfa';}
+function rsiColor(v){if(v==null)return 'c-muted';if(v<=threshold)return 'c-danger';if(v<=40)return 'c-warn';if(v<=60)return 'c-ok';return 'c-purple';}
+function barColor(v){if(v==null)return '#242424';if(v<=threshold)return '#ef4444';if(v<=40)return '#f59e0b';if(v<=60)return '#22c55e';return '#a78bfa';}
 function getBadge(v,err){
   if(err) return '<span class="badge b-err">오류</span>';
   if(v==null) return '<span class="badge b-load"><span class="spin"></span></span>';
-  if(v<20)  return '<span class="badge b-alert">풀매수! 🚀</span>';
-  if(v<=30) return '<span class="badge b-warn">강력매수! 🔥</span>';
-  if(v<=70) return '<span class="badge b-ok">절대참아! 🧐</span>';
-  return '<span class="badge b-high">분할매도! 🥸</span>';
+  if(v<=threshold) return '<span class="badge b-alert">🚨 경보</span>';
+  if(v<=40) return '<span class="badge b-warn">⚠ 주의</span>';
+  if(v<=60) return '<span class="badge b-ok">정상</span>';
+  return '<span class="badge b-high">과매수</span>';
 }
-function cardCls(v){if(v==null)return '';if(v<20)return 's-alert';if(v<=30)return 's-warn';return '';}
+function cardCls(v){if(v==null)return '';if(v<=threshold)return 's-alert';if(v<=40)return 's-warn';return '';}
 function pLabel(p){return p==='1d'?'일봉':p==='1wk'?'주봉':'월봉';}
 
 function renderCard(s){
@@ -544,26 +428,18 @@ function renderCard(s){
       +(s.chartData.length>=120?'<span><span class="legend-dash"></span>MA120</span>':'')+'</div>';
   }
   var chartHTML=s.chartData?(legendHTML+makeMiniChart(s.chartData,chartColor)):'';
-  var divHTML=getDivHTML(s);
 
   el.className='card '+cardCls(v);
   el.innerHTML=
     '<div class="drag-handle">⠿</div>'
     +'<div class="card-top">'
-    +'<div>'
-    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">'
-    +'<div class="ticker">'+s.ticker+'</div>'
-    +getBadge(v,s.error)
-    +'</div>'
-    +(s.name?'<div class="cname">'+s.name+'</div>':'')
-    +'</div>'
-    +'<div class="card-right">'
+    +'<div><div class="ticker">'+s.ticker+'</div>'+(s.name?'<div class="cname">'+s.name+'</div>':'')+'</div>'
+    +'<div class="card-right">'+getBadge(v,s.error)
     +'<button class="btn-del" data-ticker="'+s.ticker+'" data-period="'+s.period+'">✕</button>'
     +'</div></div>'
     +'<div class="card-body"><div>'+priceHTML+'</div>'
     +'<div><div class="rsi-label-sm">RSI(14) · '+pLabel(s.period)+'</div>'+rsiHTML+'</div></div>'
     +chartHTML
-    +divHTML
     +'<div class="bar-wrap"><div class="bar-fill" style="width:'+pct+'%;background:'+barColor(v)+'"></div>'
     +'<div class="bar-mark" style="left:'+threshold+'%"></div></div>'
     +'<div class="card-foot"><span>'+pLabel(s.period)+' · 최근 60일</span><span>'+footRight+'</span></div>';
@@ -704,7 +580,34 @@ document.addEventListener('mouseup',function(){
 });
 
 // ── 편집 모드 ──
-// toggleEdit 제거 - 항상 드래그 가능
+function toggleEdit(){
+  editMode=!editMode;
+  var btn=document.getElementById('btn-edit');
+  btn.textContent=editMode?'완료':'편집';
+  if(editMode) btn.classList.add('edit-active');
+  else btn.classList.remove('edit-active');
+  if(editMode) document.body.classList.add('edit-mode');
+  else document.body.classList.remove('edit-mode');
+}
+
+
+// ══════════════════════════════════════════
+// 방문자 카운터
+// ══════════════════════════════════════════
+(function initVisitors() {
+  var today = new Date().toISOString().slice(0,10);
+  var total = parseInt(localStorage.getItem('rst_total') || '0') + 1;
+  localStorage.setItem('rst_total', total);
+  var td = JSON.parse(localStorage.getItem('rst_today') || '{"date":"","count":0}');
+  if (td.date !== today) td = {date:today, count:0};
+  td.count++;
+  localStorage.setItem('rst_today', JSON.stringify(td));
+  function fmt(n){ return n>=10000?(n/10000).toFixed(1)+'만':n.toLocaleString(); }
+  var vt = document.getElementById('v-today');
+  var vl = document.getElementById('v-total');
+  if(vt) vt.textContent = fmt(td.count);
+  if(vl) vl.textContent = fmt(total);
+})();
 
 // ── 자동 새로고침 ──
 function setupAutoRefresh(){
@@ -751,7 +654,7 @@ function bindBtn(id,fn){
 }
 bindBtn('btn-add',addStock);
 bindBtn('btn-refresh',refreshAll);
-
+bindBtn('btn-edit',toggleEdit);
 bindBtn('btn-notif',requestNotif);
 bindBtn('btn-pwa-close',function(){document.getElementById('pwa-banner').classList.add('hidden');});
 document.getElementById('inp-ticker').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();addStock();}});
@@ -773,7 +676,6 @@ function checkBanners(){
   document.getElementById('thr-display').textContent=threshold;
   checkBanners();
   loadStocksFromStorage();
-  document.body.classList.add('edit-mode');
   renderAll(); updateStats(); renderLastUpdate(null);
   var i=0;
   function nextLoad(){if(i>=stocks.length)return;loadStock(stocks[i++]).then(function(){setTimeout(nextLoad,800);});}
