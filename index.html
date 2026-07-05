@@ -20,7 +20,7 @@
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
 body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif; min-height:100vh; overscroll-behavior:none; }
 
-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top)+16px) 20px 16px; background:var(--bg); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:100; }
+header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top)+14px) 18px 14px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; }
 .logo { display:flex; align-items:center; gap:9px; }
 .logo-dot { width:8px; height:8px; border-radius:50%; background:var(--accent2); box-shadow:0 0 8px var(--accent2); animation:blink 2s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
@@ -31,7 +31,7 @@ header { display:flex; align-items:center; justify-content:space-between; paddin
 .btn-hdr.edit-active { color:var(--ok); border-color:var(--ok); }
 .alert-badge { background:var(--danger); color:#fff; font-size:11px; font-weight:700; padding:2px 7px; border-radius:20px; display:none; }
 
-main { max-width:680px; margin:0 auto; padding:20px 16px calc(env(safe-area-inset-bottom)+36px); }
+main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top)+80px) 16px calc(env(safe-area-inset-bottom)+60px); }
 .banner { border-radius:12px; padding:11px 14px; margin-bottom:14px; font-size:13px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .banner-blue   { background:rgba(37,99,235,.12); border:1px solid rgba(37,99,235,.3); }
 .banner-yellow { background:rgba(245,158,11,.1);  border:1px solid rgba(245,158,11,.25); }
@@ -157,6 +157,14 @@ body.edit-mode .edit-hint { display:block; }
     <div class="logo-title">RSIngTime</div>
   </div>
   <div class="hdr-right">
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;margin-right:2px">
+      <span style="font-size:10px;color:var(--text2);font-family:monospace;line-height:1" id="v-today">—</span>
+      <span style="font-size:8px;color:var(--muted);letter-spacing:.3px;line-height:1">today</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;margin-right:4px">
+      <span style="font-size:10px;color:var(--text2);font-family:monospace;line-height:1" id="v-total">—</span>
+      <span style="font-size:8px;color:var(--muted);letter-spacing:.3px;line-height:1">total</span>
+    </div>
     <span class="alert-badge" id="alert-badge">0</span>
     <button class="btn-hdr" id="btn-edit">편집</button>
     <button class="btn-hdr" id="btn-refresh">⟳ 새로고침</button>
@@ -177,8 +185,6 @@ body.edit-mode .edit-hint { display:block; }
   <div class="stats">
     <div class="stat"><div class="stat-label">감시 종목</div><div class="stat-big c-white" id="s-total">0</div></div>
     <div class="stat"><div class="stat-label">RSI 경보</div><div class="stat-big c-danger" id="s-alert">0</div></div>
-    <div class="stat"><div class="stat-label">오늘 방문자</div><div class="stat-big" style="color:var(--accent2);font-size:22px" id="v-today">—</div></div>
-    <div class="stat"><div class="stat-label">누적 방문자</div><div class="stat-big" style="color:var(--accent2);font-size:22px" id="v-total">—</div></div>
     <div class="stat" style="grid-column:span 2"><div class="stat-label">마지막 업데이트</div><div class="stat-sm c-muted" id="s-lastup" style="padding-top:4px">—</div></div>
   </div>
 
