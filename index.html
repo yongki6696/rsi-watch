@@ -20,18 +20,25 @@
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
 body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif; min-height:100vh; overscroll-behavior:none; }
 
-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 12px) 18px 12px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; }
+header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 16px) 16px 14px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; }
 .logo { display:flex; align-items:center; gap:9px; }
 .logo-dot { width:8px; height:8px; border-radius:50%; background:var(--accent2); box-shadow:0 0 8px var(--accent2); animation:blink 2s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
 .logo-title { font-size:17px; font-weight:700; letter-spacing:-.3px; }
-.hdr-right { display:flex; align-items:center; gap:6px; }
-.btn-hdr { display:flex; align-items:center; justify-content:center; gap:5px; background:var(--card2); border:1px solid var(--border); border-radius:18px; padding:8px 13px; color:var(--text); font-size:13px; font-weight:600; cursor:pointer; touch-action:manipulation; -webkit-appearance:none; transition:background .15s,transform .1s; min-height:36px; white-space:nowrap; }
+.hdr-right { display:flex; align-items:center; gap:8px; }
+
+.visitor-mini {
+  display:flex; flex-direction:column; gap:1px;
+  font-size:9px; color:var(--muted); line-height:1.4;
+  margin-right:2px;
+}
+.visitor-mini b { color:var(--text2); font-weight:600; }
+.btn-hdr { display:flex; align-items:center; gap:5px; background:rgba(255,255,255,.07); border:1px solid var(--border); border-radius:18px; padding:8px 14px; color:var(--text); font-size:13px; font-weight:600; cursor:pointer; touch-action:manipulation; -webkit-appearance:none; transition:background .15s,transform .1s; white-space:nowrap; }
 .btn-hdr:active { background:#222; transform:scale(0.96); }
 .btn-hdr.edit-active { color:var(--ok); border-color:var(--ok); }
 .alert-badge { background:var(--danger); color:#fff; font-size:11px; font-weight:700; padding:2px 7px; border-radius:20px; display:none; }
 
-main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 70px) 16px calc(env(safe-area-inset-bottom) + 60px); }
+main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 76px) 16px calc(env(safe-area-inset-bottom) + 60px); }
 .banner { border-radius:12px; padding:11px 14px; margin-bottom:14px; font-size:13px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .banner-blue   { background:rgba(37,99,235,.12); border:1px solid rgba(37,99,235,.3); }
 .banner-yellow { background:rgba(245,158,11,.1);  border:1px solid rgba(245,158,11,.25); }
@@ -59,7 +66,7 @@ main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 7
 .thr-val { font-size:24px; font-weight:700; color:var(--danger); }
 input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 
-.sec-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 12px) 18px 12px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; }
+.sec-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 2px; }
 .sec-title { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.9px; }
 .sec-sub   { font-size:10px; color:var(--muted); }
 
@@ -84,18 +91,16 @@ input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 
 /* 드래그 핸들 (편집모드에서만 보임) */
 .drag-handle {
-  position:absolute; left:0; top:50%; transform:translateY(-50%);
-  width:32px; height:44px;
-  display:flex; align-items:center; justify-content:center;
-  color:var(--muted); font-size:16px;
-  cursor:grab; touch-action:none; opacity:.5;
+  position:absolute; left:0; top:0; bottom:0; width:40px;
+  display:none; align-items:center; justify-content:center;
+  color:var(--muted); font-size:18px; border-radius:16px 0 0 16px;
+  cursor:grab; touch-action:none;
 }
-.drag-handle:active { cursor:grabbing; opacity:1; }
+.drag-handle:active { cursor:grabbing; }
 
 /* 편집 모드 */
 body.edit-mode .drag-handle { display:flex; }
-.card { padding-left:40px; }
-body.edit-mode .card { padding-left:40px; }
+body.edit-mode .card { padding-left:48px; }
 body.edit-mode .card { cursor:default; }
 
 .card-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
@@ -109,8 +114,8 @@ body.edit-mode .card { cursor:default; }
 .b-high { background:rgba(139,92,246,.15); color:#a78bfa; }
 .b-load { background:rgba(80,80,80,.2);    color:var(--muted); }
 .b-err  { background:rgba(239,68,68,.1);   color:var(--danger); }
-.card-body { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:14px; }
-.price-main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 70px) 16px calc(env(safe-area-inset-bottom) + 60px); }
+.card-body { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; min-height:0; }
+.price-main { font-size:24px; font-weight:700; letter-spacing:-.3px; }
 .price-chg  { font-size:12px; margin-top:3px; }
 .rsi-label-sm { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px; text-align:right; }
 .rsi-big { font-size:36px; font-weight:700; line-height:1; text-align:right; }
@@ -130,28 +135,7 @@ body.edit-mode .card { cursor:default; }
 .btn-del:active { background:rgba(239,68,68,.25); }
 
 .c-white{color:#fff} .c-danger{color:var(--danger)} .c-warn{color:var(--warn)} .c-ok{color:var(--ok)} .c-purple{color:#a78bfa} .c-muted{color:var(--muted)}
-.div-badge {
-  display:inline-flex; flex-direction:column; align-items:flex-start;
-  padding:7px 12px; border-radius:10px; font-size:12px; font-weight:700;
-  margin-top:8px; width:100%; gap:3px;
-}
-.div-bull { background:rgba(34,197,94,.15); color:#4ade80; border:1px solid rgba(34,197,94,.3); }
-.div-bear { background:rgba(239,68,68,.15);  color:#ff6b6b; border:1px solid rgba(239,68,68,.3); }
-
-/* ── 면책 문구 ── */
-.disclaimer {
-  margin-top: 32px;
-  padding: 16px;
-  background: rgba(255,255,255,.03);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.7;
-}
-.disclaimer p { margin-bottom: 6px; }
-.disclaimer p:last-child { margin-bottom: 0; }
-.spin { display:inline-block; width:15px; height:15px; flex-shrink:0; border:2px solid var(--border); border-top-color:var(--accent2); border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle; }
+.spin { display:inline-block; width:15px; height:15px; border:2px solid var(--border); border-top-color:var(--accent2); border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle; }
 @keyframes sp { to{transform:rotate(360deg)} }
 
 #toasts { position:fixed; top:calc(env(safe-area-inset-top)+76px); right:16px; left:16px; z-index:999; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
@@ -171,14 +155,20 @@ body.edit-mode .card { cursor:default; }
 .edit-hint { background:rgba(37,99,235,.1); border:1px solid rgba(37,99,235,.25); border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:var(--accent2); display:none; }
 body.edit-mode .edit-hint { display:block; }
 
-/* ── 면책 문구 ── */
+.div-badge {
+  display:flex; flex-direction:column; gap:2px;
+  padding:7px 12px; border-radius:10px; font-size:12px; font-weight:700;
+  margin-top:8px; width:100%;
+}
+.div-bull { background:rgba(34,197,94,.15); color:#4ade80; border:1px solid rgba(34,197,94,.3); }
+.div-bear { background:rgba(239,68,68,.15); color:#ff6b6b; border:1px solid rgba(239,68,68,.3); }
+
 .disclaimer {
   margin-top:28px; padding:14px 16px;
   background:rgba(255,255,255,.03); border:1px solid var(--border);
-  border-radius:12px; font-size:11px; color:var(--muted); line-height:1.7;
+  border-radius:12px; font-size:11px; color:var(--muted); line-height:1.8;
 }
-.disclaimer p { margin-bottom:6px; }
-.disclaimer p:last-child { margin-bottom:0; }
+.disclaimer p+p { margin-top:6px; }
 </style>
 </head>
 <body>
@@ -189,9 +179,9 @@ body.edit-mode .edit-hint { display:block; }
     <div class="logo-title">RSIngTime</div>
   </div>
   <div class="hdr-right">
-    <div style="display:flex;flex-direction:column;align-items:center;gap:0px;line-height:1.2">
-      <span style="font-size:9px;color:var(--muted)">오늘 <span id="v-today" style="color:var(--text2)">—</span></span>
-      <span style="font-size:9px;color:var(--muted)">누적 <span id="v-total" style="color:var(--text2)">—</span></span>
+    <div class="visitor-mini">
+      <span>오늘 <b id="v-today">—</b></span>
+      <span>누적 <b id="v-total">—</b></span>
     </div>
     <span class="alert-badge" id="alert-badge">0</span>
     <button class="btn-hdr" id="btn-edit">편집</button>
@@ -270,7 +260,6 @@ body.edit-mode .edit-hint { display:block; }
     </div>
   </div>
 
-  <!-- 면책 문구 -->
   <div class="disclaimer">
     <p>⚠️ 투자 판단에 대한 책임은 본인에게 있으며, 본 서비스는 기술적 지표 분석 결과만을 제공할 뿐 투자를 권유하지 않습니다.</p>
     <p>📊 본 서비스에서 제공하는 RSI 신호 및 다이버전스 정보는 단순 기술적 지표 분석 결과이며, 투자 권유나 추천이 아닙니다. 모든 투자의 책임은 투자자 본인에게 있습니다.</p>
@@ -361,11 +350,11 @@ function calcRSI(closes){
   return Math.round((100-100/(1+ag/al))*100)/100;
 }
 
-// ══════════════════════════════════════════
-// 다이버전스 감지 (참고용)
-// ══════════════════════════════════════════
-function calcRSISeries(closes) {
-  var arr = closes.filter(function(v){ return v!=null&&!isNaN(v); });
+// ══════════════════════════════════════
+// 다이버전스 감지
+// ══════════════════════════════════════
+function calcRSISeries(closes){
+  var arr=closes.filter(function(v){return v!=null&&!isNaN(v);});
   var p=14; if(arr.length<p+1) return [];
   var g=0,l=0;
   for(var i=1;i<=p;i++){var d=arr[i]-arr[i-1];if(d>0)g+=d;else l-=d;}
@@ -383,61 +372,55 @@ function findPivots(arr,win,type){
   for(var i=win;i<arr.length-win;i++){
     var ok=true;
     for(var j=i-win;j<=i+win;j++){
-      if(j===i) continue;
-      if(type==='low'  && arr[j]<=arr[i]){ok=false;break;}
-      if(type==='high' && arr[j]>=arr[i]){ok=false;break;}
+      if(j===i)continue;
+      if(type==='low'&&arr[j]<=arr[i]){ok=false;break;}
+      if(type==='high'&&arr[j]>=arr[i]){ok=false;break;}
     }
     if(ok) res.push({idx:i,val:arr[i]});
   }
   return res;
 }
-function detectDivergence(closes, timestamps){
+function detectDivergence(closes,timestamps){
   var recent=closes.slice(-90);
-  var recentTs=timestamps?timestamps.slice(-90):null;
+  var rts=timestamps?timestamps.slice(-90):null;
   if(recent.length<30) return null;
   var rsi=calcRSISeries(recent); if(rsi.length<20) return null;
   var off=recent.length-rsi.length;
   var price=recent.slice(off);
-  var priceTs=recentTs?recentTs.slice(off):null;
+  var pts=rts?rts.slice(off):null;
   var win=3;
-  function idxToDate(idx){
-    if(!priceTs||!priceTs[idx]) return null;
-    var d=new Date(priceTs[idx]*1000);
+  function toDate(idx){
+    if(!pts||!pts[idx]) return null;
+    var d=new Date(pts[idx]*1000);
     return (d.getMonth()+1)+'/'+d.getDate();
   }
-  // 상승 다이버전스
-  var pLows=findPivots(price,win,'low'), rLows=findPivots(rsi,win,'low');
-  if(pLows.length>=2&&rLows.length>=2){
-    var pl1=pLows[pLows.length-2],pl2=pLows[pLows.length-1];
+  var pL=findPivots(price,win,'low'),rL=findPivots(rsi,win,'low');
+  if(pL.length>=2&&rL.length>=2){
+    var pl1=pL[pL.length-2],pl2=pL[pL.length-1];
     if(pl2.val<pl1.val*0.998&&pl2.idx>=price.length-20){
       var rl1=null,rl2=null;
-      for(var i=0;i<rLows.length;i++){if(Math.abs(rLows[i].idx-pl1.idx)<=win*2)rl1=rLows[i];}
-      for(var i=0;i<rLows.length;i++){if(Math.abs(rLows[i].idx-pl2.idx)<=win*2)rl2=rLows[i];}
+      for(var i=0;i<rL.length;i++){if(Math.abs(rL[i].idx-pl1.idx)<=win*2)rl1=rL[i];}
+      for(var i=0;i<rL.length;i++){if(Math.abs(rL[i].idx-pl2.idx)<=win*2)rl2=rL[i];}
       if(rl1&&rl2&&rl2.val>rl1.val*1.002){
-        var d1=idxToDate(pl1.idx), d2=idxToDate(pl2.idx);
-        return {type:'bull', label:'📈 상승 다이버전스',
-          desc:'가격↓ RSI↑ — 반등 가능성',
-          date: d1&&d2 ? d1+' → '+d2 : '',
-          rsi1:Math.round(rl1.val*10)/10, rsi2:Math.round(rl2.val*10)/10,
-          price1:Math.round(pl1.val*100)/100, price2:Math.round(pl2.val*100)/100};
+        var d1=toDate(pl1.idx),d2=toDate(pl2.idx);
+        return {type:'bull',label:'📈 상승 다이버전스',desc:'가격↓ RSI↑ — 반등 가능성',
+          date:d1&&d2?d1+' → '+d2:'',
+          rsi1:Math.round(rl1.val*10)/10,rsi2:Math.round(rl2.val*10)/10};
       }
     }
   }
-  // 하락 다이버전스
-  var pHighs=findPivots(price,win,'high'), rHighs=findPivots(rsi,win,'high');
-  if(pHighs.length>=2&&rHighs.length>=2){
-    var ph1=pHighs[pHighs.length-2],ph2=pHighs[pHighs.length-1];
+  var pH=findPivots(price,win,'high'),rH=findPivots(rsi,win,'high');
+  if(pH.length>=2&&rH.length>=2){
+    var ph1=pH[pH.length-2],ph2=pH[pH.length-1];
     if(ph2.val>ph1.val*1.002&&ph2.idx>=price.length-20){
       var rh1=null,rh2=null;
-      for(var i=0;i<rHighs.length;i++){if(Math.abs(rHighs[i].idx-ph1.idx)<=win*2)rh1=rHighs[i];}
-      for(var i=0;i<rHighs.length;i++){if(Math.abs(rHighs[i].idx-ph2.idx)<=win*2)rh2=rHighs[i];}
+      for(var i=0;i<rH.length;i++){if(Math.abs(rH[i].idx-ph1.idx)<=win*2)rh1=rH[i];}
+      for(var i=0;i<rH.length;i++){if(Math.abs(rH[i].idx-ph2.idx)<=win*2)rh2=rH[i];}
       if(rh1&&rh2&&rh2.val<rh1.val*0.998){
-        var d1=idxToDate(ph1.idx), d2=idxToDate(ph2.idx);
-        return {type:'bear', label:'📉 하락 다이버전스',
-          desc:'가격↑ RSI↓ — 하락 가능성',
-          date: d1&&d2 ? d1+' → '+d2 : '',
-          rsi1:Math.round(rh1.val*10)/10, rsi2:Math.round(rh2.val*10)/10,
-          price1:Math.round(ph1.val*100)/100, price2:Math.round(ph2.val*100)/100};
+        var d1=toDate(ph1.idx),d2=toDate(ph2.idx);
+        return {type:'bear',label:'📉 하락 다이버전스',desc:'가격↑ RSI↓ — 하락 가능성',
+          date:d1&&d2?d1+' → '+d2:'',
+          rsi1:Math.round(rh1.val*10)/10,rsi2:Math.round(rh2.val*10)/10};
       }
     }
   }
@@ -445,13 +428,13 @@ function detectDivergence(closes, timestamps){
 }
 function getDivHTML(s){
   if(!s.chartData||s.chartData.length<30) return '';
-  var div=detectDivergence(s.chartData, s.timestamps); if(!div) return '';
+  var div=detectDivergence(s.chartData,s.timestamps); if(!div) return '';
   var cls=div.type==='bull'?'div-bull':'div-bear';
-  var dateInfo=div.date?'<span style="font-size:10px;opacity:.7;font-weight:400;margin-left:6px">'+div.date+'</span>':'';
-  var detail='RSI '+div.rsi1+' → '+div.rsi2+(div.price1?' &nbsp;|&nbsp; $'+div.price1+' → $'+div.price2:'');
+  var dateStr=div.date?'<span style="font-size:10px;opacity:.7;font-weight:400;margin-left:6px">'+div.date+'</span>':'';
+  var detail='RSI '+div.rsi1+' → '+div.rsi2;
   return '<div class="div-badge '+cls+'">'
-    +'<div>'+div.label+dateInfo+'&nbsp;<span style="font-weight:400;font-size:11px;opacity:.8">'+div.desc+'</span></div>'
-    +'<div style="font-size:11px;opacity:.7;font-weight:400">'+detail+'</div>'
+    +'<div>'+div.label+dateStr+' <span style="font-weight:400;font-size:11px;opacity:.8">'+div.desc+'</span></div>'
+    +'<div style="font-size:11px;font-weight:400;opacity:.7">'+detail+'</div>'
     +'</div>';
 }
 
@@ -466,7 +449,6 @@ function loadStock(s){
     s.price=valid[valid.length-1]; s.prevClose=valid[valid.length-2];
     s.name=(chart.meta&&(chart.meta.longName||chart.meta.shortName))||'';
     s.chartData=valid.slice(-180);
-    s.timestamps=(chart.timestamp||[]).slice(-180);
     s.loading=false; s.error=null; s.lastUp=new Date();
     renderLastUpdate(s.lastUp);
   })
@@ -728,37 +710,33 @@ function toggleEdit(){
   else document.body.classList.remove('edit-mode');
 }
 
+// ── 자동 새로고침 ──
 
-// ══════════════════════════════════════════
-// 방문자 카운터
-// ══════════════════════════════════════════
-(function initVisitors() {
+// ══════════════════════════════════════
+// 방문자 카운터 (이중 백업 — 절대 초기화 안됨)
+// ══════════════════════════════════════
+(function initVisitors(){
   var today = new Date().toISOString().slice(0,10);
-
-  // ── 누적 방문자: 절대 초기화 안 됨 ──
-  // 두 곳에 백업 저장 (하나가 지워져도 복구)
-  var k1 = 'rst_total', k2 = 'rst_total_bak';
-  var v1 = parseInt(localStorage.getItem(k1) || '0');
-  var v2 = parseInt(localStorage.getItem(k2) || '0');
-  var total = Math.max(v1, v2) + 1; // 더 큰 값 기준
-  localStorage.setItem(k1, total);
-  localStorage.setItem(k2, total);
-
-  // ── 오늘 방문자 ──
-  var td = null;
-  try { td = JSON.parse(localStorage.getItem('rst_today') || 'null'); } catch(e){}
-  if (!td || td.date !== today) td = {date:today, count:0};
+  // 누적: 두 키에 백업해서 더 큰 값 사용
+  var k1='rst_total', k2='rst_total_bak';
+  var v1=parseInt(localStorage.getItem(k1)||'0');
+  var v2=parseInt(localStorage.getItem(k2)||'0');
+  var total=Math.max(v1,v2)+1;
+  localStorage.setItem(k1,total);
+  localStorage.setItem(k2,total);
+  // 오늘 방문자
+  var td=null;
+  try{td=JSON.parse(localStorage.getItem('rst_today')||'null');}catch(e){}
+  if(!td||td.date!==today) td={date:today,count:0};
   td.count++;
-  localStorage.setItem('rst_today', JSON.stringify(td));
-
-  function fmt(n){ return n>=10000?(n/10000).toFixed(1)+'만':n.toLocaleString(); }
-  var vt = document.getElementById('v-today');
-  var vl = document.getElementById('v-total');
-  if(vt) vt.textContent = fmt(td.count);
-  if(vl) vl.textContent = fmt(total);
+  localStorage.setItem('rst_today',JSON.stringify(td));
+  function fmt(n){return n>=10000?(n/10000).toFixed(1)+'만':n.toLocaleString();}
+  var et=document.getElementById('v-today');
+  var el=document.getElementById('v-total');
+  if(et) et.textContent=fmt(td.count);
+  if(el) el.textContent=fmt(total);
 })();
 
-// ── 자동 새로고침 ──
 function setupAutoRefresh(){
   if(autoTimer) clearInterval(autoTimer);
   var sec=parseInt(document.getElementById('inp-interval').value);
