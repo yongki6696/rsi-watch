@@ -591,28 +591,40 @@ footer { padding:48px 40px; border-top:1px solid var(--border); display:flex; ju
 // 방문자 카운터 (localStorage 기반 — 간단 버전)
 // 실제 서비스에는 서버 또는 외부 카운터 서비스 사용 권장
 // ══════════════════════════════════════════
-(function() {
-  var today = new Date().toISOString().slice(0,10);
+(function initVisitors(){
+  // index.html과 완전히 동일한 키/로직 사용 → 숫자 항상 일치
+  var now = new Date();
+  var kst = new Date(now.getTime() + 9*60*60*1000);
+  var today = kst.toISOString().slice(0,10);
 
-  // 누적 방문자
-  // index.html과 같은 키 사용해서 방문자 수 공유
-  var total = parseInt(localStorage.getItem('rst_total') || '0') + 1;
-  localStorage.setItem('rst_total', total);
+  // ── 누적: 이중 백업, 절대 초기화 안됨 ──
+  var k1='rst_total', k2='rst_total_bak';
+  var v1=parseInt(localStorage.getItem(k1)||'0');
+  var v2=parseInt(localStorage.getItem(k2)||'0');
+  var total=Math.max(v1,v2)+1;
+  localStorage.setItem(k1,String(total));
+  localStorage.setItem(k2,String(total));
 
-  var todayData = JSON.parse(localStorage.getItem('rst_today') || '{"date":"","count":0}');
-  if (todayData.date !== today) todayData = {date:today, count:0};
-  todayData.count++;
-  localStorage.setItem('rst_today', JSON.stringify(todayData));
+  // ── 오늘: KST 자정 기준 초기화 ──
+  var td=null;
+  try{td=JSON.parse(localStorage.getItem('rst_today')||'null');}catch(e){}
+  if(!td||td.date!==today) td={date:today,count:0};
+  td.count++;
+  localStorage.setItem('rst_today',JSON.stringify(td));
 
-  function fmt(n) {
-    if (n >= 10000) return (n/10000).toFixed(1) + '만';
-    return n.toLocaleString();
-  }
+  function fmt(n){return n>=10000?(n/10000).toFixed(1)+'만':n.toLocaleString();}
 
-  document.getElementById('today-visitors').textContent = fmt(todayData.count);
-  document.getElementById('total-visitors').textContent = fmt(total);
-  document.getElementById('ad-today').textContent = fmt(todayData.count);
-  document.getElementById('ad-total').textContent = fmt(total);
+  // 히어로 섹션 방문자
+  var et=document.getElementById('today-visitors');
+  var el=document.getElementById('total-visitors');
+  if(et) et.textContent=fmt(td.count);
+  if(el) el.textContent=fmt(total);
+
+  // 광고 섹션 방문자
+  var at=document.getElementById('ad-today');
+  var al=document.getElementById('ad-total');
+  if(at) at.textContent=fmt(td.count);
+  if(al) al.textContent=fmt(total);
 })();
 
 // ══════════════════════════════════════════
