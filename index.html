@@ -177,6 +177,29 @@ body.edit-mode .edit-hint { display:block; }
   border-radius:12px; font-size:11px; color:var(--muted); line-height:1.8;
 }
 .disclaimer p+p { margin-top:6px; }
+
+/* ── 한국어 종목 검색 드롭다운 ── */
+.ticker-wrap { position:relative; }
+.search-dropdown {
+  position:absolute; top:calc(100% + 4px); left:0; right:0;
+  background:#1a1a1a; border:1px solid var(--border);
+  border-radius:10px; z-index:300; overflow:hidden;
+  box-shadow:0 8px 24px rgba(0,0,0,.6);
+  display:none;
+}
+.search-dropdown.show { display:block; }
+.search-item {
+  padding:11px 14px; cursor:pointer;
+  display:flex; justify-content:space-between; align-items:center;
+  border-bottom:1px solid var(--border); font-size:14px;
+  touch-action:manipulation;
+}
+.search-item:last-child { border-bottom:none; }
+.search-item:active, .search-item:hover { background:#242424; }
+.search-item-name { font-weight:600; color:var(--text); }
+.search-item-ticker { font-size:11px; color:var(--muted); font-family:monospace; }
+.search-item-exchange { font-size:10px; color:var(--accent2); margin-left:6px; }
+.search-loading { padding:12px 14px; color:var(--muted); font-size:13px; text-align:center; }
 </style>
 </head>
 <body>
@@ -218,8 +241,11 @@ body.edit-mode .edit-hint { display:block; }
     <div class="row">
       <div class="field" style="flex:2">
         <div class="field-label">티커 심볼</div>
-        <input id="inp-ticker" type="text" placeholder="AAPL" maxlength="20"
-               autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+        <div class="ticker-wrap">
+          <input id="inp-ticker" type="text" placeholder="AAPL 또는 삼성전자" maxlength="20"
+                 autocomplete="off" autocorrect="off" spellcheck="false">
+          <div class="search-dropdown" id="search-dropdown"></div>
+        </div>
       </div>
       <div class="field" style="flex:1">
         <div class="field-label">기간</div>
@@ -723,6 +749,143 @@ function toggleEdit(){
   if(editMode) document.body.classList.add('edit-mode');
   else document.body.classList.remove('edit-mode');
 }
+
+
+// ══════════════════════════════════════════
+// 한국어 종목 검색
+// ══════════════════════════════════════════
+var searchTimer = null;
+var searchActive = false;
+
+function isKorean(str) {
+  return /[가-힣]/.test(str);
+}
+
+function searchTicker(query) {
+  var dd = document.getElementById('search-dropdown');
+  if (!dd) return;
+  dd.innerHTML = '<div class="search-loading">검색 중...</div>';
+  dd.classList.add('show');
+
+  // Yahoo Finance 검색 API (프록시 경유)
+  var url = 'https://query1.finance.yahoo.com/v1/finance/search?q='
+    + encodeURIComponent(query)
+    + '&lang=ko-KR&region=KR&quotesCount=6&newsCount=0&enableFuzzyQuery=true&quotesQueryId=tss_match_phrase_query';
+
+  var proxies = [
+    'https://corsproxy.io/?url=' + encodeURIComponent(url),
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+    'https://api.allorigins.win/get?url=' + encodeURIComponent(url),
+  ];
+
+  function tryProxy(idx) {
+    if (idx >= proxies.length) {
+      dd.innerHTML = '<div class="search-loading">검색 실패 — 직접 티커 입력해주세요</div>';
+      return;
+    }
+    fetch(proxies[idx], {signal: AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined})
+    .then(function(r){ return r.text(); })
+    .then(function(txt){
+      var obj;
+      try { obj = JSON.parse(txt); } catch(e) { throw new Error('parse'); }
+      if (obj && obj.contents) try { obj = JSON.parse(obj.contents); } catch(e){}
+      if (!obj || !obj.quotes) throw new Error('no data');
+      renderSearchResults(obj.quotes);
+    })
+    .catch(function(){ tryProxy(idx+1); });
+  }
+  tryProxy(0);
+}
+
+function renderSearchResults(quotes) {
+  var dd = document.getElementById('search-dropdown');
+  if (!dd) return;
+
+  // 주식만 필터 (EQUITY, ETF)
+  var filtered = quotes.filter(function(q){
+    return q.quoteType === 'EQUITY' || q.quoteType === 'ETF' || q.quoteType === 'MUTUALFUND';
+  });
+
+  if (!filtered.length) {
+    dd.innerHTML = '<div class="search-loading">검색 결과 없음</div>';
+    return;
+  }
+
+  var html = filtered.slice(0,6).map(function(q){
+    var name = q.longname || q.shortname || q.symbol;
+    var ticker = q.symbol;
+    var exch = q.exchDisp || q.exchange || '';
+    // 한국 거래소 표시
+    if (ticker.endsWith('.KS')) exch = '코스피';
+    else if (ticker.endsWith('.KQ')) exch = '코스닥';
+    else if (exch === 'NMS' || exch === 'NGM') exch = '나스닥';
+    else if (exch === 'NYQ') exch = 'NYSE';
+
+    return '<div class="search-item" data-ticker="'+ticker+'">'
+      + '<span class="search-item-name">'+name+'</span>'
+      + '<span>'
+      + '<span class="search-item-ticker">'+ticker+'</span>'
+      + '<span class="search-item-exchange">'+exch+'</span>'
+      + '</span>'
+      + '</div>';
+  }).join('');
+
+  dd.innerHTML = html;
+
+  // 항목 클릭
+  dd.querySelectorAll('.search-item').forEach(function(item){
+    function pick(e) {
+      e.preventDefault();
+      var ticker = item.dataset.ticker;
+      var inp = document.getElementById('inp-ticker');
+      inp.value = ticker;
+      searchActive = false;
+      dd.classList.remove('show');
+      dd.innerHTML = '';
+    }
+    item.addEventListener('touchend', pick, {passive:false});
+    item.addEventListener('mousedown', pick);
+  });
+}
+
+function closeSearch() {
+  var dd = document.getElementById('search-dropdown');
+  if (dd) { dd.classList.remove('show'); dd.innerHTML = ''; }
+  searchActive = false;
+}
+
+// 입력 이벤트
+document.addEventListener('DOMContentLoaded', function(){
+  var inp = document.getElementById('inp-ticker');
+  if (!inp) return;
+
+  inp.addEventListener('input', function(){
+    var val = this.value.trim();
+    if (searchTimer) clearTimeout(searchTimer);
+
+    if (!val || val.length < 1) { closeSearch(); return; }
+
+    // 한글이면 자동으로 소문자 변환 막기
+    if (!isKorean(val)) {
+      this.value = val.toUpperCase();
+    }
+
+    if (isKorean(val) && val.length >= 1) {
+      searchActive = true;
+      searchTimer = setTimeout(function(){ searchTicker(val); }, 400);
+    } else if (!isKorean(val)) {
+      closeSearch();
+    }
+  });
+
+  // 외부 클릭시 닫기
+  document.addEventListener('click', function(e){
+    if (!e.target.closest('.ticker-wrap')) closeSearch();
+  });
+  document.addEventListener('touchstart', function(e){
+    if (!e.target.closest('.ticker-wrap')) closeSearch();
+  }, {passive:true});
+});
 
 // ── 자동 새로고침 ──
 
