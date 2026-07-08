@@ -630,9 +630,17 @@ function updateStats(){
 
 // ── 추가/삭제 ──
 function addStock(){
-  var raw=document.getElementById('inp-ticker').value.trim().toUpperCase().replace(/[^A-Z0-9.\-\^]/g,'');
+  var inp = document.getElementById('inp-ticker');
+  var val = inp.value.trim();
+  // 한글이 남아있으면 드롭다운에서 선택 안 한 것
+  if(/[가-힣]/.test(val)){
+    toast('⚠️','종목 선택 필요','검색 결과에서 종목을 탭해서 선택해주세요 👆','info');
+    return;
+  }
+  var raw = val.toUpperCase().replace(/[^A-Z0-9.\-\^]/g,'');
   var period=document.getElementById('inp-period').value;
-  if(!raw){toast('⚠️','티커 없음','예: AAPL TSLA QLD NVDL','info');return;}
+  if(!raw){toast('⚠️','티커 없음','예: AAPL TSLA QLD NVDL
+한국주식: 삼성전자 검색 후 선택','info');return;}
   if(stocks.find(function(s){return s.ticker===raw&&s.period===period;})){
     toast('ℹ️','이미 있음',raw+' ('+pLabel(period)+') 은 이미 있어요','info');return;
   }
@@ -751,95 +759,105 @@ function toggleEdit(){
 }
 
 
+
 // ══════════════════════════════════════════
-// 한국어 종목 검색
+// 한국어 종목 검색 (로컬 DB 기반)
 // ══════════════════════════════════════════
-var searchTimer = null;
-var searchActive = false;
+
+// 주요 한국 종목 DB (코스피/코스닥)
+var KR_STOCKS = [
+  // 코스피 대형주
+  {n:'삼성전자',     t:'005930.KS'}, {n:'SK하이닉스',   t:'000660.KS'},
+  {n:'LG에너지솔루션',t:'373220.KS'}, {n:'삼성바이오로직스',t:'207940.KS'},
+  {n:'현대차',       t:'005380.KS'}, {n:'기아',         t:'000270.KS'},
+  {n:'셀트리온',     t:'068270.KS'}, {n:'POSCO홀딩스',  t:'005490.KS'},
+  {n:'KB금융',       t:'105560.KS'}, {n:'신한지주',     t:'055550.KS'},
+  {n:'하나금융지주', t:'086790.KS'}, {n:'우리금융지주', t:'316140.KS'},
+  {n:'LG화학',       t:'051910.KS'}, {n:'삼성SDI',      t:'006400.KS'},
+  {n:'현대모비스',   t:'012330.KS'}, {n:'LG전자',       t:'066570.KS'},
+  {n:'삼성물산',     t:'028260.KS'}, {n:'SK이노베이션', t:'096770.KS'},
+  {n:'SK텔레콤',     t:'017670.KS'}, {n:'KT',           t:'030200.KS'},
+  {n:'LG',           t:'003550.KS'}, {n:'롯데케미칼',   t:'011170.KS'},
+  {n:'한국전력',     t:'015760.KS'}, {n:'삼성생명',     t:'032830.KS'},
+  {n:'삼성화재',     t:'000810.KS'}, {n:'SK',           t:'034730.KS'},
+  {n:'아모레퍼시픽', t:'090430.KS'}, {n:'LG생활건강',   t:'051900.KS'},
+  {n:'고려아연',     t:'010130.KS'}, {n:'두산에너빌리티',t:'034020.KS'},
+  {n:'한화에어로스페이스',t:'012450.KS'},{n:'현대건설',  t:'000720.KS'},
+  {n:'HMM',          t:'011200.KS'}, {n:'카카오뱅크',   t:'323410.KS'},
+  {n:'크래프톤',     t:'259960.KS'}, {n:'넷마블',       t:'251270.KS'},
+  {n:'엔씨소프트',   t:'036570.KS'}, {n:'카카오페이',   t:'377300.KS'},
+  {n:'현대중공업',   t:'329180.KS'}, {n:'LG이노텍',     t:'011070.KS'},
+  {n:'롯데쇼핑',     t:'023530.KS'}, {n:'이마트',       t:'139480.KS'},
+  {n:'한국항공우주', t:'047810.KS'}, {n:'삼성엔지니어링',t:'028050.KS'},
+  {n:'두산밥캣',     t:'241560.KS'}, {n:'HD현대',       t:'267250.KS'},
+  {n:'포스코인터내셔널',t:'047050.KS'},{n:'KT&G',       t:'033780.KS'},
+  {n:'기업은행',     t:'024110.KS'}, {n:'우리은행',     t:'000030.KS'},
+  // 코스닥 주요주
+  {n:'카카오',       t:'035720.KS'}, {n:'네이버',       t:'035420.KS'},
+  {n:'에코프로비엠', t:'247540.KQ'}, {n:'에코프로',     t:'086520.KQ'},
+  {n:'셀트리온제약', t:'068760.KQ'}, {n:'HLB',          t:'028300.KQ'},
+  {n:'알테오젠',     t:'196170.KQ'}, {n:'리가켐바이오', t:'141080.KQ'},
+  {n:'클래시스',     t:'214150.KQ'}, {n:'레인보우로보틱스',t:'277810.KQ'},
+  {n:'루닛',         t:'328130.KQ'}, {n:'씨젠',         t:'096530.KQ'},
+  {n:'스튜디오드래곤',t:'253450.KQ'},{n:'카카오게임즈', t:'293490.KQ'},
+  {n:'펄어비스',     t:'263750.KQ'}, {n:'위메이드',     t:'112040.KQ'},
+  {n:'엘앤에프',     t:'066970.KQ'}, {n:'포스코퓨처엠', t:'003670.KS'},
+  {n:'SK바이오팜',   t:'326030.KS'}, {n:'삼성전기',     t:'009150.KS'},
+  {n:'한미반도체',   t:'042700.KQ'}, {n:'이수페타시스', t:'007660.KQ'},
+  {n:'DB하이텍',     t:'000990.KS'}, {n:'원익IPS',      t:'240810.KQ'},
+  {n:'HPSP',         t:'403870.KQ'}, {n:'주성엔지니어링',t:'036930.KQ'},
+  {n:'피에스케이',   t:'319660.KQ'}, {n:'솔브레인',     t:'357780.KQ'},
+  {n:'동진쎄미켐',   t:'005290.KQ'}, {n:'코스모신소재', t:'005070.KQ'},
+];
+
+var searchActive = false; // 드롭다운에서 선택했는지 여부
 
 function isKorean(str) {
   return /[가-힣]/.test(str);
 }
 
-function searchTicker(query) {
-  var dd = document.getElementById('search-dropdown');
-  if (!dd) return;
-  dd.innerHTML = '<div class="search-loading">검색 중...</div>';
-  dd.classList.add('show');
-
-  // Yahoo Finance 검색 API (프록시 경유)
-  var url = 'https://query1.finance.yahoo.com/v1/finance/search?q='
-    + encodeURIComponent(query)
-    + '&lang=ko-KR&region=KR&quotesCount=6&newsCount=0&enableFuzzyQuery=true&quotesQueryId=tss_match_phrase_query';
-
-  var proxies = [
-    'https://corsproxy.io/?url=' + encodeURIComponent(url),
-    'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
-    'https://api.allorigins.win/get?url=' + encodeURIComponent(url),
-  ];
-
-  function tryProxy(idx) {
-    if (idx >= proxies.length) {
-      dd.innerHTML = '<div class="search-loading">검색 실패 — 직접 티커 입력해주세요</div>';
-      return;
-    }
-    fetch(proxies[idx], {signal: AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined})
-    .then(function(r){ return r.text(); })
-    .then(function(txt){
-      var obj;
-      try { obj = JSON.parse(txt); } catch(e) { throw new Error('parse'); }
-      if (obj && obj.contents) try { obj = JSON.parse(obj.contents); } catch(e){}
-      if (!obj || !obj.quotes) throw new Error('no data');
-      renderSearchResults(obj.quotes);
-    })
-    .catch(function(){ tryProxy(idx+1); });
-  }
-  tryProxy(0);
-}
-
-function renderSearchResults(quotes) {
+function searchKRStock(query) {
   var dd = document.getElementById('search-dropdown');
   if (!dd) return;
 
-  // 주식만 필터 (EQUITY, ETF)
-  var filtered = quotes.filter(function(q){
-    return q.quoteType === 'EQUITY' || q.quoteType === 'ETF' || q.quoteType === 'MUTUALFUND';
-  });
+  var q = query.trim();
+  if (!q) { dd.classList.remove('show'); return; }
 
-  if (!filtered.length) {
-    dd.innerHTML = '<div class="search-loading">검색 결과 없음</div>';
+  // 로컬 DB에서 검색 (부분 일치)
+  var results = KR_STOCKS.filter(function(s){
+    return s.n.indexOf(q) !== -1;
+  }).slice(0, 8);
+
+  if (!results.length) {
+    dd.innerHTML = '<div class="search-loading">검색 결과 없음 — 종목코드로 직접 입력<br><small style="opacity:.6">예: 005930.KS (코스피) / 086520.KQ (코스닥)</small></div>';
+    dd.classList.add('show');
     return;
   }
 
-  var html = filtered.slice(0,6).map(function(q){
-    var name = q.longname || q.shortname || q.symbol;
-    var ticker = q.symbol;
-    var exch = q.exchDisp || q.exchange || '';
-    // 한국 거래소 표시
-    if (ticker.endsWith('.KS')) exch = '코스피';
-    else if (ticker.endsWith('.KQ')) exch = '코스닥';
-    else if (exch === 'NMS' || exch === 'NGM') exch = '나스닥';
-    else if (exch === 'NYQ') exch = 'NYSE';
-
-    return '<div class="search-item" data-ticker="'+ticker+'">'
-      + '<span class="search-item-name">'+name+'</span>'
+  var html = results.map(function(s){
+    var exch = s.t.endsWith('.KS') ? '코스피' : '코스닥';
+    var exchColor = s.t.endsWith('.KS') ? '#3b82f6' : '#22c55e';
+    return '<div class="search-item" data-ticker="'+s.t+'" data-name="'+s.n+'">'
+      + '<span class="search-item-name">'+s.n+'</span>'
       + '<span>'
-      + '<span class="search-item-ticker">'+ticker+'</span>'
-      + '<span class="search-item-exchange">'+exch+'</span>'
+      + '<span class="search-item-ticker">'+s.t+'</span>'
+      + '<span class="search-item-exchange" style="color:'+exchColor+'">'+exch+'</span>'
       + '</span>'
       + '</div>';
   }).join('');
 
   dd.innerHTML = html;
+  dd.classList.add('show');
 
-  // 항목 클릭
+  // 항목 선택
   dd.querySelectorAll('.search-item').forEach(function(item){
     function pick(e) {
       e.preventDefault();
+      e.stopPropagation();
       var ticker = item.dataset.ticker;
       var inp = document.getElementById('inp-ticker');
       inp.value = ticker;
-      searchActive = false;
+      searchActive = true; // 선택 완료 표시
       dd.classList.remove('show');
       dd.innerHTML = '';
     }
@@ -851,7 +869,6 @@ function renderSearchResults(quotes) {
 function closeSearch() {
   var dd = document.getElementById('search-dropdown');
   if (dd) { dd.classList.remove('show'); dd.innerHTML = ''; }
-  searchActive = false;
 }
 
 // 입력 이벤트
@@ -861,24 +878,22 @@ document.addEventListener('DOMContentLoaded', function(){
 
   inp.addEventListener('input', function(){
     var val = this.value.trim();
-    if (searchTimer) clearTimeout(searchTimer);
+    searchActive = false; // 입력 바뀌면 선택 초기화
 
-    if (!val || val.length < 1) { closeSearch(); return; }
+    if (!val) { closeSearch(); return; }
 
-    // 한글이면 자동으로 소문자 변환 막기
-    if (!isKorean(val)) {
+    if (isKorean(val)) {
+      // 한글 입력: 로컬 DB 검색
+      searchKRStock(val);
+    } else {
+      // 영문 입력: 대문자 변환, 드롭다운 닫기
       this.value = val.toUpperCase();
-    }
-
-    if (isKorean(val) && val.length >= 1) {
-      searchActive = true;
-      searchTimer = setTimeout(function(){ searchTicker(val); }, 400);
-    } else if (!isKorean(val)) {
+      searchActive = true; // 영문은 바로 입력 가능
       closeSearch();
     }
   });
 
-  // 외부 클릭시 닫기
+  // 외부 터치/클릭시 드롭다운 닫기
   document.addEventListener('click', function(e){
     if (!e.target.closest('.ticker-wrap')) closeSearch();
   });
