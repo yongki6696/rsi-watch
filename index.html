@@ -729,34 +729,72 @@ function toggleEdit(){
 // ══════════════════════════════════════
 // 방문자 카운터 (이중 백업 — 절대 초기화 안됨)
 // ══════════════════════════════════════
+// ══════════════════════════════════════════
+// 실시간 방문자 카운터 (Firebase Realtime DB)
+// 모든 기기/브라우저에서 동일한 숫자 표시
+// ══════════════════════════════════════════
 (function initVisitors(){
-  // 오늘 날짜 (한국 시간 기준 자정 초기화)
+  var FB = 'https://rsingtime-3e98f-default-rtdb.firebaseio.com';
   var now = new Date();
-  var kst = new Date(now.getTime() + 9*60*60*1000); // UTC+9
-  var today = kst.toISOString().slice(0,10);
+  var kst = new Date(now.getTime() + 9*60*60*1000);
+  var today = kst.toISOString().slice(0,10).replace(/-/g,'');
+  var todayStr = kst.toISOString().slice(0,10);
 
-  // ── 누적 방문자: 이중 백업, 절대 초기화 안됨 ──
-  var k1='rst_total', k2='rst_total_bak';
-  var v1=parseInt(localStorage.getItem(k1)||'0');
-  var v2=parseInt(localStorage.getItem(k2)||'0');
-  var total=Math.max(v1,v2)+1;
-  localStorage.setItem(k1,String(total));
-  localStorage.setItem(k2,String(total));
-
-  // ── 오늘 방문자: 날짜가 바뀌면 자동 초기화 ──
-  var td=null;
-  try{td=JSON.parse(localStorage.getItem('rst_today')||'null');}catch(e){}
-  if(!td||td.date!==today){
-    td={date:today,count:0}; // 자정 넘으면 0으로 초기화
+  function fmt(n){
+    if(!n||isNaN(n)) return '—';
+    n=parseInt(n);
+    return n>=10000?(n/10000).toFixed(1)+'만':n.toLocaleString();
   }
-  td.count++;
-  localStorage.setItem('rst_today',JSON.stringify(td));
+  function updateDisplay(t, tot){
+    ['today-visitors','v-today','ad-today'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.textContent=fmt(t);
+    });
+    ['total-visitors','v-total','ad-total'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.textContent=fmt(tot);
+    });
+  }
 
-  function fmt(n){return n>=10000?(n/10000).toFixed(1)+'만':n.toLocaleString();}
-  var et=document.getElementById('v-today');
-  var el=document.getElementById('v-total');
-  if(et) et.textContent=fmt(td.count);
-  if(el) el.textContent=fmt(total);
+  // 누적 +1
+  fetch(FB+'/visitors/total.json')
+  .then(function(r){return r.json();})
+  .then(function(total){
+    var newTotal=(total||0)+1;
+    return fetch(FB+'/visitors/total.json',{
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(newTotal)
+    }).then(function(){return newTotal;});
+  })
+  .then(function(total){
+    // 오늘 +1
+    return fetch(FB+'/visitors/daily/'+today+'.json')
+    .then(function(r){return r.json();})
+    .then(function(dc){
+      var newDay=(dc||0)+1;
+      return fetch(FB+'/visitors/daily/'+today+'.json',{
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(newDay)
+      }).then(function(){return{today:newDay,total:total};});
+    });
+  })
+  .then(function(data){
+    updateDisplay(data.today, data.total);
+    // localStorage 백업
+    localStorage.setItem('rst_total', String(data.total));
+    localStorage.setItem('rst_total_bak', String(data.total));
+    localStorage.setItem('rst_today', JSON.stringify({date:todayStr,count:data.today}));
+  })
+  .catch(function(){
+    // Firebase 오류시 localStorage 백업 사용
+    var v1=parseInt(localStorage.getItem('rst_total')||'0');
+    var v2=parseInt(localStorage.getItem('rst_total_bak')||'0');
+    var tot=Math.max(v1,v2);
+    var td=null;
+    try{td=JSON.parse(localStorage.getItem('rst_today')||'null');}catch(e){}
+    var tc=td&&td.date===todayStr?td.count:0;
+    updateDisplay(tc,tot);
+  });
 })();
 
 function setupAutoRefresh(){
