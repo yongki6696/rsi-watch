@@ -28,7 +28,7 @@
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
 body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif; min-height:100vh; overscroll-behavior:none; }
 
-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 16px) 16px 14px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; }
+header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 20px) 16px 16px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:9999; }
 .logo { display:flex; align-items:center; gap:9px; }
 .logo-dot { width:8px; height:8px; border-radius:50%; background:var(--accent2); box-shadow:0 0 8px var(--accent2); animation:blink 2s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
@@ -45,7 +45,7 @@ header { display:flex; align-items:center; justify-content:space-between; paddin
 .btn-hdr.edit-active { color:var(--ok); border-color:var(--ok); }
 .alert-badge { background:var(--danger); color:#fff; font-size:11px; font-weight:700; padding:2px 7px; border-radius:20px; display:none; }
 
-main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 76px) 16px calc(env(safe-area-inset-bottom) + 60px); }
+main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 84px) 16px calc(env(safe-area-inset-bottom) + 60px); }
 .banner { border-radius:12px; padding:11px 14px; margin-bottom:14px; font-size:13px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .banner-blue   { background:rgba(37,99,235,.12); border:1px solid rgba(37,99,235,.3); }
 .banner-yellow { background:rgba(245,158,11,.1);  border:1px solid rgba(245,158,11,.25); }
@@ -73,7 +73,7 @@ main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 7
 .thr-val { font-size:24px; font-weight:700; color:var(--danger); }
 input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 
-.sec-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 16px) 16px 14px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:200; }
+.sec-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 20px) 16px 16px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:9999; }
 .sec-title { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.9px; }
 .sec-sub   { font-size:10px; color:var(--muted); }
 
@@ -122,7 +122,7 @@ body.edit-mode .card { cursor:default; }
 .b-load { background:rgba(80,80,80,.2);    color:var(--muted); }
 .b-err  { background:rgba(239,68,68,.1);   color:var(--danger); }
 .card-body { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:14px; }
-.price-main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 76px) 16px calc(env(safe-area-inset-bottom) + 60px); }
+.price-main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 84px) 16px calc(env(safe-area-inset-bottom) + 60px); }
 .price-chg  { font-size:12px; margin-top:3px; }
 .rsi-label-sm { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px; text-align:right; }
 .rsi-big { font-size:36px; font-weight:700; line-height:1; text-align:right; }
@@ -579,14 +579,6 @@ function renderCard(s){
   if(s.chartData){
     legendHTML='<div class="chart-legend"><span><span class="legend-line" style="background:'+chartColor+'"></span>종가</span>'
       +(s.chartData.length>=120?'<span><span class="legend-dash"></span>MA120</span>':'')+'</div>';
-  }
-  var chartHTML=s.chartData?(legendHTML+makeMiniChart(s.chartData,chartColor)):'';
-
-  // 미니차트
-  var chartColor=(s.chartData&&s.chartData.length>=2&&s.chartData[s.chartData.length-1]>=s.chartData[0])?'#22c55e':'#ef4444';
-  var legendHTML='';
-  if(s.chartData){
-    legendHTML='<div class="chart-legend"><span><span class="legend-line" style="background:'+chartColor+'"></span>종가</span>'+(s.chartData.length>=120?'<span><span class="legend-dash"></span>MA120</span>':'')+'</div>';
   }
   var chartHTML=s.chartData?(legendHTML+makeMiniChart(s.chartData,chartColor)):'';
   var divHTML=getDivHTML(s);
