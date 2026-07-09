@@ -388,36 +388,6 @@ function calcRSI(closes){
   return Math.round((100-100/(1+ag/al))*100)/100;
 }
 
-// ══════════════════════════════════════════
-// 미니차트 SVG
-// ══════════════════════════════════════════
-function makeMiniChart(data,color){
-  if(!data||data.length<2) return '';
-  var display=data.slice(-60),W=320,H=60,PAD=4;
-  var minP=Math.min.apply(null,display),maxP=Math.max.apply(null,display),range=maxP-minP||1;
-  function tx(i,len){return PAD+(i/(len-1))*(W-PAD*2);}
-  function ty(v){return H-PAD-((v-minP)/range)*(H-PAD*2);}
-  var pts=display.map(function(v,i){return tx(i,display.length).toFixed(1)+','+ty(v).toFixed(1);});
-  var lp='M'+pts.join('L'),ap='M'+PAD+','+H+' L'+pts.join('L')+' L'+(W-PAD)+','+H+' Z';
-  var maLine='';
-  if(data.length>=120){
-    var mp=[];
-    for(var i=0;i<display.length;i++){
-      var di=data.length-display.length+i;
-      if(di>=119){var sum=0;for(var j=di-119;j<=di;j++)sum+=data[j];mp.push(tx(i,display.length).toFixed(1)+','+ty(sum/120).toFixed(1));}
-    }
-    if(mp.length>=2) maLine='<path d="M'+mp.join('L')+'" fill="none" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3,2" stroke-linecap="round"/>';
-  }
-  var gid='g'+Math.random().toString(36).slice(2,7);
-  return '<svg class="mini-chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
-    +'<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0" y2="1">'
-    +'<stop offset="0%" stop-color="'+color+'" stop-opacity="0.2"/>'
-    +'<stop offset="100%" stop-color="'+color+'" stop-opacity="0.01"/>'
-    +'</linearGradient></defs>'
-    +'<path class="area" d="'+ap+'" fill="url(#'+gid+')" />'
-    +'<path class="line" d="'+lp+'" stroke="'+color+'" />'
-    +maLine+'</svg>';
-}
 
 // ══════════════════════════════════════════
 // 다이버전스 감지
@@ -607,13 +577,14 @@ function renderCard(s){
   }
   var chartHTML=s.chartData?(legendHTML+makeMiniChart(s.chartData,chartColor)):'';
   var divHTML=getDivHTML(s);
+  var krsearchDisplay=krsearchTickerToName(s.ticker);
 
   el.className='card '+cardCls(v);
   el.innerHTML=
     '<div class="drag-handle">⠿</div>'
     +'<div class="card-top">'
     +'<div style="flex:1"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
-    +'<div class="ticker">'+s.ticker+'</div>'+getBadge(v,s.error)
+    +'<div class="ticker">'+krsearchDisplay+'</div>'+getBadge(v,s.error)
     +'</div>'+(s.name?'<div class="cname">'+s.name+'</div>':'')+'</div>'
     +'<div class="card-right">'
     +'<button class="btn-del" data-ticker="'+s.ticker+'" data-period="'+s.period+'">✕</button>'
@@ -881,18 +852,6 @@ function checkBanners(){
 }
 
 // ── 초기화 ──
-(function init(){
-  document.getElementById('inp-threshold').value=threshold;
-  document.getElementById('thr-display').textContent=threshold;
-  checkBanners();
-  loadStocksFromStorage();
-  renderAll(); updateStats(); renderLastUpdate(null);
-  var i=0;
-  function nextLoad(){if(i>=stocks.length)return;loadStock(stocks[i++]).then(function(){setTimeout(nextLoad,800);});}
-  nextLoad();
-  setupAutoRefresh();
-})();
-
 // ══════════════════════════════════════════
 // 한국주식 검색 (로컬 DB 방식, 신규 코드만 추가)
 // 기존 함수(addStock 등)는 전혀 수정하지 않음
@@ -941,6 +900,12 @@ var KRSEARCH_DB = [
 ];
 
 function krsearchIsKorean(str){ return /[가-힣]/.test(str); }
+
+// 티커 → 한글 종목명 역매칭 (카드 표시용, s.ticker 자체는 변경하지 않음)
+function krsearchTickerToName(ticker){
+  var found = KRSEARCH_DB.filter(function(s){ return s.t === ticker; })[0];
+  return found ? found.n : ticker;
+}
 
 function krsearchRender(query){
   var dd = document.getElementById('krsearch-dropdown');
@@ -1006,6 +971,19 @@ function krsearchClose(){
     if (!e.target.closest('.krsearch-wrap')) krsearchClose();
   }, {passive:true});
 })();
+
+(function init(){
+  document.getElementById('inp-threshold').value=threshold;
+  document.getElementById('thr-display').textContent=threshold;
+  checkBanners();
+  loadStocksFromStorage();
+  renderAll(); updateStats(); renderLastUpdate(null);
+  var i=0;
+  function nextLoad(){if(i>=stocks.length)return;loadStock(stocks[i++]).then(function(){setTimeout(nextLoad,800);});}
+  nextLoad();
+  setupAutoRefresh();
+})();
+
 </script>
 </body>
 </html>
