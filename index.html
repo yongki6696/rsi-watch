@@ -182,6 +182,28 @@ body.edit-mode .edit-hint { display:block; }
   border-radius:12px; font-size:11px; color:var(--muted); line-height:1.8;
 }
 .disclaimer p+p { margin-top:6px; }
+
+/* ── 한국주식 검색 (신규 클래스, 기존 스타일 미변경) ── */
+.krsearch-wrap { position:relative; }
+.krsearch-dropdown {
+  position:absolute; top:calc(100% + 4px); left:0; right:0;
+  background:#1a1a1a; border:1px solid var(--border);
+  border-radius:10px; z-index:500; overflow:hidden;
+  box-shadow:0 8px 24px rgba(0,0,0,.6); display:none;
+}
+.krsearch-dropdown.krsearch-show { display:block; }
+.krsearch-item {
+  padding:11px 14px; cursor:pointer;
+  display:flex; justify-content:space-between; align-items:center;
+  border-bottom:1px solid var(--border); font-size:14px;
+  touch-action:manipulation;
+}
+.krsearch-item:last-child { border-bottom:none; }
+.krsearch-item:active { background:#242424; }
+.krsearch-name { font-weight:600; color:var(--text); }
+.krsearch-ticker { font-size:11px; color:var(--muted); font-family:monospace; }
+.krsearch-exch { font-size:10px; margin-left:6px; }
+.krsearch-empty { padding:12px 14px; color:var(--muted); font-size:12px; text-align:center; line-height:1.6; }
 </style>
 </head>
 <body>
@@ -223,8 +245,11 @@ body.edit-mode .edit-hint { display:block; }
     <div class="row">
       <div class="field" style="flex:2">
         <div class="field-label">티커 심볼</div>
-        <input id="inp-ticker" type="text" placeholder="AAPL" maxlength="20"
-               autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+        <div class="krsearch-wrap">
+          <input id="inp-ticker" type="text" placeholder="AAPL 또는 삼성전자" maxlength="20"
+                 autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+          <div id="krsearch-dropdown" class="krsearch-dropdown"></div>
+        </div>
       </div>
       <div class="field" style="flex:1">
         <div class="field-label">기간</div>
@@ -866,6 +891,120 @@ function checkBanners(){
   function nextLoad(){if(i>=stocks.length)return;loadStock(stocks[i++]).then(function(){setTimeout(nextLoad,800);});}
   nextLoad();
   setupAutoRefresh();
+})();
+
+// ══════════════════════════════════════════
+// 한국주식 검색 (로컬 DB 방식, 신규 코드만 추가)
+// 기존 함수(addStock 등)는 전혀 수정하지 않음
+// ══════════════════════════════════════════
+var KRSEARCH_DB = [
+  {n:'삼성전자',t:'005930.KS'},{n:'SK하이닉스',t:'000660.KS'},
+  {n:'LG에너지솔루션',t:'373220.KS'},{n:'삼성바이오로직스',t:'207940.KS'},
+  {n:'현대차',t:'005380.KS'},{n:'기아',t:'000270.KS'},
+  {n:'셀트리온',t:'068270.KS'},{n:'POSCO홀딩스',t:'005490.KS'},
+  {n:'KB금융',t:'105560.KS'},{n:'신한지주',t:'055550.KS'},
+  {n:'하나금융지주',t:'086790.KS'},{n:'우리금융지주',t:'316140.KS'},
+  {n:'LG화학',t:'051910.KS'},{n:'삼성SDI',t:'006400.KS'},
+  {n:'현대모비스',t:'012330.KS'},{n:'LG전자',t:'066570.KS'},
+  {n:'삼성물산',t:'028260.KS'},{n:'SK이노베이션',t:'096770.KS'},
+  {n:'SK텔레콤',t:'017670.KS'},{n:'KT',t:'030200.KS'},
+  {n:'LG',t:'003550.KS'},{n:'롯데케미칼',t:'011170.KS'},
+  {n:'한국전력',t:'015760.KS'},{n:'삼성생명',t:'032830.KS'},
+  {n:'삼성화재',t:'000810.KS'},{n:'SK',t:'034730.KS'},
+  {n:'아모레퍼시픽',t:'090430.KS'},{n:'LG생활건강',t:'051900.KS'},
+  {n:'고려아연',t:'010130.KS'},{n:'두산에너빌리티',t:'034020.KS'},
+  {n:'한화에어로스페이스',t:'012450.KS'},{n:'현대건설',t:'000720.KS'},
+  {n:'HMM',t:'011200.KS'},{n:'카카오뱅크',t:'323410.KS'},
+  {n:'크래프톤',t:'259960.KS'},{n:'넷마블',t:'251270.KS'},
+  {n:'엔씨소프트',t:'036570.KS'},{n:'카카오페이',t:'377300.KS'},
+  {n:'현대중공업',t:'329180.KS'},{n:'LG이노텍',t:'011070.KS'},
+  {n:'롯데쇼핑',t:'023530.KS'},{n:'이마트',t:'139480.KS'},
+  {n:'한국항공우주',t:'047810.KS'},{n:'삼성엔지니어링',t:'028050.KS'},
+  {n:'두산밥캣',t:'241560.KS'},{n:'HD현대',t:'267250.KS'},
+  {n:'포스코인터내셔널',t:'047050.KS'},{n:'KT&G',t:'033780.KS'},
+  {n:'기업은행',t:'024110.KS'},{n:'우리은행',t:'000030.KS'},
+  {n:'카카오',t:'035720.KS'},{n:'네이버',t:'035420.KS'},
+  {n:'에코프로비엠',t:'247540.KQ'},{n:'에코프로',t:'086520.KQ'},
+  {n:'셀트리온제약',t:'068760.KQ'},{n:'HLB',t:'028300.KQ'},
+  {n:'알테오젠',t:'196170.KQ'},{n:'리가켐바이오',t:'141080.KQ'},
+  {n:'클래시스',t:'214150.KQ'},{n:'레인보우로보틱스',t:'277810.KQ'},
+  {n:'루닛',t:'328130.KQ'},{n:'씨젠',t:'096530.KQ'},
+  {n:'스튜디오드래곤',t:'253450.KQ'},{n:'카카오게임즈',t:'293490.KQ'},
+  {n:'펄어비스',t:'263750.KQ'},{n:'위메이드',t:'112040.KQ'},
+  {n:'엘앤에프',t:'066970.KQ'},{n:'포스코퓨처엠',t:'003670.KS'},
+  {n:'SK바이오팜',t:'326030.KS'},{n:'삼성전기',t:'009150.KS'},
+  {n:'한미반도체',t:'042700.KQ'},{n:'이수페타시스',t:'007660.KQ'},
+  {n:'DB하이텍',t:'000990.KS'},{n:'원익IPS',t:'240810.KQ'},
+  {n:'HPSP',t:'403870.KQ'},{n:'주성엔지니어링',t:'036930.KQ'},
+  {n:'피에스케이',t:'319660.KQ'},{n:'솔브레인',t:'357780.KQ'},
+  {n:'동진쎄미켐',t:'005290.KQ'},{n:'코스모신소재',t:'005070.KQ'}
+];
+
+function krsearchIsKorean(str){ return /[가-힣]/.test(str); }
+
+function krsearchRender(query){
+  var dd = document.getElementById('krsearch-dropdown');
+  if (!dd) return;
+  var q = query.trim();
+  if (!q) { dd.classList.remove('krsearch-show'); return; }
+
+  var results = KRSEARCH_DB.filter(function(s){ return s.n.indexOf(q) !== -1; }).slice(0, 8);
+
+  if (!results.length) {
+    dd.innerHTML = '<div class="krsearch-empty">검색 결과 없음<br>종목코드로 직접 입력해주세요 (예: 005930.KS)</div>';
+    dd.classList.add('krsearch-show');
+    return;
+  }
+
+  dd.innerHTML = results.map(function(s){
+    var isKS = s.t.indexOf('.KS') !== -1;
+    var exch = isKS ? '코스피' : '코스닥';
+    var color = isKS ? '#3b82f6' : '#22c55e';
+    return '<div class="krsearch-item" data-t="'+s.t+'">'
+      + '<span class="krsearch-name">'+s.n+'</span>'
+      + '<span><span class="krsearch-ticker">'+s.t+'</span>'
+      + '<span class="krsearch-exch" style="color:'+color+'">'+exch+'</span></span>'
+      + '</div>';
+  }).join('');
+  dd.classList.add('krsearch-show');
+
+  Array.prototype.forEach.call(dd.querySelectorAll('.krsearch-item'), function(item){
+    function pick(e){
+      e.preventDefault(); e.stopPropagation();
+      var inp = document.getElementById('inp-ticker');
+      inp.value = item.getAttribute('data-t');
+      dd.classList.remove('krsearch-show');
+      dd.innerHTML = '';
+    }
+    item.addEventListener('touchend', pick, {passive:false});
+    item.addEventListener('mousedown', pick);
+  });
+}
+
+function krsearchClose(){
+  var dd = document.getElementById('krsearch-dropdown');
+  if (dd) { dd.classList.remove('krsearch-show'); dd.innerHTML = ''; }
+}
+
+(function krsearchInit(){
+  var inp = document.getElementById('inp-ticker');
+  if (!inp) return;
+
+  inp.addEventListener('input', function(){
+    var val = this.value;
+    if (krsearchIsKorean(val)) {
+      krsearchRender(val);
+    } else {
+      krsearchClose();
+    }
+  });
+
+  document.addEventListener('click', function(e){
+    if (!e.target.closest('.krsearch-wrap')) krsearchClose();
+  });
+  document.addEventListener('touchstart', function(e){
+    if (!e.target.closest('.krsearch-wrap')) krsearchClose();
+  }, {passive:true});
 })();
 </script>
 </body>
