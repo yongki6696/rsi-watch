@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="index, follow">
+<title>개인정보처리방침 — RSIngTime</title>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
+
+:root {
+  --black:  #000000;
+  --card:   #111111;
+  --card2:  #181818;
+  --border: #242424;
+  --blue:   #3b82f6;
+  --text:   #ffffff;
+  --text2:  #a0a0a0;
+  --muted:  #505050;
+  --sans:   'Noto Sans KR', sans-serif;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body {
+  background:var(--black); color:var(--text);
+  font-family:var(--sans); line-height:1.8;
+}
+
+nav {
+  position:sticky; top:0; z-index:100;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 24px; height:60px;
+  background:rgba(0,0,0,.9); backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+}
+.nav-logo { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:700; text-decoration:none; color:var(--text); }
+.nav-dot { width:7px; height:7px; border-radius:50%; background:var(--blue); box-shadow:0 0 8px var(--blue); }
+.nav-back { font-size:13px; color:var(--text2); text-decoration:none; }
+.nav-back:hover { color:var(--text); }
+
+main { max-width:720px; margin:0 auto; padding:56px 24px 100px; }
+
+h1 { font-size:clamp(26px,4vw,36px); font-weight:900; letter-spacing:-.5px; margin-bottom:8px; }
+.updated { font-size:13px; color:var(--muted); margin-bottom:44px; }
+
+h2 {
+  font-size:18px; font-weight:700; margin:40px 0 14px;
+  padding-top:20px; border-top:1px solid var(--border);
+}
+h2:first-of-type { border-top:none; padding-top:0; margin-top:0; }
+
+p { font-size:14px; color:var(--text2); margin-bottom:12px; }
+ul { margin:0 0 12px 20px; }
+li { font-size:14px; color:var(--text2); margin-bottom:6px; }
+strong { color:var(--text); font-weight:600; }
+
+.info-box {
+  background:var(--card); border:1px solid var(--border);
+  border-radius:14px; padding:20px 22px; margin:16px 0;
+}
+.info-box p:last-child { margin-bottom:0; }
+
+table { width:100%; border-collapse:collapse; margin:16px 0; font-size:13px; }
+th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); }
+th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.5px; }
+td { color:var(--text2); }
+
+.contact-box {
+  background:rgba(59,130,246,.08); border:1px solid rgba(59,130,246,.2);
+  border-radius:14px; padding:22px; margin-top:40px; text-align:center;
+}
+.contact-box p { margin-bottom:6px; }
+.contact-email { font-family:monospace; font-size:16px; color:var(--blue); font-weight:700; }
+
+footer {
+  text-align:center; padding:32px 24px; border-top:1px solid var(--border);
+  font-size:12px; color:var(--muted);
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-logo">
+    <div class="nav-dot"></div>
+    RSIngTime
+  </a>
+  <a href="landing.html" class="nav-back">← 메인으로</a>
+</nav>
+
+<main>
+  <h1>개인정보처리방침</h1>
+  <p class="updated">최종 수정일: 2025년 7월 9일</p>
+
+  <h2>1. 개요</h2>
+  <p>
+    RSIngTime(이하 '서비스')은 이용자의 개인정보를 소중히 다루며, 「개인정보보호법」 등 관련 법령을 준수합니다.
+    본 방침은 서비스 이용 시 수집되는 정보와 그 처리 방식을 안내합니다.
+  </p>
+
+  <h2>2. 수집하는 정보</h2>
+  <p>본 서비스는 별도의 회원가입 절차 없이 이용 가능하며, 다음과 같은 정보가 자동으로 수집될 수 있습니다.</p>
+  <div class="info-box">
+    <ul>
+      <li><strong>방문 통계</strong> — 방문 일시, 페이지 조회수 (Google Analytics)</li>
+      <li><strong>기기 정보</strong> — 브라우저 종류, 운영체제, 화면 해상도</li>
+      <li><strong>이용 설정</strong> — 감시 종목 목록, RSI 임계값 등 (기기 내 localStorage에만 저장)</li>
+    </ul>
+    <p>이름, 이메일, 전화번호 등 개인을 특정할 수 있는 정보는 수집하지 않습니다.</p>
+  </div>
+
+  <h2>3. 정보의 저장 위치</h2>
+  <table>
+    <thead>
+      <tr><th>정보</th><th>저장 위치</th><th>비고</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>감시 종목, 알림 설정</td><td>이용자 기기 (localStorage)</td><td>서버로 전송되지 않음</td></tr>
+      <tr><td>방문자 수 통계</td><td>Firebase Realtime Database</td><td>익명 집계 데이터만 저장</td></tr>
+      <tr><td>웹 분석 데이터</td><td>Google Analytics</td><td>Google의 개인정보처리방침 적용</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. 쿠키 및 유사 기술</h2>
+  <p>
+    본 서비스는 이용자 경험 개선과 통계 분석을 위해 쿠키 및 브라우저 저장소(localStorage)를 사용합니다.
+    이용자는 브라우저 설정을 통해 쿠키 저장을 거부할 수 있으나, 이 경우 일부 기능(감시 종목 저장 등)이 정상 작동하지 않을 수 있습니다.
+  </p>
+
+  <h2>5. 제3자 서비스</h2>
+  <p>본 서비스는 다음과 같은 제3자 서비스를 이용하며, 각 서비스의 개인정보처리방침이 함께 적용됩니다.</p>
+  <ul>
+    <li><strong>Google Analytics</strong> — 방문자 통계 분석 (<a href="https://policies.google.com/privacy" style="color:var(--blue)">Google 개인정보처리방침</a>)</li>
+    <li><strong>Google AdSense</strong> — 광고 게재 (쿠키를 통한 맞춤형 광고 제공 가능)</li>
+    <li><strong>Firebase</strong> — 방문자 수 집계 (Google 소유)</li>
+    <li><strong>Yahoo Finance</strong> — 주가 데이터 제공</li>
+  </ul>
+
+  <h2>6. Google AdSense 관련 안내</h2>
+  <div class="info-box">
+    <p>
+      본 서비스는 Google AdSense를 통해 광고를 게재할 수 있습니다.
+      Google 및 제3자 광고 파트너는 쿠키를 사용하여 이용자의 이전 방문 기록을 기반으로 광고를 게재할 수 있습니다.
+    </p>
+    <p>
+      이용자는 <a href="https://www.google.com/settings/ads" style="color:var(--blue)">Google 광고 설정</a>에서 맞춤형 광고를 비활성화할 수 있습니다.
+    </p>
+  </div>
+
+  <h2>7. 정보의 보유 및 파기</h2>
+  <p>
+    localStorage에 저장된 정보(감시 종목 등)는 이용자가 직접 삭제하거나 브라우저 데이터를 초기화할 때까지 기기에 보관됩니다.
+    서버 측에 저장되는 통계 정보는 익명화되어 개인을 특정할 수 없습니다.
+  </p>
+
+  <h2>8. 투자 정보 관련 면책</h2>
+  <div class="info-box">
+    <p>
+      본 서비스가 제공하는 RSI 지표, 다이버전스 분석 등 모든 정보는 기술적 지표 분석 결과이며, 투자 권유나 추천이 아닙니다.
+      투자 판단에 대한 모든 책임은 이용자 본인에게 있습니다.
+    </p>
+  </div>
+
+  <h2>9. 개인정보처리방침의 변경</h2>
+  <p>
+    본 방침은 법령, 정책 또는 서비스 변경에 따라 수정될 수 있으며, 변경 시 본 페이지를 통해 공지합니다.
+  </p>
+
+  <div class="contact-box">
+    <p>문의사항이 있으시면 아래 이메일로 연락해주세요.</p>
+    <p class="contact-email">yongki6696@naver.com</p>
+  </div>
+</main>
+
+<footer>
+  © 2025 RSIngTime. All rights reserved.
+</footer>
+
+</body>
+</html>
