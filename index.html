@@ -73,7 +73,7 @@ main { max-width:680px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 8
 .thr-val { font-size:24px; font-weight:700; color:var(--danger); }
 input[type=range] { width:100%; accent-color:var(--danger); cursor:pointer; }
 
-.sec-header { display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top) + 20px) 16px 16px; background:var(--bg); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:9999; }
+.sec-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; padding:0 2px; }
 .sec-title { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.9px; }
 .sec-sub   { font-size:10px; color:var(--muted); }
 
@@ -595,7 +595,6 @@ function renderCard(s){
     +'</div></div>'
     +'<div class="card-body"><div>'+priceHTML+'</div>'
     +'<div><div class="rsi-label-sm">RSI(14) · '+pLabel(s.period)+'</div>'+rsiHTML+'</div></div>'
-    +chartHTML
     +chartHTML+divHTML
     +'<div class="bar-wrap"><div class="bar-fill" style="width:'+pct+'%;background:'+barColor(v)+'"></div>'
     +'<div class="bar-mark" style="left:'+threshold+'%"></div></div>'
