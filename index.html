@@ -191,7 +191,8 @@ body.edit-mode .edit-hint { display:block; }
 .krsearch-dropdown {
   position:absolute; top:calc(100% + 4px); left:0; right:0;
   background:#1a1a1a; border:1px solid var(--border);
-  border-radius:10px; z-index:500; overflow:hidden;
+  border-radius:10px; z-index:500;
+  max-height:280px; overflow-y:auto; -webkit-overflow-scrolling:touch;
   box-shadow:0 8px 24px rgba(0,0,0,.6); display:none;
 }
 .krsearch-dropdown.krsearch-show { display:block; }
@@ -1008,7 +1009,43 @@ function krsearchClose(){
   document.addEventListener('click', function(e){
     if (!e.target.closest('.krsearch-wrap')) krsearchClose();
   });
+
+  // 드롭다운 내부 스크롤 중에는 절대 닫히지 않도록 처리
+  // (갤럭시 등 안드로이드 브라우저에서 스크롤 제스처가 바깥 터치로 오인되는 문제 방지)
+  var krsearchScrolling = false;
+  var dd = document.getElementById('krsearch-dropdown');
+  if (dd) {
+    dd.addEventListener('touchstart', function(){ krsearchScrolling = false; }, {passive:true});
+    dd.addEventListener('touchmove', function(){ krsearchScrolling = true; }, {passive:true});
+    dd.addEventListener('touchend', function(e){
+      if (krsearchScrolling) { e.stopPropagation(); }
+      krsearchScrolling = false;
+    }, {passive:true});
+  }
+
+  // 바깥(페이지 전체) 스크롤인지 실제 탭인지 구분
+  // 터치 시작 지점과 끝 지점의 이동거리가 크면 "스크롤"로 간주하고 닫지 않음
+  var krsearchTouchStartX = 0, krsearchTouchStartY = 0, krsearchOutsideScrolling = false;
+
   document.addEventListener('touchstart', function(e){
+    if (e.target.closest('.krsearch-dropdown')) return; // 드롭다운 내부는 별도 처리
+    var t = e.touches[0];
+    krsearchTouchStartX = t.clientX;
+    krsearchTouchStartY = t.clientY;
+    krsearchOutsideScrolling = false;
+  }, {passive:true});
+
+  document.addEventListener('touchmove', function(e){
+    if (e.target.closest('.krsearch-dropdown')) return;
+    var t = e.touches[0];
+    var dx = Math.abs(t.clientX - krsearchTouchStartX);
+    var dy = Math.abs(t.clientY - krsearchTouchStartY);
+    if (dx > 8 || dy > 8) krsearchOutsideScrolling = true; // 8px 이상 움직이면 스크롤로 판단
+  }, {passive:true});
+
+  document.addEventListener('touchend', function(e){
+    if (e.target.closest('.krsearch-dropdown')) return;
+    if (krsearchOutsideScrolling) return; // 스크롤이었으면 닫지 않음
     if (!e.target.closest('.krsearch-wrap')) krsearchClose();
   }, {passive:true});
 })();
