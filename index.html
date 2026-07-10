@@ -165,13 +165,6 @@ body.edit-mode .card { cursor:default; }
 .edit-hint { background:rgba(37,99,235,.1); border:1px solid rgba(37,99,235,.25); border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:var(--accent2); display:none; }
 body.edit-mode .edit-hint { display:block; }
 
-.mini-chart { width:100%; height:56px; margin:8px 0 4px; display:block; }
-.mini-chart path.line { fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-.mini-chart path.area { stroke:none; }
-.chart-legend { display:flex; gap:12px; margin-bottom:4px; }
-.chart-legend span { font-size:10px; color:var(--muted); display:flex; align-items:center; gap:4px; }
-.legend-line { display:inline-block; width:14px; height:2px; border-radius:1px; }
-.legend-dash { display:inline-block; width:14px; height:0; border-top:2px dashed #f59e0b; }
 .div-badge {
   display:flex; flex-direction:column; gap:2px;
   padding:7px 12px; border-radius:10px; font-size:12px; font-weight:700;
@@ -606,7 +599,7 @@ function renderCard(s){
   var chg=(s.price&&s.prevClose)?((s.price-s.prevClose)/s.prevClose*100).toFixed(2):null;
   var isUp=chg&&parseFloat(chg)>=0;
   var chgHTML=chg?'<div class="price-chg '+(isUp?'c-ok':'c-danger')+'">'+(isUp?'▲+':'▼')+chg+'%</div>':'';
-  var priceHTML=s.price?'<div class="price-main">$'+s.price.toFixed(2)+'</div>'+chgHTML:(s.loading?'<div class="price-main"><span class="spin"></span></div>':'<div class="price-main c-muted">—</div>');
+  var priceHTML=s.price?'<div class="price-main">'+krsearchFormatPrice(s.ticker, s.price)+'</div>'+chgHTML:(s.loading?'<div class="price-main"><span class="spin"></span></div>':'<div class="price-main c-muted">—</div>');
   var rsiHTML=v!=null?'<div class="rsi-big '+rsiColor(v)+'">'+v+'</div>':(s.loading?'<div class="rsi-big"><span class="spin"></span></div>':'<div class="rsi-big c-muted">—</div>');
   var timeStr=s.lastUp?'🕐 '+s.lastUp.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
   var footRight=s.error?'<span class="c-danger">⚠ '+s.error+'</span>':timeStr;
@@ -947,6 +940,20 @@ function krsearchIsKorean(str){ return /[가-힣]/.test(str); }
 function krsearchTickerToName(ticker){
   var found = KRSEARCH_DB.filter(function(s){ return s.t === ticker; })[0];
   return found ? found.n : ticker;
+}
+
+// 티커 기준 가격 포맷 (한국주식 .KS/.KQ → 원화, 그 외 → 달러)
+// 기존 priceHTML 로직은 전혀 건드리지 않고, 통화 판단/포맷만 새 함수로 분리
+function krsearchIsKRTicker(ticker){
+  return /\.(KS|KQ)$/i.test(ticker || '');
+}
+function krsearchFormatPrice(ticker, price){
+  if (krsearchIsKRTicker(ticker)) {
+    // 원화: 소수점 없이, 천단위 콤마
+    return '₩' + Math.round(price).toLocaleString('ko-KR');
+  }
+  // 기존과 동일: 달러, 소수점 2자리
+  return '$' + price.toFixed(2);
 }
 
 function krsearchRender(query){
