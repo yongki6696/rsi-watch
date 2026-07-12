@@ -426,8 +426,10 @@ function findPivots(arr,win,type){
 function detectDivergence(closes,timestamps){
   var recent=closes.slice(-90),rts=timestamps?timestamps.slice(-90):null;
   if(recent.length<30) return null;
+  var recentOffset=closes.length-recent.length; // recent 인덱스를 closes(전체) 기준으로 변환하기 위한 오프셋
   var rsi=calcRSISeries(recent); if(rsi.length<20) return null;
   var off=recent.length-rsi.length,price=recent.slice(off),pts=rts?rts.slice(off):null,win=3;
+  var priceOffset=recentOffset+off; // price 인덱스를 closes(전체) 기준으로 변환하기 위한 오프셋
   function toDate(idx){
     if(!pts||!pts[idx]) return null;
     var d=new Date(pts[idx]*1000); return (d.getMonth()+1)+'/'+d.getDate();
@@ -442,7 +444,8 @@ function detectDivergence(closes,timestamps){
       if(rl1&&rl2&&rl2.val>rl1.val*1.002){
         var d1=toDate(pl1.idx),d2=toDate(pl2.idx);
         return {type:'bull',label:'📈 상승 다이버전스',desc:'가격↓ RSI↑ — 반등 가능성',
-          date:d1&&d2?d1+' → '+d2:'',rsi1:Math.round(rl1.val*10)/10,rsi2:Math.round(rl2.val*10)/10};
+          date:d1&&d2?d1+' → '+d2:'',rsi1:Math.round(rl1.val*10)/10,rsi2:Math.round(rl2.val*10)/10,
+          idx1:pl1.idx+priceOffset, idx2:pl2.idx+priceOffset};
       }
     }
   }
@@ -456,7 +459,8 @@ function detectDivergence(closes,timestamps){
       if(rh1&&rh2&&rh2.val<rh1.val*0.998){
         var d1=toDate(ph1.idx),d2=toDate(ph2.idx);
         return {type:'bear',label:'📉 하락 다이버전스',desc:'가격↑ RSI↓ — 하락 가능성',
-          date:d1&&d2?d1+' → '+d2:'',rsi1:Math.round(rh1.val*10)/10,rsi2:Math.round(rh2.val*10)/10};
+          date:d1&&d2?d1+' → '+d2:'',rsi1:Math.round(rh1.val*10)/10,rsi2:Math.round(rh2.val*10)/10,
+          idx1:ph1.idx+priceOffset, idx2:ph2.idx+priceOffset};
       }
     }
   }
@@ -465,6 +469,16 @@ function detectDivergence(closes,timestamps){
 function getDivHTML(s){
   if(!s.chartData||s.chartData.length<30) return '';
   var div=detectDivergence(s.chartData,s.timestamps); if(!div) return '';
+  var cls=div.type==='bull'?'div-bull':'div-bear';
+  var dateStr=div.date?'<span style="font-size:10px;opacity:.7;font-weight:400;margin-left:6px">'+div.date+'</span>':'';
+  return '<div class="div-badge '+cls+'">'
+    +'<div>'+div.label+dateStr+' <span style="font-weight:400;font-size:11px;opacity:.8">'+div.desc+'</span></div>'
+    +'<div style="font-size:11px;font-weight:400;opacity:.7">RSI '+div.rsi1+' → '+div.rsi2+'</div>'
+    +'</div>';
+}
+// 이미 계산된 다이버전스 결과를 받아 배지 HTML만 생성 (renderCard에서 중복 계산 방지용)
+function getDivHTMLFromResult(div){
+  if(!div) return '';
   var cls=div.type==='bull'?'div-bull':'div-bear';
   var dateStr=div.date?'<span style="font-size:10px;opacity:.7;font-weight:400;margin-left:6px">'+div.date+'</span>':'';
   return '<div class="div-badge '+cls+'">'
@@ -585,6 +599,35 @@ function makeMiniChart(data,color){
     +maLine+'</svg>';
 }
 
+// ── 다이버전스 구간 표시 (미니차트 위 마커, 신규 기능) ──
+// data: 전체 chartData(최대180일), div: detectDivergence 반환값(idx1/idx2 포함)
+function makeDivMarkers(data, div){
+  if(!data||!div||div.idx1==null||div.idx2==null) return '';
+  var displayLen=Math.min(60, data.length);
+  var dataStartIdx=data.length-displayLen; // display 배열의 0번째가 data 기준 몇 번 인덱스인지
+  var W=320,H=60,PAD=4;
+  var display=data.slice(-displayLen);
+  var minP=Math.min.apply(null,display),maxP=Math.max.apply(null,display),range=maxP-minP||1;
+  function tx(i){return PAD+(i/(displayLen-1))*(W-PAD*2);}
+  function ty(v){return H-PAD-((v-minP)/range)*(H-PAD*2);}
+
+  // idx1/idx2(전체 data 기준)를 display 기준 상대 인덱스로 변환
+  var relIdx1=div.idx1-dataStartIdx, relIdx2=div.idx2-dataStartIdx;
+  // 두 지점 모두 현재 표시 구간(최근 60일) 안에 있을 때만 마커 표시
+  if(relIdx1<0||relIdx1>=displayLen||relIdx2<0||relIdx2>=displayLen) return '';
+
+  var v1=data[div.idx1], v2=data[div.idx2];
+  if(v1==null||v2==null) return '';
+  var x1=tx(relIdx1), y1=ty(v1), x2=tx(relIdx2), y2=ty(v2);
+  var markColor = div.type==='bull' ? '#4ade80' : '#ff6b6b';
+
+  return '<svg class="div-markers" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">'
+    +'<line x1="'+x1.toFixed(1)+'" y1="'+y1.toFixed(1)+'" x2="'+x2.toFixed(1)+'" y2="'+y2.toFixed(1)+'" stroke="'+markColor+'" stroke-width="1.3" stroke-dasharray="2,2" opacity="0.85"/>'
+    +'<circle cx="'+x1.toFixed(1)+'" cy="'+y1.toFixed(1)+'" r="3" fill="'+markColor+'" stroke="#000" stroke-width="0.8"/>'
+    +'<circle cx="'+x2.toFixed(1)+'" cy="'+y2.toFixed(1)+'" r="3" fill="'+markColor+'" stroke="#000" stroke-width="0.8"/>'
+    +'</svg>';
+}
+
 // ── 카드 렌더 ──
 function rsiColor(v){if(v==null)return 'c-muted';if(v<20)return 'c-danger';if(v<=30)return 'c-warn';if(v<=70)return 'c-ok';return 'c-purple';}
 function barColor(v){if(v==null)return '#242424';if(v<20)return '#ef4444';if(v<=30)return '#f59e0b';if(v<=70)return '#22c55e';return '#a78bfa';}
@@ -615,8 +658,13 @@ function renderCard(s){
     legendHTML='<div class="chart-legend"><span><span class="legend-line" style="background:'+chartColor+'"></span>종가</span>'
       +(s.chartData.length>=120?'<span><span class="legend-dash"></span>MA120</span>':'')+'</div>';
   }
-  var chartHTML=s.chartData?(legendHTML+makeMiniChart(s.chartData,chartColor)):'';
-  var divHTML=getDivHTML(s);
+  // 다이버전스는 한 번만 계산해서 배지와 차트 마커 둘 다에 재사용 (중복 계산 방지)
+  var divResult = (s.chartData && s.chartData.length>=30) ? detectDivergence(s.chartData, s.timestamps) : null;
+  var divMarkerHTML = divResult ? makeDivMarkers(s.chartData, divResult) : '';
+  var chartHTML = s.chartData
+    ? (legendHTML + '<div style="position:relative">' + makeMiniChart(s.chartData,chartColor) + divMarkerHTML + '</div>')
+    : '';
+  var divHTML = divResult ? getDivHTMLFromResult(divResult) : '';
   var krsearchDisplay=krsearchTickerToName(s.ticker);
   var mddDisplay=mddHTML(s);
 
