@@ -479,11 +479,17 @@ function loadStock(s){
   .then(function(data){
     var chart=data.chart.result[0];
     var closes=chart.indicators.quote[0].close;
+    var timestamps=chart.timestamp||[];
     s.rsi=calcRSI(closes);
-    var valid=closes.filter(function(v){return v!=null;});
+    var validIdx=[];
+    var valid=[];
+    for(var i=0;i<closes.length;i++){
+      if(closes[i]!=null){ valid.push(closes[i]); validIdx.push(i); }
+    }
     s.price=valid[valid.length-1]; s.prevClose=valid[valid.length-2];
     s.name=(chart.meta&&(chart.meta.longName||chart.meta.shortName))||'';
     s.chartData=valid.slice(-180);
+    s.timestamps=validIdx.slice(-180).map(function(idx){ return timestamps[idx]; });
     s.loading=false; s.error=null; s.lastUp=new Date();
     renderLastUpdate(s.lastUp);
   })
