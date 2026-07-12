@@ -494,7 +494,28 @@ function loadStock(s){
     var chart=data.chart.result[0];
     var closes=chart.indicators.quote[0].close;
     var timestamps=chart.timestamp||[];
-    s.rsi=calcRSI(closes);
+
+    // ── 장중/장마감에 따라 RSI 계산용 마지막 종가를 다르게 처리 ──
+    // 장중: 오늘 캔들의 종가를 "현재 실시간가"로 교체해서 RSI가 실시간으로 움직이게 함
+    //       (나무증권 등 실제 증권사도 장중엔 그 순간 가격 기준으로 RSI를 계산하는 것과 동일한 방식)
+    // 장마감 후: Yahoo가 주는 마지막 캔들이 이미 확정 종가이므로 그대로 사용 → 자동으로 값이 고정됨
+    var rsiCloses = closes;
+    try {
+      var meta = chart.meta;
+      var tp = meta && meta.currentTradingPeriod && meta.currentTradingPeriod.regular;
+      if (tp && tp.end) {
+        var nowSec = Math.floor(Date.now()/1000);
+        var lastTs = timestamps[timestamps.length-1];
+        var isMarketOpenNow = (lastTs != null && lastTs >= tp.start && nowSec < tp.end);
+        if (isMarketOpenNow && meta.regularMarketPrice != null) {
+          // 장중: 마지막(오늘) 캔들 종가를 실시간 현재가로 교체
+          rsiCloses = closes.slice(0, -1).concat([meta.regularMarketPrice]);
+        }
+        // 장마감 후(isMarketOpenNow===false)에는 rsiCloses=closes 그대로 → 확정 종가로 자동 고정
+      }
+    } catch(e) { /* meta 정보 없으면 기존 방식(전체 포함) 그대로 사용 */ }
+
+    s.rsi=calcRSI(rsiCloses);
     var validIdx=[];
     var valid=[];
     for(var i=0;i<closes.length;i++){
