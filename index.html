@@ -571,9 +571,10 @@ function mddHTML(s){
 }
 
 // ── 미니차트 ──
-function makeMiniChart(data,color){
+function makeMiniChart(data,color,displayLen){
   if(!data||data.length<2) return '';
-  var display=data.slice(-60),W=320,H=60,PAD=4;
+  displayLen = displayLen || Math.min(60, data.length);
+  var display=data.slice(-displayLen),W=320,H=60,PAD=4;
   var minP=Math.min.apply(null,display),maxP=Math.max.apply(null,display),range=maxP-minP||1;
   function tx(i,len){return PAD+(i/(len-1))*(W-PAD*2);}
   function ty(v){return H-PAD-((v-minP)/range)*(H-PAD*2);}
@@ -601,19 +602,17 @@ function makeMiniChart(data,color){
 
 // ── 다이버전스 구간 표시 (미니차트 위 마커, 신규 기능) ──
 // data: 전체 chartData(최대180일), div: detectDivergence 반환값(idx1/idx2 포함)
-function makeDivMarkers(data, div){
+function makeDivMarkers(data, div, displayLen){
   if(!data||!div||div.idx1==null||div.idx2==null) return '';
-  var displayLen=Math.min(60, data.length);
-  var dataStartIdx=data.length-displayLen; // display 배열의 0번째가 data 기준 몇 번 인덱스인지
+  displayLen = displayLen || Math.min(60, data.length);
+  var dataStartIdx=data.length-displayLen;
   var W=320,H=60,PAD=4;
   var display=data.slice(-displayLen);
   var minP=Math.min.apply(null,display),maxP=Math.max.apply(null,display),range=maxP-minP||1;
   function tx(i){return PAD+(i/(displayLen-1))*(W-PAD*2);}
   function ty(v){return H-PAD-((v-minP)/range)*(H-PAD*2);}
 
-  // idx1/idx2(전체 data 기준)를 display 기준 상대 인덱스로 변환
   var relIdx1=div.idx1-dataStartIdx, relIdx2=div.idx2-dataStartIdx;
-  // 두 지점 모두 현재 표시 구간(최근 60일) 안에 있을 때만 마커 표시
   if(relIdx1<0||relIdx1>=displayLen||relIdx2<0||relIdx2>=displayLen) return '';
 
   var v1=data[div.idx1], v2=data[div.idx2];
@@ -626,6 +625,14 @@ function makeDivMarkers(data, div){
     +'<circle cx="'+x1.toFixed(1)+'" cy="'+y1.toFixed(1)+'" r="3" fill="'+markColor+'" stroke="#000" stroke-width="0.8"/>'
     +'<circle cx="'+x2.toFixed(1)+'" cy="'+y2.toFixed(1)+'" r="3" fill="'+markColor+'" stroke="#000" stroke-width="0.8"/>'
     +'</svg>';
+}
+
+// 다이버전스 지점을 포함하기 위해 필요한 최소 표시 일수 계산 (최소 60일 보장)
+function divRequiredDisplayLen(data, div){
+  if(!data||!div||div.idx1==null||div.idx2==null) return Math.min(60, data?data.length:60);
+  var earliestIdx = Math.min(div.idx1, div.idx2);
+  var neededLen = data.length - earliestIdx + 4; // 살짝 여유(4일)를 둬서 마커가 차트 끝에 딱 붙지 않게
+  return Math.min(data.length, Math.max(60, neededLen));
 }
 
 // ── 카드 렌더 ──
@@ -660,9 +667,11 @@ function renderCard(s){
   }
   // 다이버전스는 한 번만 계산해서 배지와 차트 마커 둘 다에 재사용 (중복 계산 방지)
   var divResult = (s.chartData && s.chartData.length>=30) ? detectDivergence(s.chartData, s.timestamps) : null;
-  var divMarkerHTML = divResult ? makeDivMarkers(s.chartData, divResult) : '';
+  // 다이버전스 지점이 기본 60일 범위 밖이면 차트 표시 범위를 자동으로 넓혀서 마커가 항상 보이게 함
+  var chartDisplayLen = divResult ? divRequiredDisplayLen(s.chartData, divResult) : Math.min(60, s.chartData?s.chartData.length:60);
+  var divMarkerHTML = divResult ? makeDivMarkers(s.chartData, divResult, chartDisplayLen) : '';
   var chartHTML = s.chartData
-    ? (legendHTML + '<div style="position:relative">' + makeMiniChart(s.chartData,chartColor) + divMarkerHTML + '</div>')
+    ? (legendHTML + '<div style="position:relative">' + makeMiniChart(s.chartData,chartColor,chartDisplayLen) + divMarkerHTML + '</div>')
     : '';
   var divHTML = divResult ? getDivHTMLFromResult(divResult) : '';
   var krsearchDisplay=krsearchTickerToName(s.ticker);
@@ -683,7 +692,7 @@ function renderCard(s){
     +chartHTML+divHTML
     +'<div class="bar-wrap"><div class="bar-fill" style="width:'+pct+'%;background:'+barColor(v)+'"></div>'
     +'<div class="bar-mark" style="left:'+threshold+'%"></div></div>'
-    +'<div class="card-foot"><span>'+pLabel(s.period)+' · 최근 60일</span><span>'+footRight+'</span></div>';
+    +'<div class="card-foot"><span>'+pLabel(s.period)+' · 최근 '+chartDisplayLen+'일</span><span>'+footRight+'</span></div>';
 }
 
 // ── 전체 렌더 ──
