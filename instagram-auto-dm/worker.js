@@ -128,6 +128,7 @@ async function pollComments(env) {
   if (firstRun) {
     state.since = now;
     changed = true;
+    console.log(`첫 확인: 인스타 계정 ${state.accountId} — 지금부터 달리는 새 댓글에 DM을 보냅니다`);
   }
   state.counts ??= {};
   state.seen ??= {};
@@ -138,9 +139,12 @@ async function pollComments(env) {
   });
   const cutoff = Math.max(state.since, now - POLL_WINDOW_MS);
   let budget = COMMENTS_PER_RUN;
+  let reels = 0;
+  let found = 0;
 
   for (const m of media) {
     if (env.ONLY_REELS !== 'false' && m.media_product_type !== 'REELS') continue;
+    reels++;
     if (state.counts[m.id] === m.comments_count) continue;
     state.counts[m.id] = m.comments_count;
     changed = true;
@@ -155,6 +159,7 @@ async function pollComments(env) {
         break;
       }
       state.seen[c.id] = ts;
+      found++;
       try {
         await handleComment(state.accountId, {
           id: c.id,
@@ -182,6 +187,7 @@ async function pollComments(env) {
     }
   }
   if (changed) await env.STORE.put(POLL_KEY, JSON.stringify(state));
+  console.log(`댓글 확인 완료: 릴스 ${reels}개, 새 댓글 ${found}개`);
 }
 
 async function findAccountId(env, token) {
