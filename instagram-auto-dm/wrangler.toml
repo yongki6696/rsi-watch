@@ -1,0 +1,32 @@
+# Cloudflare Worker 설정 (wrangler CLI로 배포할 때 사용)
+# 비밀값은 여기에 쓰지 말고 아래 명령으로 등록:
+#   npx wrangler secret put IG_ACCESS_TOKEN
+#   npx wrangler secret put APP_SECRET
+#   npx wrangler secret put VERIFY_TOKEN
+
+name = "instagram-auto-dm"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+# 대시보드 Logs 탭에서 DM 전송/실패 로그 확인
+[observability]
+enabled = true
+
+# 매주 월요일 03:00(UTC)에 액세스 토큰 갱신
+[triggers]
+crons = ["0 3 * * 1"]
+
+# 토큰 자동 갱신용 KV. `npx wrangler kv namespace create TOKENS` 실행 후 나온 id로 바꾸고 주석 해제
+# [[kv_namespaces]]
+# binding = "TOKENS"
+# id = "여기에_KV_ID"
+
+[vars]
+# 댓글 작성자에게 보낼 DM 내용. {username} 은 댓글 작성자 아이디로 바뀜
+DM_MESSAGE = "@{username}님 댓글 감사합니다! 요청하신 링크 보내드려요 👉 https://example.com"
+# 쉼표로 구분한 키워드. 이 중 하나라도 들어간 댓글에만 DM (비워두면 모든 댓글)
+KEYWORDS = ""
+# "false" 로 바꾸면 릴스뿐 아니라 일반 게시물 댓글에도 DM
+ONLY_REELS = "true"
+# DM을 보낸 뒤 댓글에 공개 답글도 달고 싶으면 입력 (비워두면 답글 안 함)
+PUBLIC_REPLY_MESSAGE = ""
