@@ -27,7 +27,7 @@ beforeEach(() => {
     if (failPaths.some(p => u.pathname.endsWith(p))) {
       return Response.json({ error: { message: 'failed' } }, { status: 400 });
     }
-    if (u.pathname.endsWith('/me')) return Response.json({ username: OWN_USERNAME });
+    if (u.pathname.endsWith('/me') || u.pathname.endsWith(`/${ACCOUNT_ID}`)) return Response.json({ username: OWN_USERNAME });
     if (u.pathname === '/refresh_access_token') return Response.json({ access_token: 'refreshed-token', expires_in: 5184000 });
     return Response.json({ id: 'ok' });
   };
@@ -178,4 +178,22 @@ test('IG_ACCESS_TOKEN 을 새로 넣으면 예전에 갱신해 둔 KV 토큰은 
   const updated = { ...env, IG_ACCESS_TOKEN: 'brand-new-token-BBBBBBBBBBBBBBBBBBBB' };
   await post(commentPayload(), updated);
   assert.equal(graphCalls()[0].headers.Authorization, `Bearer ${updated.IG_ACCESS_TOKEN}`);
+});
+
+test('페이스북 페이지 토큰(EAA…)이면 graph.facebook.com 의 me/messages 로 전송', async () => {
+  const env = { ...baseEnv, IG_ACCESS_TOKEN: 'EAAPageToken123' };
+  await post(commentPayload(), env);
+  const [dm] = graphCalls();
+  assert.equal(dm.url.href, 'https://graph.facebook.com/v26.0/me/messages');
+  assert.equal(dm.headers.Authorization, 'Bearer EAAPageToken123');
+  assert.deepEqual(dm.body.recipient, { comment_id: 'c1' });
+});
+
+test('페이스북 페이지 토큰은 만료되지 않으므로 크론에서 갱신하지 않음', async () => {
+  const env = { ...baseEnv, IG_ACCESS_TOKEN: 'EAAPageToken123', TOKENS: kv() };
+  const pending = [];
+  await worker.scheduled({}, env, { waitUntil: p => pending.push(p) });
+  await Promise.all(pending);
+  assert.equal(calls.length, 0);
+  assert.equal(env.TOKENS.store.size, 0);
 });

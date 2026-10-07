@@ -1,5 +1,7 @@
 // 인스타그램 릴스 댓글 → 자동 DM (Cloudflare Worker)
 // 댓글 웹후크를 받으면 공식 "비공개 답장(Private Reply)" API로 댓글 작성자에게 DM을 보낸다.
+// IG_ACCESS_TOKEN 이 페이스북 페이지 토큰(EAA…)이면 "Facebook 로그인" 방식(graph.facebook.com),
+// 인스타그램 토큰(IG…)이면 "Instagram 로그인" 방식(graph.instagram.com)으로 동작한다.
 // 설정 방법은 README.md 참고
 
 const DEFAULT_API_VERSION = 'v26.0';
@@ -98,13 +100,13 @@ async function handleComment(accountId, comment, env) {
   }
 
   const token = await getAccessToken(env);
-  if (from.id === accountId || (await isOwnUsername(from.username, token, env))) {
+  if (from.id === accountId || (await isOwnUsername(from.username, accountId, token, env))) {
     console.log(`건너뜀 (내 댓글) 댓글 ${commentId}`);
     return;
   }
 
   const vars = { username: from.username ?? '' };
-  await graphPost(env, token, `${accountId}/messages`, {
+  await graphPost(env, token, isPageToken(token) ? 'me/messages' : `${accountId}/messages`, {
     recipient: { comment_id: commentId },
     message: { text: fillTemplate(env.DM_MESSAGE || DEFAULT_DM_MESSAGE, vars) },
   });
@@ -131,11 +133,13 @@ function fillTemplate(template, vars) {
 
 // 워커 인스턴스마다 한 번만 조회
 let ownUsername;
-async function isOwnUsername(username, token, env) {
+async function isOwnUsername(username, accountId, token, env) {
   if (!username) return false;
   if (ownUsername === undefined) {
     try {
-      ownUsername = (await graphGet(env, token, 'me', { fields: 'username' })).username ?? null;
+      // 페이지 토큰의 me 는 페이스북 페이지라서 인스타 계정 ID로 조회
+      const path = isPageToken(token) ? accountId : 'me';
+      ownUsername = (await graphGet(env, token, path, { fields: 'username' })).username ?? null;
     } catch (err) {
       console.warn(`내 계정 username 조회 실패: ${err.message}`);
       return false;
@@ -152,11 +156,15 @@ async function getAccessToken(env) {
 }
 
 async function refreshAccessToken(env) {
+  const token = await getAccessToken(env);
+  if (isPageToken(token)) {
+    console.log('페이스북 페이지 토큰은 만료되지 않아 갱신하지 않습니다');
+    return;
+  }
   if (!env.TOKENS) {
     console.warn('TOKENS KV가 연결되지 않아 토큰 자동 갱신을 건너뜁니다 (토큰은 발급 60일 후 만료)');
     return;
   }
-  const token = await getAccessToken(env);
   const res = await fetch(
     `https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${encodeURIComponent(token)}`,
   );
@@ -172,19 +180,24 @@ function tokenFingerprint(token) {
   return (token ?? '').slice(-16);
 }
 
-function apiBase(env) {
-  return `https://graph.instagram.com/${env.GRAPH_API_VERSION || DEFAULT_API_VERSION}`;
+function isPageToken(token) {
+  return (token ?? '').startsWith('EAA');
+}
+
+function apiBase(env, token) {
+  const host = isPageToken(token) ? 'graph.facebook.com' : 'graph.instagram.com';
+  return `https://${host}/${env.GRAPH_API_VERSION || DEFAULT_API_VERSION}`;
 }
 
 async function graphGet(env, token, path, params) {
-  const res = await fetch(`${apiBase(env)}/${path}?${new URLSearchParams(params)}`, {
+  const res = await fetch(`${apiBase(env, token)}/${path}?${new URLSearchParams(params)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   return readGraphResponse(res, path);
 }
 
 async function graphPost(env, token, path, body) {
-  const res = await fetch(`${apiBase(env)}/${path}`, {
+  const res = await fetch(`${apiBase(env, token)}/${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
