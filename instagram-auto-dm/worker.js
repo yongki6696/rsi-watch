@@ -1,12 +1,22 @@
 // 인스타그램 릴스 댓글 → 자동 DM (Cloudflare Worker)
-// 댓글 웹후크를 받으면 공식 "비공개 답장(Private Reply)" API로 댓글 작성자에게 DM을 보낸다.
+// 새 댓글을 찾으면 공식 "비공개 답장(Private Reply)" API로 댓글 작성자에게 DM을 보낸다.
+// 새 댓글은 두 가지 경로로 찾는다.
+//   1) 크론 트리거(2분마다)로 내 릴스 댓글을 직접 확인 — STORE KV 필요, 웹후크 설정 불필요
+//   2) 메타 웹후크(comments)가 보내 주는 알림 — 웹후크 연결이 끝난 경우
 // IG_ACCESS_TOKEN 이 페이스북 페이지 토큰(EAA…)이면 "Facebook 로그인" 방식(graph.facebook.com),
 // 인스타그램 토큰(IG…)이면 "Instagram 로그인" 방식(graph.instagram.com)으로 동작한다.
 // 설정 방법은 README.md 참고
 
 const DEFAULT_API_VERSION = 'v26.0';
 const DEFAULT_DM_MESSAGE = '댓글 남겨주셔서 감사합니다! 🙌';
-const TOKEN_KV_KEY = 'ig_access_token';
+const TOKEN_KEY = 'ig_access_token';
+const POLL_KEY = 'poll_state';
+const MEDIA_LIMIT = 25; // 최근 게시물 몇 개의 댓글을 확인할지
+const COMMENT_PAGES = 4; // 게시물당 댓글 몇 페이지(50개씩)까지 읽을지
+const COMMENTS_PER_RUN = 15; // 한 번 실행에 처리할 최대 댓글 수 (워커 요청 수 제한 대비)
+const POLL_WINDOW_MS = 30 * 60 * 1000; // 이보다 오래된 댓글은 새 댓글로 보지 않음
+const SEEN_TTL_MS = 2 * 60 * 60 * 1000;
+const REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export default {
   async fetch(request, env, ctx) {
@@ -36,11 +46,28 @@ export default {
     return new Response('EVENT_RECEIVED');
   },
 
-  // 크론 트리거: 60일짜리 액세스 토큰을 만료 전에 갱신
+  // 크론 트리거: 새 댓글 확인 + (Instagram 로그인 방식이면) 60일짜리 토큰을 일주일마다 갱신
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(refreshAccessToken(env));
+    ctx.waitUntil(runScheduled(env));
   },
 };
+
+async function runScheduled(env) {
+  if (!env.STORE) {
+    console.warn('STORE KV가 연결되지 않아 댓글 확인을 건너뜁니다 — README 3단계 참고');
+    return;
+  }
+  try {
+    await refreshAccessToken(env);
+  } catch (err) {
+    console.error(`토큰 갱신 실패: ${err.message}`);
+  }
+  try {
+    await pollComments(env);
+  } catch (err) {
+    console.error(`댓글 확인 실패: ${err.message}`);
+  }
+}
 
 // 메타 대시보드에서 콜백 URL을 등록할 때 호출되는 인증 요청
 function verifySubscription(url, env) {
@@ -85,6 +112,106 @@ async function handlePayload(payload, env) {
   }
 }
 
+// 댓글 수가 바뀐 릴스만 댓글을 읽어서, 아직 처리하지 않은 최근 댓글에 DM을 보낸다
+async function pollComments(env) {
+  const token = await getAccessToken(env);
+  const state = (await env.STORE.get(POLL_KEY, 'json')) ?? {};
+  const now = Date.now();
+  let changed = false;
+
+  if (!state.accountId) {
+    state.accountId = await findAccountId(env, token);
+    changed = true;
+  }
+  // 처음 실행할 때는 기준 시각만 기록 — 예전 댓글에 DM이 한꺼번에 가지 않도록
+  const firstRun = !state.since;
+  if (firstRun) {
+    state.since = now;
+    changed = true;
+  }
+  state.counts ??= {};
+  state.seen ??= {};
+
+  const { data: media = [] } = await graphGet(env, token, `${state.accountId}/media`, {
+    fields: 'id,media_product_type,comments_count',
+    limit: MEDIA_LIMIT,
+  });
+  const cutoff = Math.max(state.since, now - POLL_WINDOW_MS);
+  let budget = COMMENTS_PER_RUN;
+
+  for (const m of media) {
+    if (env.ONLY_REELS !== 'false' && m.media_product_type !== 'REELS') continue;
+    if (state.counts[m.id] === m.comments_count) continue;
+    state.counts[m.id] = m.comments_count;
+    changed = true;
+    if (firstRun) continue;
+
+    for (const c of await fetchComments(env, token, m.id)) {
+      const ts = parseTime(c.timestamp);
+      if (!(ts >= cutoff) || state.seen[c.id]) continue;
+      // 이번에 다 못 하면 댓글 수를 지워서 다음 실행 때 이 릴스를 다시 읽게 한다
+      if (budget-- <= 0) {
+        delete state.counts[m.id];
+        break;
+      }
+      state.seen[c.id] = ts;
+      try {
+        await handleComment(state.accountId, {
+          id: c.id,
+          text: c.text,
+          from: c.from ?? { username: c.username },
+          media: { id: m.id, media_product_type: m.media_product_type },
+        }, env);
+      } catch (err) {
+        console.error(`댓글 ${c.id} 처리 실패: ${err.message}`);
+      }
+    }
+  }
+
+  for (const [id, ts] of Object.entries(state.seen)) {
+    if (ts < now - SEEN_TTL_MS) {
+      delete state.seen[id];
+      changed = true;
+    }
+  }
+  const current = new Set(media.map(m => m.id));
+  for (const id of Object.keys(state.counts)) {
+    if (!current.has(id)) {
+      delete state.counts[id];
+      changed = true;
+    }
+  }
+  if (changed) await env.STORE.put(POLL_KEY, JSON.stringify(state));
+}
+
+async function findAccountId(env, token) {
+  if (isPageToken(token)) {
+    const page = await graphGet(env, token, 'me', { fields: 'instagram_business_account' });
+    if (!page.instagram_business_account?.id) throw new Error('페이스북 페이지에 연결된 인스타그램 계정이 없습니다');
+    return page.instagram_business_account.id;
+  }
+  return (await graphGet(env, token, 'me', { fields: 'user_id' })).user_id;
+}
+
+async function fetchComments(env, token, mediaId) {
+  const comments = [];
+  let url = `${apiBase(env, token)}/${mediaId}/comments?${new URLSearchParams({
+    fields: 'id,text,timestamp,username,from',
+    limit: 50,
+  })}`;
+  for (let page = 0; url && page < COMMENT_PAGES; page++) {
+    const data = await graphFetch(url, token, `${mediaId}/comments`);
+    comments.push(...(data.data ?? []));
+    url = data.paging?.next;
+  }
+  return comments;
+}
+
+// 인스타그램 시간 형식(2026-10-08T00:24:58+0000)을 밀리초로
+function parseTime(timestamp) {
+  return Date.parse(String(timestamp).replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+}
+
 async function handleComment(accountId, comment, env) {
   const commentId = comment.id;
   const from = comment.from ?? {};
@@ -112,7 +239,7 @@ async function handleComment(accountId, comment, env) {
   });
   console.log(`DM 전송 완료: @${from.username} (댓글 ${commentId})`);
 
-  // DM이 성공했을 때만 공개 답글을 단다. 댓글당 DM은 1번만 허용되므로 웹후크가 중복으로 와도 답글은 한 번만 달린다.
+  // DM이 성공했을 때만 공개 답글을 단다. 댓글당 DM은 1번만 허용되므로 같은 댓글이 두 번 처리돼도 답글은 한 번만 달린다.
   if (env.PUBLIC_REPLY_MESSAGE) {
     await graphPost(env, token, `${commentId}/replies`, { message: fillTemplate(env.PUBLIC_REPLY_MESSAGE, vars) });
     console.log(`공개 답글 완료 (댓글 ${commentId})`);
@@ -148,31 +275,31 @@ async function isOwnUsername(username, accountId, token, env) {
   return ownUsername !== null && ownUsername.toLowerCase() === username.toLowerCase();
 }
 
-async function getAccessToken(env) {
-  const stored = env.TOKENS ? await env.TOKENS.get(TOKEN_KV_KEY, 'json') : null;
-  // IG_ACCESS_TOKEN을 새로 넣었다면 예전 토큰에서 갱신해 둔 값은 무시
-  if (stored?.base === tokenFingerprint(env.IG_ACCESS_TOKEN)) return stored.token;
-  return env.IG_ACCESS_TOKEN;
+// IG_ACCESS_TOKEN을 새로 넣었다면 예전 토큰에서 갱신해 둔 값은 무시
+async function readStoredToken(env) {
+  const stored = env.STORE ? await env.STORE.get(TOKEN_KEY, 'json') : null;
+  return stored?.base === tokenFingerprint(env.IG_ACCESS_TOKEN) ? stored : null;
 }
 
+async function getAccessToken(env) {
+  return (await readStoredToken(env))?.token ?? env.IG_ACCESS_TOKEN;
+}
+
+// 페이스북 페이지 토큰은 만료되지 않으므로 Instagram 로그인 토큰만 갱신
 async function refreshAccessToken(env) {
-  const token = await getAccessToken(env);
-  if (isPageToken(token)) {
-    console.log('페이스북 페이지 토큰은 만료되지 않아 갱신하지 않습니다');
-    return;
-  }
-  if (!env.TOKENS) {
-    console.warn('TOKENS KV가 연결되지 않아 토큰 자동 갱신을 건너뜁니다 (토큰은 발급 60일 후 만료)');
-    return;
-  }
+  const stored = await readStoredToken(env);
+  const token = stored?.token ?? env.IG_ACCESS_TOKEN;
+  if (isPageToken(token) || Date.now() - stored?.refreshedAt < REFRESH_INTERVAL_MS) return;
+
   const res = await fetch(
     `https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${encodeURIComponent(token)}`,
   );
   const data = await readGraphResponse(res, 'refresh_access_token');
-  await env.TOKENS.put(
-    TOKEN_KV_KEY,
-    JSON.stringify({ base: tokenFingerprint(env.IG_ACCESS_TOKEN), token: data.access_token }),
-  );
+  await env.STORE.put(TOKEN_KEY, JSON.stringify({
+    base: tokenFingerprint(env.IG_ACCESS_TOKEN),
+    token: data.access_token,
+    refreshedAt: Date.now(),
+  }));
   console.log(`액세스 토큰 갱신 완료 (만료까지 약 ${Math.round(data.expires_in / 86400)}일)`);
 }
 
@@ -190,10 +317,12 @@ function apiBase(env, token) {
 }
 
 async function graphGet(env, token, path, params) {
-  const res = await fetch(`${apiBase(env, token)}/${path}?${new URLSearchParams(params)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return readGraphResponse(res, path);
+  return graphFetch(`${apiBase(env, token)}/${path}?${new URLSearchParams(params)}`, token, path);
+}
+
+async function graphFetch(url, token, label) {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  return readGraphResponse(res, label);
 }
 
 async function graphPost(env, token, path, body) {

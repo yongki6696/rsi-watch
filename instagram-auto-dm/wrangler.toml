@@ -12,13 +12,13 @@ compatibility_date = "2025-09-01"
 [observability]
 enabled = true
 
-# 매주 월요일 03:00(UTC)에 액세스 토큰 갱신
+# 2분마다 새 댓글 확인 (+ Instagram 로그인 토큰이면 일주일마다 갱신)
 [triggers]
-crons = ["0 3 * * 1"]
+crons = ["*/2 * * * *"]
 
-# 토큰 자동 갱신용 KV. `npx wrangler kv namespace create TOKENS` 실행 후 나온 id로 바꾸고 주석 해제
+# 댓글 확인 기록·토큰 저장용 KV. `npx wrangler kv namespace create STORE` 실행 후 나온 id로 바꾸고 주석 해제
 # [[kv_namespaces]]
-# binding = "TOKENS"
+# binding = "STORE"
 # id = "여기에_KV_ID"
 
 [vars]
