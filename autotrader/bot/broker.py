@@ -34,11 +34,13 @@ class PaperBroker:
     def equity(self) -> float:
         return self.cash
 
-    def open(self, sig: Signal, qty: float, price: float, t: pd.Timestamp) -> Position:
+    def open(self, sig: Signal, qty: float, price: float, t: pd.Timestamp,
+             tp1_fraction: float | None = None) -> Position:
+        frac = self.cfg.strategy.tp1_fraction if tp1_fraction is None else tp1_fraction
         fill = slipped(price, sig.side, True, self.cfg.costs.slippage)
         fee = fill * qty * self.cfg.costs.fee_rate
         self.cash -= fee
-        return new_position(sig.side, qty, fill, sig.stop, sig.tp1, sig.tp2, self.cfg.strategy.tp1_fraction,
+        return new_position(sig.side, qty, fill, sig.stop, sig.tp1, sig.tp2, frac,
                             t.isoformat(), f"{sig.setup}/{sig.trigger}", fee)
 
     def execute(self, pos: Position, ex: Exit, t: pd.Timestamp) -> float:
@@ -180,22 +182,24 @@ class CcxtBroker:
             return None
 
     # ── 실행 ──
-    def open(self, sig: Signal, qty: float, price: float, t: pd.Timestamp) -> Position:
+    def open(self, sig: Signal, qty: float, price: float, t: pd.Timestamp,
+             tp1_fraction: float | None = None) -> Position:
         amount = self._amount(qty)
         self._check_min(amount, price)
-        frac = self.cfg.strategy.tp1_fraction
+        frac = self.cfg.strategy.tp1_fraction if tp1_fraction is None else tp1_fraction
         if self.native_exits and 0 < frac < 1:  # 1차 익절 주문도 최소 기준을 넘어야 진입
             self._check_min(self._amount(qty * frac), sig.tp1)
         order = self._market("buy" if sig.side == "long" else "sell", amount, price, reduce_only=False)
         fill = float(order.get("average") or order.get("price") or price)
         qty_filled = float(order.get("filled") or amount) * self.contract_size
         pos = new_position(sig.side, qty_filled, fill, sig.stop, sig.tp1, sig.tp2,
-                           self.cfg.strategy.tp1_fraction, t.isoformat(), f"{sig.setup}/{sig.trigger}",
+                           frac, t.isoformat(), f"{sig.setup}/{sig.trigger}",
                            fill * qty_filled * self.cfg.costs.fee_rate)
         pos.order_ids["entry"] = str(order.get("id"))
         if self.native_exits:
             try:
-                pos.order_ids["sl"] = self._stop_order(pos, pos.stop)
+                if pos.stop:
+                    pos.order_ids["sl"] = self._stop_order(pos, pos.stop)
                 if pos.tp1_qty > 0 and self._amount(pos.tp1_qty) > 0:
                     pos.order_ids["tp1"] = self._limit_exit(pos, pos.tp1_qty, pos.tp1)
                 if pos.tp2:

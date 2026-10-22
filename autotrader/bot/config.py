@@ -59,6 +59,19 @@ class StrategyParams:
 
 
 @dataclass
+class TrendParams:
+    """추세추종(돈치안 돌파) 자동매매 — mode: hybrid 에서 실제 주문을 내는 쪽."""
+    timeframe: str = "1d"          # 판단 봉 (일봉 마감 직후 판단)
+    entry_days: int = 20           # 종가가 직전 20일 최고가를 넘으면 진입
+    exit_days: int = 10            # 종가가 직전 10일 최저가 아래면 청산
+    allow_short: bool = False      # 숏도 할지 (검증은 롱만 했음)
+    exposure: float = 1.0          # 포지션 명목가치 = 자산 x 배수 (1.0 = 현물 매수와 같은 노출)
+    disaster_stop_atr: float = 2.0 # 거래소 비상 손절 = 10일 최저가 - ATR x 배수 (0 이면 안 검)
+    atr_period: int = 20
+    max_delay_hours: float = 6.0   # 일봉 마감 후 이 시간이 지나 켜졌으면 그날 판단은 건너뜀
+
+
+@dataclass
 class RiskParams:
     risk_per_trade: float = 0.01   # 1회 손실 한도 = 자산의 1%
     max_leverage: float = 3.0      # 포지션 명목가치 상한 = 자산 x 배수
@@ -71,6 +84,7 @@ class CostParams:
     fee_rate: float = 0.0005       # 시장가(테이커) 수수료: 진입, 손절
     maker_fee_rate: float = 0.0002 # 지정가(메이커) 수수료: 익절 주문
     slippage: float = 0.0002       # 시장가 체결 미끄러짐
+    funding_apr: float = 0.11      # 무기한 선물 롱 보유 중 펀딩비 (연율, 추세추종 백테스트에 반영)
 
 
 @dataclass
@@ -91,7 +105,9 @@ class NotifyParams:
 
 @dataclass
 class Config:
-    symbol: str = "BTC/USDT:USDT"  # ccxt 심볼. 현물: BTC/USDT, 업비트: BTC/KRW
+    mode: str = "hybrid"           # hybrid: 추세추종 자동매매 + 채널 방식 신호는 알림만 / smc: 채널 방식 자동매매
+    alerts: bool = True            # hybrid 에서 채널 방식 신호를 텔레그램으로 알릴지
+    symbol: str = "BTC/USDT:USDT"  # ccxt 심볼. 현물: BTC/USDT, 업비트: BTC/KRW, 하이퍼리퀴드: BTC/USDC:USDC
     timeframe: str = "15m"         # 진입(트리거) 봉: 내부 구조 전환·핀바 확인
     liquidity_timeframe: str = "1h"  # 내부 유동성(단기 고점/저점) 봉
     structure_timeframe: str = "4h"  # 가격 구조·외부 유동성·오더블록 봉
@@ -99,6 +115,7 @@ class Config:
     initial_equity: float = 10_000.0  # 백테스트/모의매매 시작 자산
     exchange: ExchangeParams = field(default_factory=ExchangeParams)
     strategy: StrategyParams = field(default_factory=StrategyParams)
+    trend: TrendParams = field(default_factory=TrendParams)
     risk: RiskParams = field(default_factory=RiskParams)
     costs: CostParams = field(default_factory=CostParams)
     live: LiveParams = field(default_factory=LiveParams)
@@ -128,6 +145,7 @@ def config_from_dict(data: dict[str, Any]) -> Config:
     sections = {
         "exchange": ExchangeParams,
         "strategy": StrategyParams,
+        "trend": TrendParams,
         "risk": RiskParams,
         "costs": CostParams,
         "live": LiveParams,
@@ -157,6 +175,15 @@ def validate(cfg: Config) -> None:
 
     if cfg.exchange.market_type not in ("spot", "future"):
         raise ValueError("exchange.market_type 은 spot 또는 future 여야 합니다")
+    if cfg.mode not in ("hybrid", "smc"):
+        raise ValueError("mode 는 hybrid / smc 중 하나여야 합니다")
+    tp = cfg.trend
+    if tp.exposure <= 0 or tp.exposure > cfg.risk.max_leverage:
+        raise ValueError("trend.exposure 는 0 초과, risk.max_leverage 이하여야 합니다")
+    if tp.allow_short and cfg.exchange.market_type == "spot":
+        raise ValueError("현물에서는 trend.allow_short 를 쓸 수 없습니다")
+    if tp.exit_days >= tp.entry_days or tp.exit_days < 2:
+        raise ValueError("trend.exit_days 는 2 이상, entry_days 보다 작아야 합니다")
     p = cfg.strategy
     if p.bias_mode not in ("off", "structure"):
         raise ValueError("strategy.bias_mode 은 off / structure 중 하나여야 합니다")

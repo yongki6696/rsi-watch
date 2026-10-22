@@ -158,9 +158,9 @@ def compute_stats(trades: pd.DataFrame, equity: pd.Series, df: pd.DataFrame, cfg
 
 
 def format_stats(stats: dict) -> str:
-    pct = {"총 수익률", "보유(Buy&Hold) 수익률", "최대 낙폭(MDD)"}
-    rate = {"승률", "1차 익절 도달률"}
-    money = {"시작 자산", "최종 자산"}
+    pct = {"총 수익률", "보유(Buy&Hold) 수익률", "최대 낙폭(MDD)", "연환산 수익률", "보유 MDD"}
+    rate = {"승률", "1차 익절 도달률", "포지션 보유 비중"}
+    money = {"시작 자산", "최종 자산", "낸 펀딩비", "평균 이익 거래", "평균 손실 거래"}
     lines = []
     for k, v in stats.items():
         if k in pct:

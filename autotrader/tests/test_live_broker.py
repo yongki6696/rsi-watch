@@ -312,6 +312,9 @@ class FakeHyperliquid(FakeExchange):
         assert not params, "하이퍼리퀴드에는 추가 파라미터를 보내면 안 됨"
         return super().fetch_order(oid, symbol, params)
 
+    def fetch_balance(self):
+        return {"total": {"USDC": 1000.0}, "free": {}}
+
 
 def _hl_cfg():
     return config_from_dict({"symbol": "BTC/USDC:USDC", "exchange": {"id": "hyperliquid"}})

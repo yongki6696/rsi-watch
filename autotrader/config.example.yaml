@@ -1,26 +1,42 @@
-# 차슐랭 방식 BTC 자동매매 봇 설정 예시
+# BTC 자동매매 봇 설정 예시 — 하이퍼리퀴드, 하이브리드 모드
+#   - 추세추종(일봉 20일 돌파 / 10일 이탈)은 자동으로 주문
+#   - 차슐랭 채널 방식 신호(15분봉)는 텔레그램 알림만 (주문 없음)
 # 복사해서 쓰세요:  cp config.example.yaml config.yaml
 # 적지 않은 항목은 bot/config.py 의 기본값을 씁니다. 키 이름을 틀리면 바로 오류가 납니다.
 
-symbol: BTC/USDT:USDT        # 바이낸스 USDT 무기한 선물. 업비트 현물은 BTC/KRW
-timeframe: 15m               # 진입 봉: 내부 구조 전환 확인 (채널은 10분·30분봉 사용, 바이낸스는 10분봉이 없어 15m)
-liquidity_timeframe: 1h      # 내부 유동성(단기 고점·저점)과 핀바를 보는 봉
-structure_timeframe: 4h      # 가격 구조, 외부 유동성, 오더블록을 보는 봉
-timezone: Asia/Seoul         # 일일 손실 한도가 리셋되는 기준 시간대
+mode: hybrid                 # hybrid = 추세추종 자동매매 + 채널 신호 알림 / smc = 채널 방식 자동매매
+alerts: true                 # 채널 방식 신호 알림 켜기
+symbol: BTC/USDC:USDC        # 하이퍼리퀴드 BTC 무기한. 바이낸스 선물은 BTC/USDT:USDT
+timeframe: 15m               # 채널 방식: 진입 봉 (내부 구조 전환 확인)
+liquidity_timeframe: 1h      # 채널 방식: 내부 유동성(단기 고점·저점)과 핀바를 보는 봉
+structure_timeframe: 4h      # 채널 방식: 가격 구조, 외부 유동성, 오더블록을 보는 봉
+timezone: Asia/Seoul
 initial_equity: 10000        # 백테스트/모의매매 시작 자산 (실거래는 거래소 잔고 사용)
 
 exchange:
-  id: binance                # ccxt 거래소 id: binance / bybit / okx / upbit ...
-  market_type: future        # future = 롱·숏 / spot = 롱만
-  sandbox: true              # ★ 바이낸스 선물 테스트넷 (testnet.binancefuture.com 키)
-  demo: false                # 바이낸스 데모 트레이딩 계정을 쓰려면 sandbox: false, demo: true
-  leverage: 3                # 거래소에 설정할 레버리지 (실제 노출은 risk.max_leverage 로 다시 제한)
-  margin_mode: isolated      # 격리 마진 (cross = 교차)
-  api_key_env: EXCHANGE_API_KEY      # API 키는 파일에 쓰지 말고 환경변수로
+  id: hyperliquid            # ccxt 거래소 id: hyperliquid / binance / bybit / okx / upbit ...
+  market_type: future        # future = 무기한 선물 / spot = 현물
+  sandbox: true              # ★ 하이퍼리퀴드 테스트넷. 충분히 확인한 뒤에만 false
+  demo: false                # (바이낸스 데모 트레이딩 전용)
+  leverage: 2                # 거래소 레버리지 한도. 실제 노출은 trend.exposure (1배)
+  margin_mode: isolated      # 격리 마진: 이 포지션 증거금만 위험에 노출
+  wallet_address_env: HYPERLIQUID_WALLET_ADDRESS  # 메인 지갑 주소 (환경변수 이름)
+  private_key_env: HYPERLIQUID_PRIVATE_KEY        # API 지갑 개인키 (환경변수 이름, 출금 권한 없음)
+  api_key_env: EXCHANGE_API_KEY                   # (바이낸스 등 API 키 방식 거래소용)
   secret_env: EXCHANGE_API_SECRET
-  password_env: EXCHANGE_API_PASSWORD  # OKX passphrase 등 (필요할 때만)
+  password_env: EXCHANGE_API_PASSWORD
 
-strategy:
+trend:                       # ★ 실제 주문을 내는 추세추종
+  timeframe: 1d              # 일봉 마감(UTC 00:00 = 한국 오전 9시) 직후 판단
+  entry_days: 20             # 일봉 종가 > 직전 20일 최고가 → 롱 진입
+  exit_days: 10              # 일봉 종가 < 직전 10일 최저가 → 청산
+  allow_short: false         # 숏은 검증에서 성과가 나빠 끔
+  exposure: 1.0              # 포지션 크기 = 자산 x 1배 (BTC 를 현물로 산 것과 같은 노출)
+  disaster_stop_atr: 2.0     # 거래소 비상 손절 = 10일 최저가 - ATR x 2 (봇이 꺼져도 폭락 대비)
+  atr_period: 20
+  max_delay_hours: 6         # 일봉 마감 후 6시간 넘게 지나 켜지면 그날 판단은 건너뜀
+
+strategy:                    # 채널 방식 규칙 (hybrid 에서는 알림에만 사용)
   # 유동성: 스윙 고점 뒤 = 바이사이드(숏 손절 물량), 스윙 저점 뒤 = 셀사이드(롱 손절 물량)
   liq_pivot_window: 5        # 1h 단기 고점/저점 = 내부 유동성 (좌우 5봉)
   ext_pivot_window: 3        # 4h 고점/저점 = 외부 유동성, 가격 구조 (좌우 3봉)
@@ -54,14 +70,15 @@ risk:
   max_consecutive_losses: 3  # 3연패면 그날 신규 진입 중지
 
 costs:                       # 백테스트·모의매매용 (실거래는 실제 체결 기준)
-  fee_rate: 0.0005           # 시장가(진입·손절) 바이낸스 선물 0.05%
-  maker_fee_rate: 0.0002     # 지정가(익절) 0.02%
+  fee_rate: 0.00045          # 하이퍼리퀴드 기본 등급 시장가 0.045% (바이낸스 선물 0.05%)
+  maker_fee_rate: 0.00015    # 지정가 0.015% (바이낸스 0.02%)
   slippage: 0.0002
+  funding_apr: 0.11          # 롱 보유 중 펀딩비 가정 (연 11%, 상승장에서는 더 높을 수 있음)
 
 live:
   enabled: false             # ★ 실거래 이중 안전장치: true + 실행 시 --live 둘 다 있어야 실주문
-  poll_seconds: 20
-  history_bars: 6000         # 15m x 6000 = 약 62일치로 유동성·구조 계산
+  poll_seconds: 30
+  history_bars: 5000         # 채널 신호용 15m 봉 수 (하이퍼리퀴드는 최근 5,000봉까지만 제공)
   exits: auto                # auto: 선물은 거래소 손절/익절 주문, 현물은 봇이 직접 감시
   state_file: state.json
   log_file: trader.log
@@ -70,16 +87,8 @@ notify:                      # 텔레그램 알림 (환경변수가 비어 있�
   telegram_token_env: TELEGRAM_BOT_TOKEN
   telegram_chat_env: TELEGRAM_CHAT_ID
 
-# ── 업비트 현물(KRW, 롱만) 예시 ──
-# symbol: BTC/KRW
-# exchange: {id: upbit, market_type: spot, sandbox: false}
-# risk: {max_leverage: 1}
-# costs: {fee_rate: 0.0005, maker_fee_rate: 0.0005}
-# initial_equity: 10000000
-
-# ── 하이퍼리퀴드 무기한(USDC, 롱·숏) 예시 ──
-# 키: HYPERLIQUID_WALLET_ADDRESS(메인 지갑 주소), HYPERLIQUID_PRIVATE_KEY(API 지갑 개인키)
-# symbol: BTC/USDC:USDC
-# exchange: {id: hyperliquid, market_type: future, sandbox: true, leverage: 3, margin_mode: isolated}
-# costs: {fee_rate: 0.00045, maker_fee_rate: 0.00015}
-# live: {history_bars: 5000}   # 하이퍼리퀴드는 최근 5,000봉까지만 제공
+# ── 다른 거래소 예시 ──
+# 바이낸스 선물: symbol: BTC/USDT:USDT / exchange: {id: binance, market_type: future, sandbox: true}
+#               costs: {fee_rate: 0.0005, maker_fee_rate: 0.0002}
+# 업비트 현물(롱만): symbol: BTC/KRW / exchange: {id: upbit, market_type: spot, sandbox: false}
+#                   risk: {max_leverage: 1} / costs: {fee_rate: 0.0005, maker_fee_rate: 0.0005, funding_apr: 0}
