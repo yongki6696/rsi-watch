@@ -25,7 +25,7 @@
 cd autotrader
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest -q                         # 59개 테스트
+python -m pytest -q                         # 63개 테스트
 cp config.example.yaml config.yaml          # 하이퍼리퀴드 + hybrid + 테스트넷이 기본
 
 # 1) 텔레그램 알림 (선택이지만 권장)
@@ -93,6 +93,41 @@ python -m bot run -c config.yaml --live
 python -m bot fetch -c config.yaml --exchange binance --symbol BTC/USDT --timeframe 1d --since 2018-01-01
 python -m bot backtest -c config.yaml --csv data/binance_BTC_USDT_1d.csv
 ```
+
+## 빗썸으로 돌리기 (원화 현물)
+
+추세추종은 롱만 하기 때문에 현물로도 그대로 돌릴 수 있습니다. 하이퍼리퀴드와 비교하면 장단점이 있습니다.
+
+| | 빗썸 현물 | 하이퍼리퀴드 무기한 |
+|---|---|---|
+| 펀딩비 | **없음** | 롱 보유 중 연 11% 안팎 |
+| 추세추종 2014–18 / 2019–22 / 2023–26 | **+1,032% / +659% / +146%** | +815% / +530% / +101% |
+| 비상 손절 | 거래소 스탑 주문이 없어 **봇이 현재가를 보고 직접 매도**. 봇이 꺼져 있으면 동작 안 함 | 거래소에 스탑 주문을 걸어 둠 |
+| 테스트 환경 | 없음 → 모의매매 후 소액으로 시작 | 테스트넷 있음 |
+| 입출금 | 원화 계좌로 바로 | 지갑·브리지 필요 |
+| 채널 신호 알림 | 원화 가격 기준 | 달러(USDC) 가격 기준 |
+
+- 빗썸 백테스트 가정: 수수료 0.04%, 슬리피지 0.03%. 실제 수수료는 등급·쿠폰에 따라 다르니 본인 수수료로 `costs`를 고치세요.
+- 백테스트는 달러 시세로 했습니다. 원화 시세에는 김치 프리미엄이 섞여 있어서 결과가 조금 달라질 수 있습니다.
+- 추세추종의 평소 청산은 일봉 종가 기준이라 하루 한 번만 판단하면 됩니다. 비상 손절은 그 사이 폭락에 대비한 보조 장치일 뿐입니다. 그래도 빗썸에서는 **봇이 계속 켜져 있어야** 비상 손절이 동작합니다.
+
+**설정 순서**
+
+1. **API 키 발급**: 빗썸 → 마이페이지 → API 관리에서 **API 2.0 키**를 발급합니다. ccxt는 새 API만 쓰므로 예전 1.0 키는 동작하지 않습니다.
+   - 권한: 자산 조회, 주문 조회, 주문하기만 켭니다. **출금은 끄세요.**
+   - 허용 IP 등록이 필요하면 봇이 도는 서버 IP를 넣습니다.
+2. **키 넣기**:
+   ```bash
+   export EXCHANGE_API_KEY=...  EXCHANGE_API_SECRET=...
+   ```
+3. **config.yaml 설정**: `config.example.yaml` 맨 아래의 빗썸 예시를 반영합니다(`symbol: BTC/KRW`, `exchange: {id: bithumb, market_type: spot, sandbox: false}`, `risk: {max_leverage: 1}`, `costs.funding_apr: 0`).
+4. **실행**: `python -m bot run -c config.yaml`로 모의매매를 며칠 해 봅니다. 그다음 `live.enabled: true`와 `--live`로 **소액**부터 시작합니다.
+5. **매수 방식**: 원화 잔고의 99.5%까지만 씁니다(수수료 여유분). 시장가 매수는 '쓸 원화 금액'으로 주문됩니다.
+
+**빗썸 API 특성 (봇이 처리함)**
+
+- 빗썸은 봉을 조회할 때 시작 시각을 무시하고 최근 200개만 줍니다. 봇은 `to` 파라미터로 200개씩 거꾸로 넘겨 가며 받습니다.
+- 이 부분은 실제 ccxt 빗썸 코드로 테스트했지만, 실제 빗썸 서버에는 접속해 보지 못했습니다. 모의매매를 처음 켤 때 로그에 "봉 데이터가 부족합니다"가 계속 나오면 알려 주세요.
 
 ## 거래소 비교
 

@@ -28,6 +28,9 @@ def make_exchange(p: ExchangeParams, with_keys: bool = False):
     if with_keys:
         set_credentials(ex, p)
     if p.sandbox:
+        if not (ex.urls or {}).get("test"):
+            raise ValueError(f"{p.id} 는 테스트넷이 없습니다. exchange.sandbox: false 로 두고 "
+                             f"모의매매(--live 없이)로 확인한 뒤 소액으로 시작하세요")
         ex.set_sandbox_mode(True)
     elif p.demo:
         ex.enable_demo_trading(True)  # 바이낸스 데모 트레이딩 계정
@@ -59,9 +62,38 @@ def to_frame(rows: list[list]) -> pd.DataFrame:
     return df.astype(float)
 
 
+def ohlcv_limit(ex, market_type: str = "spot") -> int | None:
+    """ccxt 에 적힌 거래소별 봉 조회 최대 개수 (빗썸·업비트 200, 바이낸스 1000, 하이퍼리퀴드 5000)."""
+    feats = getattr(ex, "features", None) or {}
+    node = feats.get("swap" if market_type == "future" else "spot") or {}
+    for d in (node, node.get("linear") or {}, feats.get("spot") or {}):
+        lim = (d.get("fetchOHLCV") or {}).get("limit")
+        if lim:
+            return int(lim)
+    return None
+
+
+# 시작 시각(since)을 무시하고 '최근 N개'만 주는 거래소: to(이 시각 이전) 로 뒤로 넘겨 가며 받는다
+BACKWARD_PAGING = {"bithumb"}
+
+
 def fetch_ohlcv(ex, symbol: str, timeframe: str, since_ms: int, until_ms: int | None = None,
                 page_limit: int | None = None) -> pd.DataFrame:
     """since 부터 현재(또는 until)까지 페이지를 넘기며 모두 수집."""
+    page_limit = page_limit or ohlcv_limit(ex, "future" if ":" in symbol else "spot")
+    if getattr(ex, "id", "") in BACKWARD_PAGING:
+        rows = _fetch_backward(ex, symbol, timeframe, since_ms, page_limit or 200)
+    else:
+        rows = _fetch_forward(ex, symbol, timeframe, since_ms, until_ms, page_limit)
+    df = to_frame(rows) if rows else pd.DataFrame(columns=COLUMNS)
+    if len(df):
+        df = df[df.index >= pd.Timestamp(since_ms, unit="ms", tz="UTC")]
+    if until_ms is not None and len(df):
+        df = df[df.index < pd.Timestamp(until_ms, unit="ms", tz="UTC")]
+    return df
+
+
+def _fetch_forward(ex, symbol, timeframe, since_ms, until_ms, page_limit) -> list[list]:
     tf_ms = timeframe_seconds(timeframe) * 1000
     now = ex.milliseconds()
     end = min(until_ms or now, now)
@@ -76,10 +108,23 @@ def fetch_ohlcv(ex, symbol: str, timeframe: str, since_ms: int, until_ms: int | 
         if nxt <= cursor:
             break
         cursor = nxt
-    df = to_frame(rows) if rows else pd.DataFrame(columns=COLUMNS)
-    if until_ms is not None and len(df):
-        df = df[df.index < pd.Timestamp(until_ms, unit="ms", tz="UTC")]
-    return df
+    return rows
+
+
+def _fetch_backward(ex, symbol, timeframe, since_ms, page_limit) -> list[list]:
+    rows: list[list] = []
+    to = None
+    while True:
+        params = {"to": pd.Timestamp(to, unit="ms", tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")} if to else {}
+        batch = ex.fetch_ohlcv(symbol, timeframe, limit=page_limit, params=params)
+        if not batch:
+            break
+        rows = batch + rows
+        oldest = batch[0][0]
+        if oldest <= since_ms or (to is not None and oldest >= to):
+            break
+        to = oldest
+    return rows
 
 
 def drop_unclosed(df: pd.DataFrame, timeframe: str, now_ms: int) -> pd.DataFrame:

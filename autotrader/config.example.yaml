@@ -88,6 +88,11 @@ notify:                      # 텔레그램 알림 (환경변수가 비어 있�
   telegram_chat_env: TELEGRAM_CHAT_ID
 
 # ── 다른 거래소 예시 ──
+# 빗썸 현물(원화, 롱만, 펀딩비 없음): API 2.0 키 → EXCHANGE_API_KEY / EXCHANGE_API_SECRET
+#   symbol: BTC/KRW
+#   exchange: {id: bithumb, market_type: spot, sandbox: false}   # 빗썸은 테스트넷 없음 → 모의매매 후 소액
+#   risk: {max_leverage: 1}
+#   costs: {fee_rate: 0.0004, maker_fee_rate: 0.0004, slippage: 0.0003, funding_apr: 0}  # 본인 수수료로 수정
 # 바이낸스 선물: symbol: BTC/USDT:USDT / exchange: {id: binance, market_type: future, sandbox: true}
 #               costs: {fee_rate: 0.0005, maker_fee_rate: 0.0002}
 # 업비트 현물(롱만): symbol: BTC/KRW / exchange: {id: upbit, market_type: spot, sandbox: false}

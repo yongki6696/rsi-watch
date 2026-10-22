@@ -21,7 +21,7 @@ from typing import Callable
 import pandas as pd
 
 from .config import Config, NotifyParams
-from .data import drop_unclosed, fetch_ohlcv, to_frame
+from .data import drop_unclosed, fetch_ohlcv
 from .risk import RiskManager
 from .strategy import Features, Signal, generate_signal, prepare_features, trail_stop
 from .timeframes import timeframe_seconds
@@ -65,9 +65,8 @@ class CcxtFeed:
             self.df = fetch_ohlcv(self.ex, self.symbol, self.timeframe, now - (n + 1) * self.tf_ms)
         else:
             since = int(self.df.index[-1].timestamp() * 1000) - self.tf_ms
-            rows = self.ex.fetch_ohlcv(self.symbol, self.timeframe, since=since)
-            if rows:
-                fresh = to_frame(rows)
+            fresh = fetch_ohlcv(self.ex, self.symbol, self.timeframe, since)
+            if len(fresh):
                 self.df = pd.concat([self.df[~self.df.index.isin(fresh.index)], fresh]).sort_index()
         self.df = self.df.iloc[-n:]
         return self.df
@@ -306,7 +305,10 @@ class TrendTrader(Stateful):
         if stop and not (stop < price if side == "long" else stop > price):
             log.info("[추세추종] 현재가 %.0f 가 이미 비상 손절가 %.0f 를 넘어 진입하지 않음", price, stop)
             return
-        qty = self.broker.equity() * self.p.exposure / price
+        equity = self.broker.equity()
+        qty = equity * self.p.exposure / price
+        if self.cfg.exchange.market_type == "spot":  # 현물은 원화 잔고 안에서, 수수료 여유를 남기고 산다
+            qty = min(qty, equity * 0.995 / price)
         reason = reason_text(lv, i, side, self.p)
         sig = Signal(side, "trend", "breakout", price, stop, 0.0, 0.0, lv.entry_hi[i], lv.index[i], reason)
         try:

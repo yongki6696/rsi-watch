@@ -141,6 +141,13 @@ class CcxtBroker:
             raise OrderTooSmall(f"주문 수량 {amount} 이 거래소 최소 주문 기준보다 작습니다")
 
     # ── 주문 ──
+    @staticmethod
+    def _fill_price(order: dict, reference: float) -> float:
+        """시장가 체결가. order['price'] 는 거래소마다 뜻이 달라 쓰지 않는다
+        (빗썸·업비트 시장가 매수는 '쓸 원화 금액'이 들어 있음). 평균 체결가가 없으면 기준가."""
+        avg = order.get("average")
+        return float(avg) if avg else float(reference)
+
     def _market(self, side: str, amount: float, price: float, reduce_only: bool) -> dict:
         params = {"reduceOnly": True} if (reduce_only and self.contract) else {}
         px = None
@@ -190,7 +197,7 @@ class CcxtBroker:
         if self.native_exits and 0 < frac < 1:  # 1차 익절 주문도 최소 기준을 넘어야 진입
             self._check_min(self._amount(qty * frac), sig.tp1)
         order = self._market("buy" if sig.side == "long" else "sell", amount, price, reduce_only=False)
-        fill = float(order.get("average") or order.get("price") or price)
+        fill = self._fill_price(order, price)
         qty_filled = float(order.get("filled") or amount) * self.contract_size
         pos = new_position(sig.side, qty_filled, fill, sig.stop, sig.tp1, sig.tp2,
                            frac, t.isoformat(), f"{sig.setup}/{sig.trigger}",
@@ -221,7 +228,7 @@ class CcxtBroker:
             free = float((self.ex.fetch_balance().get("free") or {}).get(self.base) or 0.0)
             amount = float(self.ex.amount_to_precision(self.symbol, min(amount, free)))
         order = self._market("sell" if pos.is_long else "buy", amount, ex.price, reduce_only=True)
-        fill = float(order.get("average") or order.get("price") or ex.price)
+        fill = self._fill_price(order, ex.price)
         apply_exit(pos, Exit(ex.price, pos.qty if closing_all else ex.qty, ex.reason, False), fill,
                    self.cfg.costs.fee_rate)
         return fill

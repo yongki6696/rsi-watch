@@ -178,8 +178,8 @@ def validate(cfg: Config) -> None:
     if cfg.mode not in ("hybrid", "smc"):
         raise ValueError("mode 는 hybrid / smc 중 하나여야 합니다")
     tp = cfg.trend
-    if tp.exposure <= 0 or tp.exposure > cfg.risk.max_leverage:
-        raise ValueError("trend.exposure 는 0 초과, risk.max_leverage 이하여야 합니다")
+    if tp.exposure <= 0 or tp.exposure > cfg.effective_max_leverage:
+        raise ValueError("trend.exposure 는 0 초과, 최대 레버리지 이하여야 합니다 (현물은 1 이하)")
     if tp.allow_short and cfg.exchange.market_type == "spot":
         raise ValueError("현물에서는 trend.allow_short 를 쓸 수 없습니다")
     if tp.exit_days >= tp.entry_days or tp.exit_days < 2:
