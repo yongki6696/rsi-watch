@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+.venv/
+config.yaml
+.env
+data/
+results/
+*.log
+*state*.json
+*.trades.csv
+*.tmp
