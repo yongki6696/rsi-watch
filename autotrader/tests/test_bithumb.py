@@ -25,25 +25,79 @@ def _bithumb():
     return ex
 
 
-def test_bithumb_candles_page_backwards_with_to_param():
-    ex = _bithumb()
-    calls = []
+def _minutes_server(calls, accept=("T",), tz="Asia/Seoul"):
+    """빗썸 분봉 API 흉내: 최신순으로 count 개. to 는 시간대 표기 없는 시각(tz 기준), 'Z' 붙으면 거절."""
 
-    def minutes(req, *a, **k):
+    def handler(req, *a, **k):
         calls.append(dict(req))
-        end = pd.Timestamp(req["to"]) - pd.Timedelta(minutes=15) if "to" in req else NOW.floor("15min")
+        if "to" in req:
+            to = req["to"]
+            style = "T" if "T" in to else " "
+            if to.endswith("Z") or style not in accept:
+                raise ccxt.BadRequest("bithumb Invalid parameter. Check the given value!")
+            end = pd.Timestamp(to).tz_localize(tz).tz_convert("UTC") - pd.Timedelta(minutes=15)
+            end = end.ceil("15min") if end != end.floor("15min") else end
+        else:
+            end = NOW.floor("15min")
         return [{"market": req["market"], "candle_date_time_utc": (end - pd.Timedelta(minutes=15 * j)).strftime(
                     "%Y-%m-%dT%H:%M:%S"), "opening_price": 1.0, "high_price": 2.0, "low_price": 0.5,
                  "trade_price": 1.5, "candle_acc_trade_volume": 3.0, "unit": 15}
-                for j in range(int(req["count"]))]  # 빗썸은 최신순으로 준다
+                for j in range(int(req["count"]))]
 
-    ex.publicGetV1CandlesMinutesUnit = minutes
+    return handler
+
+
+def _fetch_5_days(ex):
     since = NOW - pd.Timedelta(days=5)
-    df = fetch_ohlcv(ex, "BTC/KRW", "15m", int(since.timestamp() * 1000))
+    return fetch_ohlcv(ex, "BTC/KRW", "15m", int(since.timestamp() * 1000)), since
+
+
+@pytest.fixture(autouse=True)
+def _reset_format_cache(monkeypatch):
+    import bot.data as data
+
+    monkeypatch.setattr(data, "_to_format_ok", {})
+
+
+def test_bithumb_candles_page_backwards_with_kst_to_param():
+    ex = _bithumb()
+    calls = []
+    ex.publicGetV1CandlesMinutesUnit = _minutes_server(calls)
+    df, since = _fetch_5_days(ex)
     assert len(df) == 5 * 96 and df.index[0] >= since and df.index.is_monotonic_increasing
     assert (df.index.to_series().diff().dropna() == pd.Timedelta(minutes=15)).all()  # 빈 구간 없음
     assert all(c["count"] == 200 and c["market"] == "KRW-BTC" for c in calls)
-    assert "to" not in calls[0] and calls[1]["to"].endswith("Z")
+    assert "to" not in calls[0]
+    oldest_first_page = NOW.floor("15min") - pd.Timedelta(minutes=15 * 199)
+    assert calls[1]["to"] == oldest_first_page.tz_convert("Asia/Seoul").strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def test_bithumb_to_format_falls_back_and_is_remembered():
+    ex = _bithumb()
+    calls = []
+    ex.publicGetV1CandlesMinutesUnit = _minutes_server(calls, accept=(" ",))
+    df, _ = _fetch_5_days(ex)
+    assert len(df) == 5 * 96
+    to_styles = [c["to"] for c in calls if "to" in c]
+    assert "T" in to_styles[0] and all(" " in t for t in to_styles[1:])  # 한 번 거절된 뒤 다른 형식
+    calls.clear()
+    _fetch_5_days(ex)
+    assert all(" " in c["to"] for c in calls if "to" in c)  # 통하는 형식을 기억
+
+
+def test_bithumb_rejecting_all_to_formats_keeps_latest_page():
+    ex = _bithumb()
+    ex.publicGetV1CandlesMinutesUnit = _minutes_server([], accept=())
+    df, _ = _fetch_5_days(ex)
+    assert len(df) == 200  # 오류로 멈추지 않고 최근 200개로 진행
+
+
+def test_bithumb_to_read_as_utc_still_gives_continuous_data():
+    ex = _bithumb()
+    ex.publicGetV1CandlesMinutesUnit = _minutes_server([], tz="UTC")  # 서버가 to 를 UTC 로 해석해도
+    df, _ = _fetch_5_days(ex)
+    assert len(df) == 5 * 96 and not df.index.duplicated().any()
+    assert (df.index.to_series().diff().dropna() == pd.Timedelta(minutes=15)).all()
 
 
 def _cfg():

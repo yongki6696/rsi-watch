@@ -25,7 +25,7 @@
 cd autotrader
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest -q                         # 65개 테스트
+python -m pytest -q                         # 68개 테스트
 cp config.example.yaml config.yaml          # 하이퍼리퀴드 + hybrid + 테스트넷이 기본
 
 # 1) 텔레그램 알림 (선택이지만 권장)
@@ -164,6 +164,8 @@ python -m bot backtest -c config.yaml --csv data/binance_BTC_USDT_1d.csv
 **빗썸 API 특성 (봇이 처리함)**
 
 - 빗썸은 봉을 조회할 때 시작 시각을 무시하고 최근 200개만 줍니다. 봇은 `to` 파라미터로 200개씩 거꾸로 넘겨 가며 받습니다.
+  - `to`는 **한국시간, 시간대 표기 없이**(`2026-10-22T09:00:00`) 보냅니다. `Z`를 붙인 UTC 형식은 빗썸이 `Invalid parameter`로 거절합니다.
+  - 그 형식도 거절되면 `2026-10-22 09:00:00` 형식으로 다시 시도합니다. 둘 다 안 되면 오류로 멈추지 않고 최근 200개로 진행합니다.
 - 이 부분은 실제 ccxt 빗썸 코드로 테스트했지만, 실제 빗썸 서버에는 접속해 보지 못했습니다. 모의매매를 처음 켤 때 로그에 "봉 데이터가 부족합니다"가 계속 나오면 알려 주세요.
 
 ## 거래소 비교

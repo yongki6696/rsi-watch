@@ -1,6 +1,7 @@
 """시세 데이터: 거래소(ccxt) 수집, CSV 저장/로드, 미마감 봉 제거, 데모용 합성 데이터."""
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from .config import ExchangeParams
 from .timeframes import timeframe_seconds
 
 COLUMNS = ["open", "high", "low", "close", "volume"]
+
+log = logging.getLogger(__name__)
 
 
 def make_exchange(p: ExchangeParams, with_keys: bool = False):
@@ -75,6 +78,10 @@ def ohlcv_limit(ex, market_type: str = "spot") -> int | None:
 
 # 시작 시각(since)을 무시하고 '최근 N개'만 주는 거래소: to(이 시각 이전) 로 뒤로 넘겨 가며 받는다
 BACKWARD_PAGING = {"bithumb"}
+# 빗썸 to 형식: 한국시간, 시간대 표기 없음 (응답의 candle_date_time_kst 와 같은 모양).
+# 'Z' 를 붙인 UTC 형식은 'Invalid parameter' 로 거절됨. 첫 형식이 거절되면 다음 형식을 시도한다
+TO_FORMATS = ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S")
+_to_format_ok: dict[str, str] = {}
 
 
 def fetch_ohlcv(ex, symbol: str, timeframe: str, since_ms: int, until_ms: int | None = None,
@@ -111,12 +118,32 @@ def _fetch_forward(ex, symbol, timeframe, since_ms, until_ms, page_limit) -> lis
     return rows
 
 
+def _to_param(ms: int, fmt: str) -> str:
+    return pd.Timestamp(ms, unit="ms", tz="UTC").tz_convert("Asia/Seoul").strftime(fmt)
+
+
 def _fetch_backward(ex, symbol, timeframe, since_ms, page_limit) -> list[list]:
+    """최근 페이지부터 to 를 넘겨 가며 과거로. 겹치는 봉은 to_frame 에서 중복 제거된다."""
+    import ccxt
+
     rows: list[list] = []
     to = None
+    known = _to_format_ok.get(ex.id)
+    formats = [known] if known else list(TO_FORMATS)
     while True:
-        params = {"to": pd.Timestamp(to, unit="ms", tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")} if to else {}
-        batch = ex.fetch_ohlcv(symbol, timeframe, limit=page_limit, params=params)
+        params = {"to": _to_param(to, formats[0])} if to else {}
+        try:
+            batch = ex.fetch_ohlcv(symbol, timeframe, limit=page_limit, params=params)
+        except ccxt.BadRequest as e:
+            if to is None:
+                raise
+            formats.pop(0)
+            if formats:
+                continue
+            log.warning("%s 과거 봉을 더 받지 못해 %d개로 진행합니다: %s", ex.id, len(rows), e)
+            break
+        if to is not None:
+            _to_format_ok[ex.id] = formats[0]
         if not batch:
             break
         rows = batch + rows
