@@ -5,6 +5,11 @@ CcxtBroker  : ccxt 로 거래소에 실제 주문.
               선물은 진입과 동시에 거래소에 손절(스탑 마켓)·1차 익절(지정가)·최종 목표(지정가)를
               reduceOnly 로 걸어 둔다. 봇이 꺼져도 손절은 거래소에서 실행된다.
               현물(업비트 등)은 거래소 손절 주문이 없어 봇이 현재가를 보고 시장가로 청산한다.
+
+거래소별 차이
+  - 바이낸스 등: 조건부(스탑) 주문 조회·취소에 {'trigger': True} 필요 (바이낸스 선물은 algo 주문)
+  - 하이퍼리퀴드: 시장가가 '최대 슬리피지(기본 5%) 지정가 IOC'로 처리돼 시장가·스탑 주문에도 가격이 필요,
+                 주문 조회·취소에 추가 파라미터를 보내면 안 됨
 """
 from __future__ import annotations
 
@@ -17,9 +22,6 @@ from .strategy import Signal
 from .trade import Exit, Position, apply_exit, exit_fill, new_position, slipped
 
 log = logging.getLogger(__name__)
-
-TRIGGER = {"trigger": True}  # 조건부(스탑) 주문 조회·취소 시 필요 (바이낸스 선물은 algo 주문으로 처리됨)
-
 
 class PaperBroker:
     label = "모의매매"
@@ -82,11 +84,26 @@ class CcxtBroker:
         self.quote = self.market.get("settle") or self.market["quote"]
         self.base = self.market["base"]
         self.contract_size = float(self.market.get("contractSize") or 1) if self.contract else 1.0
-        if self.contract and cfg.exchange.leverage:
+        hyper = getattr(ex, "id", "") == "hyperliquid"
+        self.market_needs_price = hyper
+        self.trigger_params = {} if hyper else {"trigger": True}
+        if self.contract:
+            self._setup_margin()
+
+    def _setup_margin(self) -> None:
+        """마진 모드·레버리지 설정. 거래소마다 지원/권한이 달라 실패해도 경고만 남기고 진행."""
+        p = self.cfg.exchange
+        if getattr(self.ex, "id", "") == "hyperliquid":
+            calls = [lambda: self.ex.set_leverage(p.leverage, self.symbol, {"marginMode": p.margin_mode})]
+        else:
+            calls = [lambda: self.ex.set_leverage(p.leverage, self.symbol)]
+            if (getattr(self.ex, "has", None) or {}).get("setMarginMode"):
+                calls.insert(0, lambda: self.ex.set_margin_mode(p.margin_mode, self.symbol))
+        for call in calls:
             try:
-                ex.set_leverage(cfg.exchange.leverage, self.symbol)
-            except Exception as e:  # 거래소마다 지원/권한이 달라 실패해도 진행
-                log.warning("레버리지 설정 실패(무시하고 진행): %s", e)
+                call()
+            except Exception as e:  # 이미 같은 설정이거나 포지션이 있으면 거래소가 거부함
+                log.warning("마진/레버리지 설정 생략: %s", e)
 
     # ── 조회 ──
     def equity(self) -> float:
@@ -125,14 +142,17 @@ class CcxtBroker:
     def _market(self, side: str, amount: float, price: float, reduce_only: bool) -> dict:
         params = {"reduceOnly": True} if (reduce_only and self.contract) else {}
         px = None
-        if not self.contract and side == "buy" and self.ex.options.get("createMarketBuyOrderRequiresPrice"):
+        if self.market_needs_price:
+            px = self._price(price)  # 하이퍼리퀴드: 최대 슬리피지 계산 기준 가격
+        elif not self.contract and side == "buy" and self.ex.options.get("createMarketBuyOrderRequiresPrice"):
             px = price  # 업비트 등: 시장가 매수는 총액(수량 x 가격)으로 주문
         return self.ex.create_order(self.symbol, "market", side, amount, px, params)
 
     def _stop_order(self, pos: Position, stop: float) -> str:
         opp = "sell" if pos.is_long else "buy"
         params = {"stopLossPrice": self._price(stop), "reduceOnly": True}
-        return str(self.ex.create_order(self.symbol, "market", opp, self._amount(pos.qty), None, params)["id"])
+        px = self._price(stop) if self.market_needs_price else None
+        return str(self.ex.create_order(self.symbol, "market", opp, self._amount(pos.qty), px, params)["id"])
 
     def _limit_exit(self, pos: Position, qty: float, price: float) -> str:
         opp = "sell" if pos.is_long else "buy"
@@ -145,7 +165,7 @@ class CcxtBroker:
             oid = pos.order_ids.pop(k, None)
             if oid:
                 try:
-                    self.ex.cancel_order(oid, self.symbol, TRIGGER if k == "sl" else {})
+                    self.ex.cancel_order(oid, self.symbol, self.trigger_params if k == "sl" else {})
                 except Exception as e:  # 이미 체결/취소된 주문
                     log.info("주문 %s(%s) 취소 생략: %s", k, oid, e)
 
@@ -154,7 +174,7 @@ class CcxtBroker:
         if not oid:
             return None
         try:
-            return self.ex.fetch_order(oid, self.symbol, TRIGGER if key == "sl" else {})
+            return self.ex.fetch_order(oid, self.symbol, self.trigger_params if key == "sl" else {})
         except Exception as e:
             log.info("주문 %s(%s) 조회 실패: %s", key, oid, e)
             return None
@@ -208,7 +228,7 @@ class CcxtBroker:
             pos.order_ids["sl"] = self._stop_order(pos, new_stop)  # 새 손절 먼저 걸고
             if old:
                 try:
-                    self.ex.cancel_order(old, self.symbol, TRIGGER)  # 기존 손절 취소
+                    self.ex.cancel_order(old, self.symbol, self.trigger_params)  # 기존 손절 취소
                 except Exception as e:
                     log.info("기존 손절 주문 취소 생략: %s", e)
         pos.stop = new_stop

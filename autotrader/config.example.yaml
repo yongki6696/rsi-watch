@@ -15,6 +15,7 @@ exchange:
   sandbox: true              # ★ 바이낸스 선물 테스트넷 (testnet.binancefuture.com 키)
   demo: false                # 바이낸스 데모 트레이딩 계정을 쓰려면 sandbox: false, demo: true
   leverage: 3                # 거래소에 설정할 레버리지 (실제 노출은 risk.max_leverage 로 다시 제한)
+  margin_mode: isolated      # 격리 마진 (cross = 교차)
   api_key_env: EXCHANGE_API_KEY      # API 키는 파일에 쓰지 말고 환경변수로
   secret_env: EXCHANGE_API_SECRET
   password_env: EXCHANGE_API_PASSWORD  # OKX passphrase 등 (필요할 때만)
@@ -73,3 +74,10 @@ notify:                      # 텔레그램 알림 (환경변수가 비어 있�
 # risk: {max_leverage: 1}
 # costs: {fee_rate: 0.0005, maker_fee_rate: 0.0005}
 # initial_equity: 10000000
+
+# ── 하이퍼리퀴드 무기한(USDC, 롱·숏) 예시 ──
+# 키: HYPERLIQUID_WALLET_ADDRESS(메인 지갑 주소), HYPERLIQUID_PRIVATE_KEY(API 지갑 개인키)
+# symbol: BTC/USDC:USDC
+# exchange: {id: hyperliquid, market_type: future, sandbox: true, leverage: 3, margin_mode: isolated}
+# costs: {fee_rate: 0.00045, maker_fee_rate: 0.00015}
+# live: {history_bars: 5000}   # 하이퍼리퀴드는 최근 5,000봉까지만 제공

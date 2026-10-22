@@ -19,9 +19,12 @@ class ExchangeParams:
     sandbox: bool = True           # 테스트넷 사용 (실거래 전 반드시 true로 검증)
     demo: bool = False             # 바이낸스 '데모 트레이딩' 계정 사용 (sandbox 대신)
     leverage: int = 3              # 선물 레버리지 (거래소에 설정; 실제 노출은 risk.max_leverage로 제한)
+    margin_mode: str = "isolated"  # 선물 마진 모드: isolated(격리) / cross(교차)
     api_key_env: str = "EXCHANGE_API_KEY"
     secret_env: str = "EXCHANGE_API_SECRET"
     password_env: str = "EXCHANGE_API_PASSWORD"  # OKX 등 passphrase가 필요한 거래소
+    wallet_address_env: str = "HYPERLIQUID_WALLET_ADDRESS"  # 하이퍼리퀴드: 메인 지갑 주소
+    private_key_env: str = "HYPERLIQUID_PRIVATE_KEY"        # 하이퍼리퀴드: API 지갑(에이전트) 개인키
 
 
 @dataclass
@@ -168,5 +171,7 @@ def validate(cfg: Config) -> None:
         raise ValueError("timeframe <= liquidity_timeframe <= structure_timeframe 순서여야 합니다")
     if not 0 < cfg.risk.risk_per_trade <= 0.05:
         raise ValueError("risk.risk_per_trade 는 0 초과 0.05(5%) 이하로 두세요")
+    if cfg.exchange.margin_mode not in ("isolated", "cross"):
+        raise ValueError("exchange.margin_mode 는 isolated / cross 중 하나여야 합니다")
     if cfg.exchange.sandbox and cfg.exchange.demo:
         raise ValueError("exchange.sandbox 와 exchange.demo 는 동시에 켤 수 없습니다")

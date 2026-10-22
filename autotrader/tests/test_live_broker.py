@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from bot import live
-from bot.broker import TRIGGER, CcxtBroker, OrderTooSmall, PaperBroker
+from bot.broker import CcxtBroker, OrderTooSmall, PaperBroker
 from bot.config import config_from_dict
 from bot.data import synthetic_ohlcv
 from bot.strategy import Signal
@@ -108,7 +108,13 @@ def test_entry_skipped_when_price_already_past_tp1(setup):
 
 # ── 거래소 브로커 (가짜 ccxt 거래소로 주문 흐름 검증) ──
 
+TRIGGER = {"trigger": True}
+
+
 class FakeExchange:
+    id = "binance"
+    has = {"setMarginMode": True}
+
     def __init__(self, contract=True, contract_size=1.0, fail_stop=False):
         self.orders, self.cancelled, self.fetched = [], [], []
         self.positions = []
@@ -127,8 +133,12 @@ class FakeExchange:
     def market(self, symbol):
         return self._market
 
-    def set_leverage(self, lev, symbol):
+    def set_leverage(self, lev, symbol, params=None):
         self.leverage = lev
+        self.leverage_params = params
+
+    def set_margin_mode(self, mode, symbol):
+        self.margin_mode = mode
 
     def amount_to_precision(self, symbol, amount):
         return f"{int(amount * 1000 + 1e-9) / 1000:.3f}"
@@ -182,7 +192,7 @@ def test_ccxt_open_places_entry_stop_and_tp1():
     assert (tp1["type"], tp1["side"], tp1["amount"], tp1["price"]) == ("limit", "sell", 0.25, 107.5)
     assert tp1["params"] == {"reduceOnly": True}
     assert pos.order_ids == {"entry": "1", "sl": "2", "tp1": "3"} and pos.qty == 0.5
-    assert ex.leverage == 3
+    assert ex.leverage == 3 and ex.margin_mode == "isolated"
 
 
 def test_ccxt_tp1_fill_moves_stop_to_breakeven_with_trigger_param():
@@ -269,3 +279,121 @@ def test_ccxt_spot_close_is_capped_by_available_balance():
     pos = new_position("long", 0.6, 100.0, 95.0, 107.5, 0.0, 0.5, "t", "x", 0.0)
     b.execute(pos, Exit(96.0, pos.qty, "stop", False), T0)
     assert ex.orders[-1]["amount"] == 0.5
+
+
+# ── 하이퍼리퀴드 ──
+
+class FakeHyperliquid(FakeExchange):
+    id = "hyperliquid"
+    has = {}
+
+    def __init__(self):
+        super().__init__()
+        self._market.update(symbol="BTC/USDC:USDC", quote="USDC", settle="USDC",
+                            limits={"amount": {"min": None}, "cost": {"min": 10}})
+
+    def create_order(self, symbol, type_, side, amount, price=None, params=None):
+        if type_ == "market" and price is None:  # ccxt hyperliquid 와 같은 제약
+            raise ValueError("market orders require price")
+        return super().create_order(symbol, type_, side, amount, price, params)
+
+    def cancel_order(self, oid, symbol, params=None):
+        assert not params, "하이퍼리퀴드에는 추가 파라미터를 보내면 안 됨"
+        super().cancel_order(oid, symbol, params)
+
+    def fetch_order(self, oid, symbol, params=None):
+        assert not params, "하이퍼리퀴드에는 추가 파라미터를 보내면 안 됨"
+        return super().fetch_order(oid, symbol, params)
+
+
+def _hl_cfg():
+    return config_from_dict({"symbol": "BTC/USDC:USDC", "exchange": {"id": "hyperliquid"}})
+
+
+def test_hyperliquid_market_and_stop_orders_carry_price_and_no_trigger_param():
+    ex = FakeHyperliquid()
+    b = CcxtBroker(ex, _hl_cfg())
+    pos = b.open(_sig(), 0.5, 100.0, T0)
+    entry, sl, tp1 = ex.orders
+    assert entry["type"] == "market" and entry["price"] == 100.0
+    assert sl["price"] == 95.0 and sl["params"] == {"stopLossPrice": 95.0, "reduceOnly": True}
+    assert tp1["type"] == "limit" and tp1["price"] == 107.5
+    assert ex.leverage_params == {"marginMode": "isolated"}
+    ex.positions = [{"symbol": "BTC/USDC:USDC", "contracts": 0.25}]
+    ex.status["3"] = "closed"
+    b.sync(pos, 107.6, T0)  # 1차 익절 → 본절 손절로 교체 (조회·취소에 trigger 파라미터 없이)
+    assert pos.tp1_done and ex.orders[-1]["price"] == 100.0 and ("2", {}) in ex.cancelled
+
+
+HL_MARKET = {"id": "0", "symbol": "BTC/USDC:USDC", "base": "BTC", "quote": "USDC", "settle": "USDC",
+             "baseId": "0", "quoteId": "USDC", "settleId": "USDC", "type": "swap", "spot": False,
+             "margin": False, "swap": True, "future": False, "option": False, "active": True,
+             "contract": True, "linear": True, "inverse": False, "contractSize": 1,
+             "precision": {"amount": 0.00001, "price": 1},
+             "limits": {"amount": {"min": None}, "cost": {"min": 10}, "leverage": {"max": 40}},
+             "info": {"szDecimals": "5"}}
+
+
+def test_make_exchange_hyperliquid_uses_wallet_keys_and_disables_ccxt_extras(monkeypatch):
+    from bot.data import make_exchange
+
+    monkeypatch.setenv("HYPERLIQUID_WALLET_ADDRESS", "0x" + "1" * 40)
+    monkeypatch.setenv("HYPERLIQUID_PRIVATE_KEY", "0x" + "2" * 64)
+    ex = make_exchange(_hl_cfg().exchange, with_keys=True)
+    assert ex.walletAddress == "0x" + "1" * 40 and ex.privateKey == "0x" + "2" * 64
+    assert ex.options["builderFee"] is False and ex.options["refSet"] is True
+    assert "testnet" in ex.urls["api"]["private"]
+    monkeypatch.delenv("HYPERLIQUID_PRIVATE_KEY")
+    with pytest.raises(RuntimeError, match="HYPERLIQUID_PRIVATE_KEY"):
+        make_exchange(_hl_cfg().exchange, with_keys=True)
+
+
+def test_make_exchange_binance_uses_api_keys(monkeypatch):
+    from bot.data import make_exchange
+
+    monkeypatch.setenv("EXCHANGE_API_KEY", "k")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "s")
+    ex = make_exchange(_cfg().exchange, with_keys=True)
+    assert (ex.apiKey, ex.secret) == ("k", "s")
+
+
+def test_hyperliquid_real_ccxt_order_path_offline(monkeypatch):
+    """실제 ccxt 하이퍼리퀴드 코드(주문 생성·서명)를 돌리고 HTTP 전송만 가로챈다."""
+    from bot.data import make_exchange
+
+    monkeypatch.setenv("HYPERLIQUID_WALLET_ADDRESS", "0x" + "1" * 40)
+    monkeypatch.setenv("HYPERLIQUID_PRIVATE_KEY", "0x" + "2" * 64)
+    ex = make_exchange(_hl_cfg().exchange, with_keys=True)
+    ex.set_markets([HL_MARKET])
+    sent = []
+
+    def private_post(req, *a, **k):
+        sent.append(req["action"])
+        assert "signature" in req
+        if req["action"]["type"] != "order":
+            return {"status": "ok", "response": {"type": "default"}}
+        o = req["action"]["orders"][0]
+        ioc = o["t"].get("limit", {}).get("tif") == "Ioc"
+        st = {"filled": {"totalSz": o["s"], "avgPx": "62000", "oid": 7}} if ioc else {"resting": {"oid": len(sent)}}
+        return {"status": "ok", "response": {"type": "order", "data": {"statuses": [st]}}}
+
+    ex.privatePostExchange = private_post
+    ex.publicPostInfo = lambda req, *a, **k: {}
+    b = CcxtBroker(ex, _hl_cfg())
+    sig = Signal("long", "sweep", "pinbar", 62000.0, 60000.0, 65000.0, 0.0, 61000, T0, "t")
+    pos = b.open(sig, 0.02, 62000.0, T0)
+
+    types = [a["type"] for a in sent]
+    assert "setReferrer" not in types  # ccxt 추천인 코드 등록 안 함
+    for a in sent:
+        if a["type"] == "approveBuilderFee":
+            assert a["maxFeeRate"] == "0%"  # 빌더 수수료 0%
+    lev = next(a for a in sent if a["type"] == "updateLeverage")
+    assert lev["isCross"] is False and lev["leverage"] == 3
+    orders = [a["orders"][0] for a in sent if a["type"] == "order"]
+    entry, sl, tp1 = orders
+    assert entry["b"] is True and entry["t"] == {"limit": {"tif": "Ioc"}} and entry["p"] == "65100"
+    assert sl["b"] is False and sl["r"] is True
+    assert sl["t"] == {"trigger": {"isMarket": True, "triggerPx": "60000", "tpsl": "sl"}}
+    assert tp1["r"] is True and tp1["t"] == {"limit": {"tif": "Gtc"}} and tp1["p"] == "65000" and tp1["s"] == "0.01"
+    assert pos.entry == 62000.0 and pos.qty == pytest.approx(0.02)

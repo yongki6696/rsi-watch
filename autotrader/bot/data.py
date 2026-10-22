@@ -18,22 +18,38 @@ def make_exchange(p: ExchangeParams, with_keys: bool = False):
 
     if not hasattr(ccxt, p.id):
         raise ValueError(f"ccxt 에 없는 거래소 id: {p.id}")
-    opts: dict = {"enableRateLimit": True}
+    options: dict = {}
     if p.market_type == "future":
-        opts["options"] = {"defaultType": "swap"}
+        options["defaultType"] = "swap"
+    if p.id == "hyperliquid":
+        options["builderFee"] = False  # ccxt 기본값은 주문마다 0.01% 빌더 수수료를 ccxt 주소로 보냄 → 끔
+        options["refSet"] = True       # ccxt 기본값은 첫 주문 때 계정에 ccxt 추천인 코드를 영구 등록 → 끔
+    ex = getattr(ccxt, p.id)({"enableRateLimit": True, "options": options})
     if with_keys:
-        key, secret = os.environ.get(p.api_key_env), os.environ.get(p.secret_env)
-        if not key or not secret:
-            raise RuntimeError(f"환경변수 {p.api_key_env} / {p.secret_env} 에 API 키를 넣어주세요")
-        opts.update(apiKey=key, secret=secret)
-        if os.environ.get(p.password_env):
-            opts["password"] = os.environ[p.password_env]
-    ex = getattr(ccxt, p.id)(opts)
+        set_credentials(ex, p)
     if p.sandbox:
         ex.set_sandbox_mode(True)
     elif p.demo:
         ex.enable_demo_trading(True)  # 바이낸스 데모 트레이딩 계정
     return ex
+
+
+def set_credentials(ex, p: ExchangeParams) -> None:
+    """환경변수의 키를 거래소 객체에 넣는다. 지갑 서명 방식(하이퍼리퀴드)과 API 키 방식을 구분."""
+    need = ex.requiredCredentials
+    if need.get("walletAddress") or need.get("privateKey"):
+        addr, key = os.environ.get(p.wallet_address_env), os.environ.get(p.private_key_env)
+        if not addr or not key:
+            raise RuntimeError(f"환경변수 {p.wallet_address_env}(메인 지갑 주소) / "
+                               f"{p.private_key_env}(API 지갑 개인키)를 넣어주세요")
+        ex.walletAddress, ex.privateKey = addr, key
+        return
+    key, secret = os.environ.get(p.api_key_env), os.environ.get(p.secret_env)
+    if not key or not secret:
+        raise RuntimeError(f"환경변수 {p.api_key_env} / {p.secret_env} 에 API 키를 넣어주세요")
+    ex.apiKey, ex.secret = key, secret
+    if os.environ.get(p.password_env):
+        ex.password = os.environ[p.password_env]
 
 
 def to_frame(rows: list[list]) -> pd.DataFrame:
