@@ -101,6 +101,8 @@ class LiveParams:
 class NotifyParams:
     telegram_token_env: str = "TELEGRAM_BOT_TOKEN"
     telegram_chat_env: str = "TELEGRAM_CHAT_ID"
+    daily_summary: bool = True     # 매일 일봉 마감 때 요약 전송 (봇이 살아 있는지도 확인됨)
+    commands: bool = True          # 텔레그램에서 /status 를 보내면 현재 상태를 답장
 
 
 @dataclass

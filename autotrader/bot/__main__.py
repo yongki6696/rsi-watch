@@ -117,8 +117,13 @@ def cmd_backtest(args) -> None:
 
 
 def cmd_run(args) -> None:
+    import time
+
+    import pandas as pd
+
     from .broker import CcxtBroker, PaperBroker
-    from .live import CcxtFeed, LiveTrader, Notifier, SignalAlerter, TrendTrader, run_forever
+    from .live import (CcxtFeed, LiveTrader, Notifier, SignalAlerter, TelegramCommands, TrendTrader,
+                       run_forever)
 
     cfg = load_config(args.config)
     _setup_logging(cfg.live.log_file)
@@ -144,14 +149,17 @@ def cmd_run(args) -> None:
         return PaperBroker(cfg, saved.get("broker"))
 
     notifier = Notifier(cfg.notify)
+    started = time.time()
+    alerter = None
     if cfg.mode == "hybrid":
         trend_state = state("-trend")
         trend = TrendTrader(cfg, CcxtFeed(ex, cfg.symbol, cfg.trend.timeframe), broker_for(trend_state),
                             trend_state, notifier)
         components = [trend]
         if cfg.alerts:
-            components.append(SignalAlerter(cfg, CcxtFeed(ex, cfg.symbol, cfg.timeframe), state("-alerts"),
-                                            notifier, trend.status_text))
+            alerter = SignalAlerter(cfg, CcxtFeed(ex, cfg.symbol, cfg.timeframe), state("-alerts"),
+                                    notifier, trend.status_text)
+            components.append(alerter)
         start = (f"▶️ 봇 시작 [{trend.broker.label}] {cfg.exchange.id} {cfg.symbol}\n"
                  f"- 추세추종 자동매매 ({cfg.trend.timeframe}, {cfg.trend.entry_days}일 돌파/{cfg.trend.exit_days}일 이탈)\n"
                  f"- 채널 방식 신호 알림 {'켜짐' if cfg.alerts else '꺼짐'} ({cfg.timeframe}, 주문 없음)\n"
@@ -160,6 +168,29 @@ def cmd_run(args) -> None:
         trader = LiveTrader(cfg, CcxtFeed(ex, cfg.symbol, cfg.timeframe), broker_for(base), base, notifier)
         components = [trader]
         start = f"▶️ 봇 시작 [{trader.broker.label}] 채널 방식 자동매매 {cfg.symbol} {cfg.timeframe}"
+
+    def report() -> str:
+        """텔레그램 /status 답장."""
+        main = components[0]
+        price = main.feed.last_price()
+        hours = int((time.time() - started) // 3600)
+        lines = [f"📊 현재 상태 [{main.broker.label}] {cfg.exchange.id} {cfg.symbol} "
+                 f"({pd.Timestamp.now(tz='Asia/Seoul'):%m/%d %H:%M})", f"현재가 {price:,.0f}"]
+        if isinstance(main, TrendTrader):
+            lines += main.report(price)
+        else:
+            lines.append(f"자산 {main.broker.equity():,.0f}")
+            lines.append("포지션 없음" if main.pos is None else
+                         f"{main.pos.side} 보유 (진입 {main.pos.entry:,.0f}, 손절 {main.pos.stop:,.0f})")
+        if alerter is not None:
+            lines.append(f"채널 신호 마지막 알림: {alerter.last_alert or '아직 없음'}")
+        lines.append(f"가동 시간 {hours // 24}일 {hours % 24}시간")
+        return "\n".join(lines)
+
+    if cfg.notify.commands:
+        components.append(TelegramCommands(notifier, report, state("-telegram")))
+        if notifier.enabled:
+            start += "\n(텔레그램에서 /status 를 보내면 현재 상태를 알려 드립니다)"
     if args.once:
         for c in components:
             c.step()

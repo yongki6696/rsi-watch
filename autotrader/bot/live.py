@@ -33,12 +33,28 @@ MIN_BARS = 200
 log = logging.getLogger(__name__)
 
 
+def _http_get_json(url: str) -> dict:
+    with urllib.request.urlopen(url, timeout=10) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 class Notifier:
     """텔레그램 알림 (환경변수에 토큰/채팅 ID가 있을 때만). 로그는 항상 남긴다."""
 
-    def __init__(self, p: NotifyParams):
+    def __init__(self, p: NotifyParams, http_get: Callable[[str], dict] = _http_get_json):
         self.token = os.environ.get(p.telegram_token_env)
         self.chat = os.environ.get(p.telegram_chat_env)
+        self.http_get = http_get
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.token and self.chat)
+
+    def updates(self, offset: int) -> list[dict]:
+        """봇에게 온 새 메시지 (getUpdates)."""
+        url = (f"https://api.telegram.org/bot{self.token}/getUpdates?"
+               + urllib.parse.urlencode({"offset": offset, "timeout": 0}))
+        return self.http_get(url).get("result", [])
 
     def send(self, text: str) -> None:
         log.info(text)
@@ -235,19 +251,68 @@ class TrendTrader(Stateful):
         self.last_bar: str | None = st.get("last_bar")
         self.pos: Position | None = Position.from_dict(st["position"]) if st.get("position") else None
         self.pending_exit: str | None = st.get("pending_exit")  # 청산 주문이 실패했으면 다음 확인 때 재시도
+        self.last_daily: dict | None = st.get("last_daily")     # 마지막 일봉 판단 (상태 보고용)
         self.tf = pd.Timedelta(seconds=timeframe_seconds(self.p.timeframe))
         self.history = max(self.p.entry_days, self.p.exit_days, self.p.atr_period) * 3 + 10
         broker.startup_check(self.pos)
 
     def _save(self) -> None:
         self._write({"last_bar": self.last_bar, "position": self.pos.to_dict() if self.pos else None,
-                     "pending_exit": self.pending_exit, "broker": self.broker.state()})
+                     "pending_exit": self.pending_exit, "last_daily": self.last_daily,
+                     "broker": self.broker.state()})
 
     def status_text(self) -> str:
         if self.pos is None:
             return "추세추종 봇: 현금 대기 (돌파 기다리는 중)"
         stop = f", 비상 손절 {self.pos.stop:,.0f}" if self.pos.stop else ""
         return f"추세추종 봇: {'롱' if self.pos.is_long else '숏'} 보유 중 (진입 {self.pos.entry:,.0f}{stop})"
+
+    def equity_estimate(self, price: float) -> float:
+        """평가 자산 = 잔고 + 보유 포지션 가치 (모의: 미실현 손익, 현물: 코인 평가액)."""
+        eq = self.broker.equity()
+        if self.pos is None:
+            return eq
+        if getattr(self.broker, "label", "") == "모의매매":
+            return eq + self.pos.gross(price, self.pos.qty)
+        if self.cfg.exchange.market_type == "spot":
+            return eq + self.pos.qty * price
+        return eq
+
+    def report(self, price: float) -> list[str]:
+        lines = [f"평가 자산 {self.equity_estimate(price):,.0f}"]
+        d = self.last_daily
+        if self.pos is None:
+            lines.append("추세추종: 현금 대기 중")
+            if d:
+                gap = (d["entry_hi"] / price - 1) * 100
+                lines.append(f"  다음 진입: 일봉 종가가 {d['entry_hi']:,.0f} 를 넘으면 매수 (현재가 대비 {gap:+.1f}%)")
+        else:
+            p = self.pos
+            pnl = (price / p.entry - 1) * (100 if p.is_long else -100)
+            lines.append(f"추세추종: {'롱' if p.is_long else '숏'} 보유 {p.qty:.6f} (진입 {p.entry:,.0f}, "
+                         f"평가손익 {pnl:+.1f}%)")
+            if p.stop:
+                lines.append(f"  비상 손절 {p.stop:,.0f}")
+            if d:
+                lines.append(f"  청산 기준: 일봉 종가가 {d['exit_lo']:,.0f} 아래로 마감하면 매도")
+        if d:
+            lines.append(f"  마지막 일봉 판단: {d['date']} 종가 {d['close']:,.0f}")
+        return lines
+
+    def _daily_summary(self, date, close: float, entry_hi: float, exit_lo: float) -> None:
+        self.last_daily = {"date": str(date), "close": float(close), "entry_hi": float(entry_hi),
+                           "exit_lo": float(exit_lo)}
+        if not self.cfg.notify.daily_summary:
+            return
+        if self.pos is None:
+            gap = (entry_hi / close - 1) * 100
+            msg = (f"📅 {date} 일봉 마감 [{self.broker.label}] 종가 {close:,.0f}\n"
+                   f"현금 대기 · 진입 기준 {entry_hi:,.0f} (종가 대비 {gap:+.1f}%)")
+        else:
+            pnl = (close / self.pos.entry - 1) * (100 if self.pos.is_long else -100)
+            msg = (f"📅 {date} 일봉 마감 [{self.broker.label}] 종가 {close:,.0f}\n"
+                   f"보유 중 · 평가손익 {pnl:+.1f}% · 청산 기준 {exit_lo:,.0f}")
+        self.notifier.send(msg)
 
     def step(self) -> None:
         df, now = closed_bars(self.feed, self.history, self.p.timeframe)
@@ -274,6 +339,8 @@ class TrendTrader(Stateful):
         lv = trend_levels(df, self.p)
         i = len(df) - 1
         action = decide(lv, i, self.pos.side if self.pos else None, self.p)
+        if action is None:
+            self._daily_summary(bar_t.date(), lv.close[i], lv.entry_hi[i], lv.exit_lo[i])
         if action == "exit":
             self._exit(price, now, reason_text(lv, i, action, self.p))
         elif action in ("long", "short"):
@@ -357,7 +424,11 @@ class SignalAlerter(Stateful):
         self.status = status
         st = self._init_state(state_path)
         self.last_bar: str | None = st.get("last_bar")
+        self.last_alert: str | None = st.get("last_alert")  # 상태 보고용 한 줄 요약
         self.tf = pd.Timedelta(seconds=timeframe_seconds(cfg.timeframe))
+
+    def _save(self) -> None:
+        self._write({"last_bar": self.last_bar, "last_alert": self.last_alert})
 
     def step(self) -> None:
         df, now = closed_bars(self.feed, self.cfg.live.history_bars, self.cfg.timeframe)
@@ -368,7 +439,7 @@ class SignalAlerter(Stateful):
         if self.last_bar is not None and bar_t <= pd.Timestamp(self.last_bar):
             return
         self.last_bar = bar_t.isoformat()
-        self._write({"last_bar": self.last_bar})
+        self._save()
         if now - (bar_t + self.tf) > self.tf / 2:
             return
         sig = generate_signal(prepare_features(df, self.cfg), len(df) - 1, self.cfg.strategy, allow_short=True)
@@ -385,6 +456,41 @@ class SignalAlerter(Stateful):
         if self.status:
             lines.append(self.status())
         self.notifier.send("\n".join(x for x in lines if x))
+        kst = (bar_t + self.tf).tz_convert("Asia/Seoul")
+        self.last_alert = f"{kst:%m/%d %H:%M} {'롱' if sig.side == 'long' else '숏'} 후보 ({sig.setup}/{sig.trigger})"
+        self._save()
+
+
+HELP_TEXT = ("명령어\n/status - 현재 가격·자산·포지션·진입 기준\n/help - 도움말\n"
+             "자동 알림: 진입·청산·비상 손절·오류, 매일 일봉 마감 요약, 채널 방식 신호")
+
+
+class TelegramCommands(Stateful):
+    """텔레그램 명령 처리. 설정된 채팅(TELEGRAM_CHAT_ID)에서 온 메시지에만 답한다."""
+
+    label = "텔레그램 명령"
+
+    def __init__(self, notifier: Notifier, report: Callable[[], str], state_path: str | Path):
+        self.notifier, self.report = notifier, report
+        st = self._init_state(state_path)
+        self.offset = int(st.get("offset", 0))
+
+    def step(self) -> None:
+        if not self.notifier.enabled:
+            return
+        updates = self.notifier.updates(self.offset)
+        for u in updates:
+            self.offset = max(self.offset, int(u.get("update_id", 0)) + 1)
+            msg = u.get("message") or {}
+            if str((msg.get("chat") or {}).get("id")) != str(self.notifier.chat):
+                continue  # 다른 사람이 봇에게 보낸 메시지는 무시
+            text = (msg.get("text") or "").strip().lower()
+            if text.startswith("/status") or text in ("상태", "status"):
+                self.notifier.send(self.report())
+            elif text.startswith(("/help", "/start")) or text == "도움말":
+                self.notifier.send(HELP_TEXT)
+        if updates:
+            self._write({"offset": self.offset})
 
 
 def run_forever(components: list, poll_seconds: int, notifier: Notifier, start_text: str,

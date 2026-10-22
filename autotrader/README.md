@@ -25,7 +25,7 @@
 cd autotrader
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest -q                         # 68개 테스트
+python -m pytest -q                         # 73개 테스트
 cp config.example.yaml config.yaml          # 하이퍼리퀴드 + hybrid + 테스트넷이 기본
 
 # 1) 텔레그램 알림 (선택이지만 권장)
@@ -130,6 +130,60 @@ python -m bot backtest -c config.yaml --csv data/binance_BTC_USDT_1d.csv
 4. `.env`의 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`에 넣습니다.
 
 **IP 주의**: 빗썸 API 키는 발급할 때 등록한 IP에서만 동작합니다. 공유기를 재부팅해서 집 IP가 바뀌면 주문이 거부됩니다. 그러면 키를 지우고 새 IP로 다시 발급하세요. 24시간 안정적으로 돌리려면 고정 IP가 있는 클라우드 서버가 낫습니다.
+
+## 휴대폰으로 보기 (텔레그램)
+
+`.env`에 텔레그램 토큰과 채팅 ID를 넣으면, 아이폰 텔레그램 앱이 이 봇의 화면이 됩니다.
+
+- **`/status`**: 봇에게 보내면 아래 내용을 답장합니다. 답장까지 최대 30초 걸립니다.
+  - 현재가, 평가 자산
+  - 포지션 또는 다음 진입 기준까지 남은 거리
+  - 채널 신호의 마지막 알림
+  - 가동 시간
+- **매일 일봉 마감 요약**: 종가, 진입·청산 기준, 평가손익을 보냅니다. 이 요약이 안 오면 봇이 멈춘 것입니다.
+- **자동 알림**: 진입, 청산, 비상 손절, 오류, 채널 방식 신호
+- **보안**: 설정한 채팅 ID에서 온 명령에만 답합니다.
+
+예시:
+
+```
+📊 현재 상태 [모의매매] bithumb BTC/KRW (10/23 14:05)
+현재가 121,500,000
+평가 자산 10,000,000
+추세추종: 현금 대기 중
+  다음 진입: 일봉 종가가 128,300,000 를 넘으면 매수 (현재가 대비 +5.6%)
+  마지막 일봉 판단: 2026-10-22 종가 120,900,000
+채널 신호 마지막 알림: 10/23 11:30 숏 후보 (sweep/pinbar)
+가동 시간 0일 5시간
+```
+
+## 24시간 돌리기 (클라우드 서버)
+
+PC가 꺼져 있어도 돌리려면 서버가 필요합니다. 빗썸 API는 등록한 IP에서만 동작하므로 **고정 IP**가 있어야 합니다.
+
+1. **서버 만들기**: [AWS Lightsail](https://lightsail.aws.amazon.com/)을 권합니다. 브라우저에서 바로 터미널을 열 수 있어 쉽습니다.
+   - 인스턴스 만들기 → 지역 **서울** → OS만 **Ubuntu 24.04** → 메모리 **1GB 이상** 플랜
+2. **고정 IP 연결**: 네트워킹 → 고정 IP 생성 → 방금 만든 서버에 연결합니다.
+3. **빗썸에 IP 추가**: 그 고정 IP를 빗썸 API 키의 허용 IP에 추가합니다. 최대 5개까지 등록되니 집 IP는 그대로 두면 됩니다. 이미 발급한 키는 수정이 안 되면 새로 발급하세요.
+4. **설치 (명령 한 줄)**: 서버 화면의 **"SSH를 사용하여 연결"**을 누르면 터미널이 열립니다. 아래 한 줄을 붙여 넣으면 설치되고, 모의매매로 바로 시작합니다.
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/yongki6696/rsi-watch/claude/gracious-hopper-8bhohq/autotrader/deploy/setup_ubuntu.sh | bash
+   ```
+5. **키 넣기**:
+   - `nano ~/rsi-watch/autotrader/.env`를 열고 빗썸 키와 텔레그램 값을 넣습니다. 저장은 `Ctrl+O` → Enter, 나가기는 `Ctrl+X`입니다.
+   - `sudo systemctl restart btc-bot`으로 재시작합니다.
+6. **확인**:
+   - `journalctl -u btc-bot -f`로 로그를 봅니다. 나가기는 `Ctrl+C`입니다.
+   - 텔레그램에서 `/status`를 보내 봅니다.
+7. **실거래로 전환**:
+   - `nano ~/rsi-watch/autotrader/config.yaml`에서 `enabled: true`로 바꿉니다.
+   - 설치 명령을 `... | bash -s -- --live`로 다시 실행합니다.
+
+**알아둘 점**
+
+- **업데이트**: 설치 명령을 다시 실행하면 최신 코드로 업데이트합니다. 설정(`config.yaml`), 키(`.env`), 봇 상태 파일은 그대로 유지됩니다.
+- **재시작**: 서버가 재부팅되거나 봇이 오류로 죽어도 30초 뒤 자동으로 다시 켜집니다.
+- ⚠️ **봇은 한 곳에서만 돌리세요.** 집 PC와 서버에서 동시에 실거래를 켜면 주문이 두 번 나갑니다. 텔레그램 `/status`도 한쪽만 답합니다. 서버로 옮기면 집 PC의 봇은 끄세요.
 
 ## 빗썸으로 돌리기 (원화 현물)
 
