@@ -25,7 +25,7 @@
 cd autotrader
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest -q                         # 63개 테스트
+python -m pytest -q                         # 65개 테스트
 cp config.example.yaml config.yaml          # 하이퍼리퀴드 + hybrid + 테스트넷이 기본
 
 # 1) 텔레그램 알림 (선택이지만 권장)
@@ -94,6 +94,43 @@ python -m bot fetch -c config.yaml --exchange binance --symbol BTC/USDT --timefr
 python -m bot backtest -c config.yaml --csv data/binance_BTC_USDT_1d.csv
 ```
 
+## 집 PC(윈도우)에서 빗썸으로 시작하기
+
+1. **Python 설치**: [python.org](https://www.python.org/downloads/)에서 3.11 이상을 설치합니다. 설치 첫 화면에서 **"Add python.exe to PATH"를 체크**하세요.
+2. **코드 받기**: GitHub 저장소에서 브랜치 `claude/gracious-hopper-8bhohq`를 선택하고 Code → **Download ZIP** → 압축을 풉니다.
+3. **설치**: PowerShell을 열고 압축 푼 폴더 안의 `autotrader` 폴더로 이동해 설치합니다.
+   ```powershell
+   cd C:\Users\내이름\Downloads\rsi-watch-claude-gracious-hopper-8bhohq\autotrader
+   py -m pip install -r requirements.txt
+   ```
+4. **키 넣기**: `.env` 파일을 만들고 메모장으로 빗썸 API 키를 넣습니다. 이 파일은 내 PC에만 두고 누구에게도 보내지 마세요.
+   ```powershell
+   copy .env.example .env
+   notepad .env
+   ```
+5. **모의매매**: 가상 주문으로 실행합니다. PowerShell 창은 켜 둡니다.
+   ```powershell
+   py -m bot run -c config.bithumb.yaml
+   ```
+   로그에 `[추세추종] ... 일봉 마감: 종가 ..., 진입 기준 ...` 같은 줄이 나오면 정상입니다. 상태는 `paper-state-bithumb-trend.json`에 저장됩니다.
+6. **실거래**: `config.bithumb.yaml`에서 `live.enabled: true`로 바꾸고 실행합니다.
+   ```powershell
+   py -m bot run -c config.bithumb.yaml --live
+   ```
+7. **절전 끄기**: 윈도우 설정 → 시스템 → 전원 → 절전 모드를 **"안 함"**으로 둡니다.
+   - 봇이 꺼져 있으면 빗썸에서는 비상 손절이 동작하지 않습니다.
+   - 추세추종은 일봉 마감 후 6시간 안에 켜져 있어야 그날 판단을 합니다.
+   - 멈추려면 PowerShell 창에서 `Ctrl+C`를 누릅니다. 다시 켜면 저장된 상태에서 이어서 합니다.
+
+**텔레그램 알림 (선택)**
+
+1. 텔레그램에서 `@BotFather` → `/newbot`으로 봇을 만들고 토큰을 받습니다.
+2. 만든 봇에게 아무 메시지나 보냅니다.
+3. 브라우저에서 `https://api.telegram.org/bot<토큰>/getUpdates`를 열면 나오는 `"chat":{"id":숫자}`가 채팅 ID입니다.
+4. `.env`의 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`에 넣습니다.
+
+**IP 주의**: 빗썸 API 키는 발급할 때 등록한 IP에서만 동작합니다. 공유기를 재부팅해서 집 IP가 바뀌면 주문이 거부됩니다. 그러면 키를 지우고 새 IP로 다시 발급하세요. 24시간 안정적으로 돌리려면 고정 IP가 있는 클라우드 서버가 낫습니다.
+
 ## 빗썸으로 돌리기 (원화 현물)
 
 추세추종은 롱만 하기 때문에 현물로도 그대로 돌릴 수 있습니다. 하이퍼리퀴드와 비교하면 장단점이 있습니다.
@@ -120,8 +157,8 @@ python -m bot backtest -c config.yaml --csv data/binance_BTC_USDT_1d.csv
    ```bash
    export EXCHANGE_API_KEY=...  EXCHANGE_API_SECRET=...
    ```
-3. **config.yaml 설정**: `config.example.yaml` 맨 아래의 빗썸 예시를 반영합니다(`symbol: BTC/KRW`, `exchange: {id: bithumb, market_type: spot, sandbox: false}`, `risk: {max_leverage: 1}`, `costs.funding_apr: 0`).
-4. **실행**: `python -m bot run -c config.yaml`로 모의매매를 며칠 해 봅니다. 그다음 `live.enabled: true`와 `--live`로 **소액**부터 시작합니다.
+3. **설정 파일**: 바로 쓸 수 있는 `config.bithumb.yaml`이 준비돼 있습니다. 키는 `.env` 파일에 넣습니다(`.env.example` 참고).
+4. **실행**: `python -m bot run -c config.bithumb.yaml`로 모의매매를 며칠 해 봅니다. 그다음 `live.enabled: true`와 `--live`로 **소액**부터 시작합니다.
 5. **매수 방식**: 원화 잔고의 99.5%까지만 씁니다(수수료 여유분). 시장가 매수는 '쓸 원화 금액'으로 주문됩니다.
 
 **빗썸 API 특성 (봇이 처리함)**

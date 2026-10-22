@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -20,7 +21,29 @@ from .config import load_config
 from .data import fetch_ohlcv, load_csv, make_exchange, parse_date_ms, save_csv, synthetic_ohlcv
 
 
+def load_env_file(path: str | Path = ".env") -> list[str]:
+    """KEY=VALUE 형식의 .env 파일을 환경변수로 읽는다 (이미 설정된 값은 덮지 않음). 읽은 키 이름 목록을 돌려준다."""
+    p = Path(path)
+    if not p.exists():
+        return []
+    loaded = []
+    for line in p.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
+
+
 def _setup_logging(log_file: str | None) -> None:
+    try:  # 윈도우 콘솔(cp949)은 이모지를 못 써서 로그가 깨지므로 그런 글자는 ? 로 바꿔 출력
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
     if log_file:
         handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
@@ -183,6 +206,7 @@ def main(argv: list[str] | None = None) -> None:
     r.set_defaults(func=cmd_run)
 
     args = ap.parse_args(argv)
+    load_env_file()  # 현재 폴더의 .env (API 키, 텔레그램 토큰)
     args.func(args)
 
 

@@ -103,3 +103,30 @@ def test_sandbox_on_exchange_without_testnet_gives_clear_error():
     with pytest.raises(ValueError, match="테스트넷이 없습니다"):
         make_exchange(cfg.exchange)
     make_exchange(_cfg().exchange)  # sandbox: false 면 정상
+
+
+def test_bithumb_config_file_is_ready_to_use():
+    from pathlib import Path
+
+    from bot.config import load_config
+
+    c = load_config(Path(__file__).resolve().parents[1] / "config.bithumb.yaml")
+    assert (c.mode, c.symbol, c.exchange.id, c.exchange.market_type, c.exchange.sandbox) == \
+        ("hybrid", "BTC/KRW", "bithumb", "spot", False)
+    assert c.effective_max_leverage == 1 and c.costs.funding_apr == 0 and not c.live.enabled
+
+
+def test_env_file_loader(tmp_path, monkeypatch):
+    from bot.__main__ import load_env_file
+
+    env = tmp_path / ".env"
+    env.write_text("\ufeffEXCHANGE_API_KEY=abc\n# 주석\nEXCHANGE_API_SECRET='s3'\nTELEGRAM_CHAT_ID=\nBAD LINE\n",
+                   encoding="utf-8")
+    monkeypatch.delenv("EXCHANGE_API_KEY", raising=False)
+    monkeypatch.delenv("EXCHANGE_API_SECRET", raising=False)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "keep")
+    loaded = load_env_file(env)
+    import os
+    assert os.environ["EXCHANGE_API_KEY"] == "abc" and os.environ["EXCHANGE_API_SECRET"] == "s3"
+    assert os.environ["TELEGRAM_CHAT_ID"] == "keep"  # 이미 있는 값은 덮지 않음
+    assert sorted(loaded) == ["EXCHANGE_API_KEY", "EXCHANGE_API_SECRET"]

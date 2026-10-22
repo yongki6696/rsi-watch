@@ -1,0 +1,36 @@
+# 빗썸 원화 현물용 설정 — 그대로 쓰면 됩니다
+#   - 추세추종(일봉 20일 돌파 / 10일 이탈)은 자동 주문, 롱만
+#   - 차슐랭 채널 방식 신호(15분봉)는 텔레그램 알림만
+#   - 키는 같은 폴더의 .env 파일에 (EXCHANGE_API_KEY / EXCHANGE_API_SECRET)
+# 실행: python -m bot run -c config.bithumb.yaml          (모의매매: 가상 주문)
+#       python -m bot run -c config.bithumb.yaml --live   (실주문: 아래 live.enabled 도 true 로)
+
+mode: hybrid
+alerts: true
+symbol: BTC/KRW
+timeframe: 15m
+initial_equity: 10000000     # 모의매매 시작 자산 (원). 실거래는 빗썸 원화 잔고를 씀
+
+exchange:
+  id: bithumb
+  market_type: spot          # 현물: 롱만, 레버리지 없음
+  sandbox: false             # 빗썸은 테스트넷이 없음 → 모의매매로 먼저 확인
+
+trend:
+  exposure: 1.0              # 원화 잔고 거의 전부(수수료 여유 0.5% 제외)로 매수. 줄이려면 0.5 등
+
+risk:
+  max_leverage: 1
+
+costs:                       # 본인 빗썸 수수료로 고치세요 (백테스트·모의매매에만 쓰임)
+  fee_rate: 0.0004
+  maker_fee_rate: 0.0004
+  slippage: 0.0003
+  funding_apr: 0             # 현물이라 펀딩비 없음
+
+live:
+  enabled: false             # ★ 실주문하려면 true + 실행할 때 --live
+  poll_seconds: 30
+  history_bars: 5000
+  state_file: state-bithumb.json  # 상태 파일 (모의매매는 paper-state-bithumb-*.json)
+  log_file: bithumb.log
