@@ -1,13 +1,17 @@
-"""매매 규칙.
+"""매매 규칙 — 차슐랭 채널 자막에서 정리한 방식 (RULES.md 참고).
 
-  1) 중기 방향(상위 TF)  : 4시간봉 EMA50/EMA200 + 종가 위치로 상승/하락/중립 판단
-  2) 핵심 가격대         : 스윙 고점·저점 + 매물대를 묶은 지지·저항 구간 (levels.py)
-  3) 셋업 A - 함정(스윕) : 지지 구간 아래를 꼬리로 찌르고(손절 물량 사냥) 다시 구간 위로 마감 → 롱
-                           저항 구간 위를 찌르고 다시 아래로 마감 → 숏
-  4) 셋업 B - 리테스트   : 저항 돌파 후 처음 되돌아와 지지 확인 → 롱 (숏은 반대)
-  5) 손절은 꼬리/구간 바깥, 목표는 다음 반대편 가격대. 손익비 min_rr 미만이면 진입 안 함.
+  1) 유동성 훼손 또는 오더블록 터치로 '무장'
+     - 바이사이드(스윙 고점) 훼손 / 서플라이 존 터치 → 숏 후보
+     - 셀사이드(스윙 저점) 훼손 / 디맨드 존 터치   → 롱 후보
+  2) arm_bars 안에 트리거가 나오면 다음 봉 진입
+     - 핀바   : 훼손이 일어난 유동성 봉(1h)이 긴 꼬리를 남기고 레벨 안쪽으로 마감
+                 ("1시간봉 … 윗꼬리를 말아내리고 핀바 형태로 바로 캔들이 안으로 회귀")
+     - 구조 전환: 훼손 뒤 진입 봉에서 직전 스윙을 종가로 반대로 깸 ("내부 구조가 하락으로 전환")
+     - 훼손 폭이 sweep_max_atr 보다 크면 함정이 아니라 돌파 → 무효 ("저점을 미리 예상하지 않는다")
+  3) 손절 = 훼손 꼬리 끝 너머 / 1차 익절 tp1_r 에서 일부 → 본절 → 나머지는 스윙 따라 보유
+  4) 방향은 고집하지 않는다(bias_mode: off). structure 로 바꾸면 4h 구조 방향으로만 진입
 
-신호는 i 번째 봉이 '마감된 뒤' 그 봉까지의 정보만으로 계산하고, 진입은 다음 봉 시가다.
+신호는 i 번째 진입 봉이 마감된 뒤 그때까지 확정된 정보만으로 계산하고, 진입은 다음 봉에서 한다.
 """
 from __future__ import annotations
 
@@ -17,21 +21,22 @@ import numpy as np
 import pandas as pd
 
 from .config import Config, StrategyParams
-from .indicators import atr, ema, pivots, sma
-from .levels import Zone, find_zones
+from .indicators import atr, pivots
+from .smc import (Events, build_events, known_index, liquidity_levels, order_blocks, resample,
+                  structure, to_base)
 from .timeframes import timeframe_seconds
 
 
 @dataclass
 class Signal:
     side: str          # long | short
-    setup: str         # sweep | retest
+    setup: str         # sweep | ob
+    trigger: str       # pinbar | choch
     ref_price: float   # 신호 봉 종가 (실제 진입은 다음 봉 시가 근처)
     stop: float
-    target: float
-    rr: float
-    zone_low: float
-    zone_high: float
+    tp1: float
+    tp2: float         # 0 이면 최종 목표 없음
+    level: float       # 훼손된 레벨 / 존 바깥 끝
     bar_time: pd.Timestamp
     reason: str
 
@@ -43,171 +48,162 @@ class Features:
     high: np.ndarray
     low: np.ndarray
     close: np.ndarray
-    volume: np.ndarray
-    atr: np.ndarray
-    vol_sma: np.ndarray
-    bias: np.ndarray      # +1 상승 / -1 하락 / 0 중립 / nan 워밍업
-    pivot_hi: np.ndarray
-    pivot_lo: np.ndarray
-
-
-def compute_bias(df: pd.DataFrame, timeframe: str, bias_timeframe: str, fast: int, slow: int) -> np.ndarray:
-    """상위 타임프레임 방향을 하위 봉마다 매핑. 마감된 상위 봉만 사용한다."""
-    ltf = pd.Timedelta(seconds=timeframe_seconds(timeframe))
-    htf = pd.Timedelta(seconds=timeframe_seconds(bias_timeframe))
-    closes = df["close"].resample(htf, origin="epoch", label="left", closed="left").last().dropna()
-    ef, es = ema(closes, fast), ema(closes, slow)
-    up = (closes > es) & (ef > es)
-    down = (closes < es) & (ef < es)
-    bias = np.where(up, 1.0, np.where(down, -1.0, 0.0))
-    bias[es.isna().to_numpy()] = np.nan
-    htf_frame = pd.DataFrame({"t": closes.index + htf, "bias": bias})
-    ltf_frame = pd.DataFrame({"t": df.index + ltf})
-    merged = pd.merge_asof(ltf_frame, htf_frame, on="t", direction="backward")
-    return merged["bias"].to_numpy(dtype=float)
+    atr: np.ndarray        # 유동성 봉(1h) ATR, 진입 봉 기준으로 확정된 값
+    lq_ohlc: np.ndarray    # (n, 4) 유동성 봉이 마감되는 진입 봉 자리에 그 봉의 OHLC, 나머지는 nan
+    lq_start: np.ndarray   # 같은 자리에 그 유동성 봉의 첫 진입 봉 인덱스
+    struct: np.ndarray     # 4h 구조 상태 +1/-1/0
+    struct_ref: np.ndarray # 4h 구조 기준 가격
+    piv_hi: np.ndarray     # 진입 봉 스윙 고점 인덱스 (j + entry_pivot_window 에 확정)
+    piv_lo: np.ndarray
+    short_ev: Events
+    long_ev: Events
+    trail_hi: tuple[np.ndarray, np.ndarray]  # (확정 봉, 가격) 유동성 봉 스윙 고점 — 숏 트레일링
+    trail_lo: tuple[np.ndarray, np.ndarray]  # 유동성 봉 스윙 저점 — 롱 트레일링
 
 
 def prepare_features(df: pd.DataFrame, cfg: Config) -> Features:
     p = cfg.strategy
-    ph, pl = pivots(df["high"].to_numpy(float), df["low"].to_numpy(float), p.pivot_window)
+    n = len(df)
+    lq = resample(df, cfg.liquidity_timeframe)
+    st = resample(df, cfg.structure_timeframe)
+    lv = liquidity_levels(df, cfg.timeframe, lq, cfg.liquidity_timeframe, p.liq_pivot_window,
+                          st, cfg.structure_timeframe, p.ext_pivot_window)
+    zones = order_blocks(df, cfg.timeframe, st, cfg.structure_timeframe, p.ext_pivot_window,
+                         p.ob_impulse_atr, p.ob_max_age, p.atr_period)
+
+    lq_td = pd.Timedelta(seconds=timeframe_seconds(cfg.liquidity_timeframe))
+    st_td = pd.Timedelta(seconds=timeframe_seconds(cfg.structure_timeframe))
+    lq_known = known_index(df.index, cfg.timeframe, lq.index + lq_td)
+    st_known = known_index(df.index, cfg.timeframe, st.index + st_td)
+    s_state, s_ref = structure(st, p.ext_pivot_window)
+
+    h, l = df["high"].to_numpy(float), df["low"].to_numpy(float)
+    ph, pl = pivots(h, l, p.entry_pivot_window)
+
+    lq_ohlc = np.full((n, 4), np.nan)
+    lq_start = np.full(n, -1, dtype=np.int64)
+    ok = lq_known < n
+    lq_ohlc[lq_known[ok]] = lq[["open", "high", "low", "close"]].to_numpy(float)[ok]
+    lq_start[lq_known[ok]] = np.searchsorted(df.index.asi8, lq.index.asi8[ok], side="left")
+
+    trail = {}
+    for side, m in (("hi", lv.side == 1), ("lo", lv.side == -1)):
+        m = m & ~lv.external
+        order = np.argsort(lv.known[m], kind="stable")
+        trail[side] = (lv.known[m][order], lv.price[m][order])
+
     return Features(
         index=df.index,
-        open=df["open"].to_numpy(float),
-        high=df["high"].to_numpy(float),
-        low=df["low"].to_numpy(float),
-        close=df["close"].to_numpy(float),
-        volume=df["volume"].to_numpy(float),
-        atr=atr(df, p.atr_period).to_numpy(float),
-        vol_sma=sma(df["volume"], p.volume_sma).to_numpy(float),
-        bias=compute_bias(df, cfg.timeframe, cfg.bias_timeframe, p.ema_fast, p.ema_slow),
-        pivot_hi=ph,
-        pivot_lo=pl,
+        open=df["open"].to_numpy(float), high=h, low=l, close=df["close"].to_numpy(float),
+        atr=to_base(atr(lq, p.atr_period).to_numpy(float), lq_known, n),
+        lq_ohlc=lq_ohlc, lq_start=lq_start,
+        struct=to_base(s_state, st_known, n, 0.0),
+        struct_ref=to_base(s_ref, st_known, n),
+        piv_hi=ph, piv_lo=pl,
+        short_ev=build_events(lv, zones, n, 1, p.enable_sweep, p.enable_ob, p.sweep_levels == "external"),
+        long_ev=build_events(lv, zones, n, -1, p.enable_sweep, p.enable_ob, p.sweep_levels == "external"),
+        trail_hi=trail["hi"], trail_lo=trail["lo"],
     )
 
 
-def _bias_ok(side: str, b: float, mode: str) -> bool:
-    if mode == "off":
-        return True
-    if np.isnan(b):
-        return False
-    if mode == "strict":
-        return b == (1.0 if side == "long" else -1.0)
-    return b >= 0 if side == "long" else b <= 0
-
-
-def _volume_ok(f: Features, j: int, p: StrategyParams) -> bool:
-    if p.volume_mult <= 0:
-        return True
-    return bool(np.isfinite(f.vol_sma[j]) and f.volume[j] >= p.volume_mult * f.vol_sma[j])
-
-
-def _plan(side, setup, f, i, stop, zone, zones, p, reason) -> Signal | None:
-    entry = f.close[i]
-    risk = entry - stop if side == "long" else stop - entry
-    if risk <= 0:
-        return None
-    key = [z for z in zones if z.strength >= p.target_min_strength]
-    if side == "long":
-        above = [z.low for z in key if z.low > max(entry, zone.high)]
-        target = min(above) if above else entry + p.fallback_rr * risk
-    else:
-        below = [z.high for z in key if z.high < min(entry, zone.low)]
-        target = max(below) if below else entry - p.fallback_rr * risk
-    rr = abs(target - entry) / risk
-    if rr < p.min_rr:
-        return None
-    return Signal(side, setup, float(entry), float(stop), float(target), float(rr),
-                  zone.low, zone.high, f.index[i], reason)
-
-
 def _fmt(x: float) -> str:
-    return f"{x:,.2f}" if x < 1000 else f"{x:,.0f}"
+    return f"{x:,.0f}" if abs(x) >= 1000 else f"{x:,.2f}"
 
 
-def _sweep_signals(f: Features, i: int, zones: list[Zone], p: StrategyParams, a: float) -> list[Signal]:
-    k = p.sweep_clean_bars
-    rng = f.high[i] - f.low[i]
-    if i < k or rng <= 0 or not _volume_ok(f, i, p):
-        return []
-    close_pos = (f.close[i] - f.low[i]) / rng
-    prev = f.close[i - k : i]
-    vol_x = f.volume[i] / f.vol_sma[i] if f.vol_sma[i] > 0 else float("nan")
-    out = []
-    for z in zones:
-        depth = z.low - f.low[i]
-        if (p.sweep_min_atr * a <= depth <= p.sweep_max_atr * a and f.close[i] > z.low
-                and close_pos >= p.reclaim_close_pos and prev.min() > z.low):
-            reason = (f"지지 {_fmt(z.low)}~{_fmt(z.high)} 아래 유동성 스윕 후 회복 "
-                      f"(깊이 {depth / a:.2f} ATR, 거래량 {vol_x:.1f}배)")
-            s = _plan("long", "sweep", f, i, f.low[i] - p.stop_buffer_atr * a, z, zones, p, reason)
-            if s:
-                out.append(s)
-        depth = f.high[i] - z.high
-        if (p.sweep_min_atr * a <= depth <= p.sweep_max_atr * a and f.close[i] < z.high
-                and (1 - close_pos) >= p.reclaim_close_pos and prev.max() < z.high):
-            reason = (f"저항 {_fmt(z.low)}~{_fmt(z.high)} 위 유동성 스윕 후 이탈 "
-                      f"(깊이 {depth / a:.2f} ATR, 거래량 {vol_x:.1f}배)")
-            s = _plan("short", "sweep", f, i, f.high[i] + p.stop_buffer_atr * a, z, zones, p, reason)
-            if s:
-                out.append(s)
-    return out
+def _candidate(f: Features, i: int, p: StrategyParams, side: str, pivot_window: int) -> Signal | None:
+    short = side == "short"
+    ev = f.short_ev if short else f.long_ev
+    k = int(np.searchsorted(ev.idx, i, side="right")) - 1
+    if k < 0 or ev.idx[k] < i - p.arm_bars:
+        return None
+    s, level = int(ev.idx[k]), float(ev.level[k])
+    a = f.atr[i]
+    if not np.isfinite(a) or a <= 0:
+        return None
+    seg = f.high[s:i + 1] if short else f.low[s:i + 1]
+    e = s + int(np.argmax(seg) if short else np.argmin(seg))
+    extreme = f.high[e] if short else f.low[e]
+    depth = (extreme - level) if short else (level - extreme)
+    if depth > p.sweep_max_atr * a:
+        return None  # 함정이 아니라 돌파
+    c = f.close
+    inside = c[i] < level if short else c[i] > level
+    if not inside:
+        return None
 
+    trigger = None
+    if p.enable_pinbar and ev.kind[k] == 0 and f.lq_start[i] >= 0 and f.lq_start[i] <= s:
+        o1, h1, l1, c1 = f.lq_ohlc[i]  # i 봉에서 마감된 유동성 봉이 훼손을 포함
+        rng = h1 - l1
+        wick = (h1 - max(o1, c1)) if short else (min(o1, c1) - l1)
+        back = c1 < level if short else c1 > level
+        if rng > 0 and back and wick / rng >= p.pinbar_wick:
+            trigger = "pinbar"
+    ref = np.nan
+    if trigger is None and p.enable_choch:
+        piv = f.piv_lo if short else f.piv_hi
+        piv = piv[(piv < e) & (piv + pivot_window <= i)]
+        if len(piv):
+            j = piv[-1]
+            ref = f.low[j] if short else f.high[j]
+            crossed = c[i] < ref if short else c[i] > ref
+            earlier = c[e:i]
+            fresh = (earlier >= ref).all() if short else (earlier <= ref).all()
+            if crossed and fresh:
+                trigger = "choch"
+    if trigger is None:
+        return None
 
-def _retest_signals(f: Features, i: int, zones: list[Zone], p: StrategyParams, a: float) -> list[Signal]:
-    tol = p.retest_tolerance_atr * a
     buf = p.stop_buffer_atr * a
-    first = max(1, i - p.retest_window)
-    c, h, l = f.close, f.high, f.low
-    out = []
-    for z in zones:
-        # 롱: 저항 상향 돌파 → 처음 되돌아와 구간 위에서 지지
-        for j in range(i - 1, first - 1, -1):
-            if c[j] > z.high and c[j - 1] <= z.high:
-                held = (c[j:i] > z.high).all() and (l[j + 1 : i] > z.high + tol).all()
-                if (held and _volume_ok(f, j, p) and l[i] <= z.high + tol
-                        and c[i] > z.high and l[i] > z.low - buf):
-                    reason = f"저항 {_fmt(z.low)}~{_fmt(z.high)} 돌파({i - j}봉 전) 후 첫 리테스트 지지"
-                    s = _plan("long", "retest", f, i, min(l[i], z.low) - buf, z, zones, p, reason)
-                    if s:
-                        out.append(s)
-                break
-        # 숏: 지지 하향 이탈 → 처음 되돌아와 구간 아래에서 저항
-        for j in range(i - 1, first - 1, -1):
-            if c[j] < z.low and c[j - 1] >= z.low:
-                held = (c[j:i] < z.low).all() and (h[j + 1 : i] < z.low - tol).all()
-                if (held and _volume_ok(f, j, p) and h[i] >= z.low - tol
-                        and c[i] < z.low and h[i] < z.high + buf):
-                    reason = f"지지 {_fmt(z.low)}~{_fmt(z.high)} 이탈({i - j}봉 전) 후 첫 리테스트 저항"
-                    s = _plan("short", "retest", f, i, max(h[i], z.high) + buf, z, zones, p, reason)
-                    if s:
-                        out.append(s)
-                break
-    return out
+    entry = c[i]
+    stop = extreme + buf if short else extreme - buf
+    risk = abs(stop - entry)
+    if not (p.min_stop_atr * a <= risk <= p.max_stop_atr * a):
+        return None
+    sign = -1 if short else 1
+    tp1 = entry + sign * p.tp1_r * risk
+    tp2 = entry + sign * p.tp2_r * risk if p.tp2_r > 0 else 0.0
 
-
-def warmup_bars(p: StrategyParams) -> int:
-    return max(p.atr_period, p.volume_sma, 2 * p.pivot_window + 1, p.sweep_clean_bars) + 1
+    if ev.kind[k] == 0:
+        where = f"{'외부' if ev.external[k] else '내부'} {'바이' if short else '셀'}사이드 유동성 {_fmt(level)} 훼손"
+    else:
+        where = f"{'서플라이' if short else '디맨드'} 존 {_fmt(ev.zone_low[k])}~{_fmt(ev.zone_high[k])} 터치"
+    if trigger == "pinbar":
+        how = f"유동성 봉 {'윗' if short else '밑'}꼬리 핀바로 안쪽 마감"
+    else:
+        how = f"내부 구조 {'하락' if short else '상승'} 전환({_fmt(ref)} {'이탈' if short else '돌파'} 마감)"
+    st = {1: "상승", -1: "하락"}.get(int(f.struct[i]), "미정")
+    reason = f"{where} → {how} | 4h 구조 {st}"
+    return Signal(side, "sweep" if ev.kind[k] == 0 else "ob", trigger, float(entry), float(stop),
+                  float(tp1), float(tp2), level, f.index[i], reason)
 
 
 def generate_signal(f: Features, i: int, p: StrategyParams, allow_short: bool = True) -> Signal | None:
     """i 번째 봉 마감 시점의 진입 신호. 없으면 None."""
-    if i < warmup_bars(p):
-        return None
-    a = f.atr[i]
-    if not np.isfinite(a) or a <= 0:
-        return None
-    start = max(0, i - p.level_lookback)
-    zones = find_zones(f.high, f.low, f.close, f.volume, f.pivot_hi, f.pivot_lo, start, i,
-                       p.pivot_window, p.zone_width_atr * a, p.min_touches, p.vp_bins, p.hvn_quantile)
-    if not zones:
-        return None
-    cands: list[Signal] = []
-    if p.enable_sweep:
-        cands += _sweep_signals(f, i, zones, p, a)
-    if p.enable_retest:
-        cands += _retest_signals(f, i, zones, p, a)
-    cands = [s for s in cands
-             if (allow_short or s.side == "long") and _bias_ok(s.side, f.bias[i], p.bias_mode)]
+    cands = []
+    for side in ("short", "long"):
+        if side == "short" and not allow_short:
+            continue
+        if p.bias_mode == "structure" and f.struct[i] != (-1 if side == "short" else 1):
+            continue
+        sig = _candidate(f, i, p, side, p.entry_pivot_window)
+        if sig:
+            cands.append(sig)
     if not cands:
         return None
-    return max(cands, key=lambda s: s.rr)
+    return cands[0] if len(cands) == 1 else None  # 양방향 신호가 동시에 나오면 애매하므로 패스
+
+
+def trail_stop(f: Features, i: int, side: str, current: float, p: StrategyParams) -> float | None:
+    """남은 물량 손절을 i 봉까지 확정된 마지막 유동성 봉 스윙 너머로 옮길 가격 (더 유리할 때만)."""
+    known, price = f.trail_lo if side == "long" else f.trail_hi
+    k = int(np.searchsorted(known, i, side="right")) - 1
+    if k < 0 or not np.isfinite(f.atr[i]):
+        return None
+    buf = p.stop_buffer_atr * f.atr[i]
+    c = f.close[i]
+    if side == "long":
+        new = price[k] - buf
+        return new if current < new < c else None
+    new = price[k] + buf
+    return new if c < new < current else None

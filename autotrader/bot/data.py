@@ -31,6 +31,8 @@ def make_exchange(p: ExchangeParams, with_keys: bool = False):
     ex = getattr(ccxt, p.id)(opts)
     if p.sandbox:
         ex.set_sandbox_mode(True)
+    elif p.demo:
+        ex.enable_demo_trading(True)  # 바이낸스 데모 트레이딩 계정
     return ex
 
 

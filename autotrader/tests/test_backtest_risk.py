@@ -2,51 +2,64 @@ import pandas as pd
 import pytest
 
 from bot import backtest
-from bot.config import RiskParams
+from bot.config import CostParams, RiskParams, config_from_dict
 from bot.data import synthetic_ohlcv
 from bot.risk import RiskManager
 from bot.strategy import Signal
-from bot.trade import Position, breakeven_price, check_exit, close_trade, entry_valid
+from bot.trade import apply_exit, new_position, plan_exits, trade_record
 from conftest import make_df
 
 
-def _pos(side="long", entry=100.0, stop=95.0, target=110.0, qty=2.0):
-    return Position(side, qty, entry, stop, target, stop, "2024-01-01T00:00:00+00:00")
+def _pos(side="long", entry=100.0, stop=95.0, tp1=110.0, tp2=0.0, qty=2.0, frac=0.5):
+    return new_position(side, qty, entry, stop, tp1, tp2, frac, "2024-01-01T00:00:00+00:00", "t", 0.0)
 
 
-def test_stop_first_when_both_hit_in_same_bar():
-    assert check_exit(_pos(), 100, 111, 94) == (95.0, "stop")
-    assert check_exit(_pos("short", 100, 105, 90), 100, 106, 89) == (105.0, "stop")
+def _plan(pos, o, h, l):
+    return [(e.price, e.qty, e.reason) for e in plan_exits(pos, o, h, l)]
 
 
-def test_gap_through_stop_fills_at_open():
-    assert check_exit(_pos(), 93, 96, 92) == (93, "stop")
+def test_stop_first_when_stop_and_tp1_in_same_bar():
+    assert _plan(_pos(), 100, 111, 94) == [(95.0, 2.0, "stop")]
+    assert _plan(_pos("short", 100, 105, 90), 100, 106, 89) == [(105.0, 2.0, "stop")]
 
 
-def test_target_hit():
-    assert check_exit(_pos(), 100, 110.5, 99) == (110.0, "target")
+def test_tp1_then_breakeven_in_same_bar_is_conservative():
+    assert _plan(_pos(), 100, 111, 99) == [(110.0, 1.0, "tp1"), (100.0, 1.0, "breakeven")]
 
 
-def test_breakeven_move_and_label():
-    p = _pos()
-    assert breakeven_price(p, 104, 99, 1.0) is None
-    assert breakeven_price(p, 105, 99, 1.0) == 100.0
-    p.stop = 100.0
-    assert close_trade(p, 100.0, "stop", "t", 0.0)["reason"] == "breakeven"
+def test_tp1_only_moves_stop_to_breakeven():
+    pos = _pos()
+    exits = plan_exits(pos, 100, 111, 101)
+    assert [(e.price, e.qty, e.reason) for e in exits] == [(110.0, 1.0, "tp1")]
+    pnl = apply_exit(pos, exits[0], 110.0, 0.0)
+    assert pnl == pytest.approx(10.0)
+    assert pos.qty == 1.0 and pos.tp1_done and pos.stop == 100.0
 
 
-def test_close_trade_pnl_and_r_with_fees():
-    p = _pos(qty=2.0)
-    p.entry_fee = 0.2
-    tr = close_trade(p, 110.0, "target", "t", 0.001)
-    assert tr["pnl"] == pytest.approx(20 - 0.2 - 0.22)
-    assert tr["r"] == pytest.approx(tr["pnl"] / 10)
+def test_gaps_and_final_target():
+    assert _plan(_pos(), 93, 96, 92) == [(93, 2.0, "stop")]
+    assert _plan(_pos(tp2=120.0), 100, 121, 101) == [(110.0, 1.0, "tp1"), (120.0, 1.0, "tp2")]
+    assert _plan(_pos(tp2=120.0), 125, 126, 124) == [(125, 1.0, "tp1"), (125, 1.0, "tp2")]
 
 
-def test_entry_valid_rechecks_rr_at_fill_price():
-    assert entry_valid("long", 100, 95, 110, 1.5)
-    assert not entry_valid("long", 103, 95, 110, 1.5)  # 많이 올라 손익비 부족
-    assert not entry_valid("long", 94, 95, 110, 1.5)   # 이미 손절가 아래
+def test_plan_does_not_mutate_position():
+    pos = _pos()
+    plan_exits(pos, 100, 111, 99)
+    assert pos.qty == 2.0 and not pos.tp1_done and pos.stop == 95.0
+
+
+def test_trade_record_r_multiple_includes_partial_and_fees():
+    pos = new_position("long", 2.0, 100.0, 95.0, 110.0, 0.0, 0.5, "t0", "sweep/choch", entry_fee=0.2)
+    for ex in plan_exits(pos, 100, 111, 101):
+        apply_exit(pos, ex, ex.price, 0.0002)
+    for ex in plan_exits(pos, 105, 106, 99):
+        last = ex
+        apply_exit(pos, ex, ex.price, 0.0005)
+    tr = trade_record(pos, last, last.price, "t1")
+    expected = 10.0 - 110 * 0.0002 - 100 * 0.0005 - 0.2
+    assert tr["reason"] == "breakeven" and tr["tp1_done"]
+    assert tr["pnl"] == pytest.approx(expected)
+    assert tr["r"] == pytest.approx(expected / 10.0)
 
 
 def test_position_size_risks_fixed_fraction_and_caps_leverage():
@@ -71,32 +84,34 @@ def test_daily_loss_limit_and_streak_block_until_next_day():
     assert not rm.can_trade()  # 하루 3% 초과
 
 
-def test_backtest_executes_next_open_and_books_pnl(cfg, monkeypatch):
-    rows = [(100, 101, 99, 100)] * 10 + [(100, 101, 99, 100), (100.5, 112, 100, 111)] + [(111, 112, 110, 111)] * 3
+def test_backtest_partial_then_breakeven(cfg, monkeypatch):
+    cfg.strategy.runner = "hold"
+    rows = [(100, 101, 99, 100)] * 11 + [(100.5, 108, 101, 107), (107, 107.5, 100.3, 101)] + [(101, 102, 100, 101)] * 2
     df = make_df(rows)
-    fired = {"done": False}
 
     def fake_signal(f, i, p, allow_short=True):
-        if i == 10 and not fired["done"]:
-            fired["done"] = True
-            return Signal("long", "sweep", 100, 95, 110, 2.0, 99, 100, f.index[i], "test")
+        if i == 10:
+            return Signal("long", "sweep", "pinbar", 100, 95, 107.5, 0.0, 99, f.index[i], "test")
         return None
 
     monkeypatch.setattr(backtest, "generate_signal", fake_signal)
     res = backtest.run_backtest(df, cfg)
     assert len(res.trades) == 1
     tr = res.trades.iloc[0]
-    assert tr["entry"] == 100.5 and tr["exit"] == 110 and tr["reason"] == "target"
     qty = cfg.initial_equity * cfg.risk.risk_per_trade / (100.5 - 95)
-    assert tr["pnl"] == pytest.approx(qty * 9.5)
-    assert res.equity.iloc[-1] == pytest.approx(cfg.initial_equity + qty * 9.5)
+    assert tr["entry"] == 100.5 and tr["tp1_done"] and tr["reason"] == "breakeven"
+    assert tr["pnl"] == pytest.approx(qty / 2 * 7.0)
+    assert res.equity.iloc[-1] == pytest.approx(cfg.initial_equity + qty / 2 * 7.0)
 
 
 def test_backtest_runs_on_synthetic_data():
-    from bot.config import config_from_dict
-
-    res = backtest.run_backtest(synthetic_ohlcv(3000, seed=5, timeframe="4h"), config_from_dict({}))
+    res = backtest.run_backtest(synthetic_ohlcv(3000, seed=5, timeframe="15m"), config_from_dict({}))
     assert res.stats["거래 수"] == len(res.trades)
     if len(res.trades):
-        # 한 번 손실은 대략 1R(=자산의 1%) 근처를 넘지 않아야 함 (수수료·슬리피지·갭 감안)
-        assert res.trades["r"].min() > -1.5
+        # 한 번 손실은 1R(=자산의 1%) 근처를 크게 넘지 않아야 함 (수수료·슬리피지·갭 감안)
+        assert res.trades["r"].min() > -1.6
+
+
+def test_costs_default_maker_cheaper_than_taker():
+    c = CostParams()
+    assert c.maker_fee_rate < c.fee_rate

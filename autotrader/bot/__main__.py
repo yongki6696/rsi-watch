@@ -52,7 +52,7 @@ def cmd_demo(args) -> None:
 
 def cmd_fetch(args) -> None:
     cfg = load_config(args.config)
-    ex = make_exchange(replace(cfg.exchange, sandbox=False))
+    ex = make_exchange(replace(cfg.exchange, sandbox=False, demo=False))
     until = parse_date_ms(args.until) if args.until else None
     df = fetch_ohlcv(ex, cfg.symbol, cfg.timeframe, parse_date_ms(args.since), until)
     out = Path(args.out) if args.out else _default_csv(cfg)
@@ -87,10 +87,11 @@ def cmd_run(args) -> None:
         ex = make_exchange(cfg.exchange, with_keys=True)
         broker = CcxtBroker(ex, cfg)
         state_file = cfg.live.state_file
-        logging.warning("⚠️ 실거래 모드 (%s, sandbox=%s)", cfg.exchange.id, cfg.exchange.sandbox)
+        logging.warning("⚠️ 실거래 모드 (%s, sandbox=%s, demo=%s)", cfg.exchange.id, cfg.exchange.sandbox,
+                        cfg.exchange.demo)
     else:
         # 모의매매는 실제(메인넷) 공개 시세를 쓰고 주문은 가상으로 체결
-        ex = make_exchange(replace(cfg.exchange, sandbox=False))
+        ex = make_exchange(replace(cfg.exchange, sandbox=False, demo=False))
         state_path = Path(cfg.live.state_file)
         state_file = str(state_path.with_name("paper-" + state_path.name))
         saved = json.loads(Path(state_file).read_text(encoding="utf-8")) if Path(state_file).exists() else {}
@@ -103,7 +104,7 @@ def cmd_run(args) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(prog="python -m bot", description="차슐랭 스타일 비트코인 자동매매 봇")
+    ap = argparse.ArgumentParser(prog="python -m bot", description="차슐랭 방식(유동성 훼손·구조 전환) BTC 자동매매 봇")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("demo", help="합성 데이터로 백테스트 (설치 확인용)")

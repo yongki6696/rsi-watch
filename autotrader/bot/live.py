@@ -1,8 +1,8 @@
 """실시간 매매 루프 (모의/실거래 공용).
 
 poll_seconds 마다:
-  1) 보유 포지션 관리 - 거래소 청산 여부 확인 또는 현재가로 손절/익절 판정
-  2) 새 봉이 마감됐으면 - 본절 이동 확인, 포지션이 없으면 신호 계산 후 진입
+  1) 보유 포지션 관리 - 거래소에서 체결된 익절/손절 반영, 또는 현재가로 직접 판정(현물/모의)
+  2) 새 봉이 마감됐으면 - 남은 물량 손절 트레일링, 포지션이 없으면 신호 계산 후 진입
 상태(포지션, 마지막 처리 봉, 일일 손실 등)는 JSON 파일에 저장돼 재시작해도 이어진다.
 """
 from __future__ import annotations
@@ -22,9 +22,11 @@ import pandas as pd
 from .config import Config, NotifyParams
 from .data import drop_unclosed, fetch_ohlcv, to_frame
 from .risk import RiskManager
-from .strategy import generate_signal, prepare_features, warmup_bars
+from .strategy import Features, generate_signal, prepare_features, trail_stop
 from .timeframes import timeframe_seconds
-from .trade import Position, breakeven_price, check_price_exit, entry_valid
+from .trade import Position, entry_valid, is_closed, plan_exits, trade_record
+
+MIN_BARS = 200
 
 log = logging.getLogger(__name__)
 
@@ -121,7 +123,7 @@ class LiveTrader:
         now = pd.Timestamp(self.feed.now_ms(), unit="ms", tz="UTC")
         df = drop_unclosed(self.feed.recent(self.cfg.live.history_bars), self.cfg.timeframe,
                            int(now.timestamp() * 1000))
-        if len(df) <= warmup_bars(self.cfg.strategy):
+        if len(df) < MIN_BARS:
             log.warning("봉 데이터가 부족합니다 (%d개)", len(df))
             return
         price = self.feed.last_price()
@@ -130,9 +132,10 @@ class LiveTrader:
 
         bar_t = df.index[-1]
         new_bar = self.last_bar is None or bar_t > pd.Timestamp(self.last_bar)
+        feats = prepare_features(df, self.cfg) if new_bar else None
 
         if self.pos is not None:
-            self._manage(price, df.iloc[-1] if new_bar else None, now)
+            self._manage(price, feats, now)
 
         if new_bar:
             self.last_bar = bar_t.isoformat()
@@ -142,7 +145,6 @@ class LiveTrader:
             elif self.pos is None and age > self.tf / 2:
                 log.info("마감된 지 오래된 봉(%s)이라 진입 판단을 건너뜁니다", bar_t)
             elif self.pos is None:
-                feats = prepare_features(df, self.cfg)
                 sig = generate_signal(feats, len(df) - 1, self.cfg.strategy, self.cfg.allow_short)
                 if sig:
                     self._enter(sig, price, now)
@@ -150,27 +152,28 @@ class LiveTrader:
                     log.info("%s 봉 마감: 신호 없음 (종가 %.2f)", bar_t, df["close"].iloc[-1])
         self._save()
 
-    def _manage(self, price: float, closed_bar: pd.Series | None, now: pd.Timestamp) -> None:
+    def _manage(self, price: float, feats: Features | None, now: pd.Timestamp) -> None:
         pos = self.pos
         if self.broker.native_exits:
-            tr = self.broker.sync(pos, price, now)
-            if tr:
-                self._closed(tr)
-                return
+            fills = self.broker.sync(pos, price, now)
         else:
-            reason = check_price_exit(pos, price)
-            if reason:
-                self._closed(self.broker.close(pos, price, reason, now))
-                return
-        if closed_bar is not None:
-            be = breakeven_price(pos, closed_bar["high"], closed_bar["low"], self.cfg.strategy.breakeven_at_r)
-            if be is not None:
-                self.broker.update_stop(pos, be)
-                self.notifier.send(f"🔒 본절 이동: {pos.side} 손절 → {be:,.2f}")
+            fills = [(ex, self.broker.execute(pos, ex, now)) for ex in plan_exits(pos, price, price, price)]
+        for ex, px in fills:
+            if ex.reason == "tp1" and not is_closed(pos):
+                self.notifier.send(f"💰 1차 익절 {ex.qty:.6f} @ {px:,.2f} → 남은 물량 손절 본절({pos.stop:,.2f})")
+        if is_closed(pos):
+            ex, px = fills[-1]
+            self._closed(trade_record(pos, ex, px, now.isoformat()))
+            return
+        if feats is not None and pos.tp1_done and self.cfg.strategy.runner == "trail":
+            new = trail_stop(feats, len(feats.index) - 1, pos.side, pos.stop, self.cfg.strategy)
+            if new is not None:
+                self.broker.update_stop(pos, new)
+                self.notifier.send(f"🔒 손절 이동(트레일링): {pos.side} → {new:,.2f}")
 
     def _enter(self, sig, price: float, now: pd.Timestamp) -> None:
-        if not entry_valid(sig.side, price, sig.stop, sig.target, self.cfg.strategy.min_rr):
-            log.info("신호(%s %s) 발생했지만 현재가 %.2f 에서는 손익비가 맞지 않아 패스", sig.side, sig.setup, price)
+        if not entry_valid(sig.side, price, sig.stop, sig.tp1):
+            log.info("신호(%s %s) 발생했지만 현재가 %.2f 가 이미 손절/1차 목표를 지나쳐 패스", sig.side, sig.setup, price)
             return
         qty = self.risk.size(self.broker.equity(), price, sig.stop)
         try:
@@ -181,8 +184,9 @@ class LiveTrader:
         p = self.pos
         self._save()
         self.notifier.send(
-            f"{'🟢 롱' if p.is_long else '🔴 숏'} 진입 [{sig.setup}] {self.cfg.symbol}\n"
-            f"진입 {p.entry:,.2f} / 손절 {p.stop:,.2f} / 목표 {p.target:,.2f} (손익비 {sig.rr:.2f})\n"
+            f"{'🟢 롱' if p.is_long else '🔴 숏'} 진입 [{sig.setup}/{sig.trigger}] {self.cfg.symbol}\n"
+            f"진입 {p.entry:,.2f} / 손절 {p.stop:,.2f} / 1차 익절 {p.tp1:,.2f} ({p.tp1_qty:.6f})"
+            f"{f' / 최종 {p.tp2:,.2f}' if p.tp2 else ''}\n"
             f"수량 {p.qty:.6f}\n근거: {sig.reason}"
         )
 

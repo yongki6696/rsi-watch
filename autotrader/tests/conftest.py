@@ -1,7 +1,6 @@
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -17,26 +16,38 @@ def make_df(rows, start="2024-01-01", freq="1h"):
     return pd.DataFrame(rows, columns=["open", "high", "low", "close", "volume"], index=idx).astype(float)
 
 
-def range_market(n=120, low=100.0, high=110.0, period=20, seed=0):
-    """low~high 박스권을 오가는 시세 (지지 low, 저항 high 가 여러 번 확인됨)."""
-    rng = np.random.default_rng(seed)
-    mid, amp = (low + high) / 2, (high - low) / 2
+def mirror(rows, axis=300.0):
+    """가격을 위아래로 뒤집는다 (숏 시나리오 → 롱 시나리오)."""
+    return [(axis - o, axis - l, axis - h, axis - c) for o, h, l, c, *_ in rows]
+
+
+def swing_high_prefix():
+    """횡보 → 105.2 스윙 고점(1h 유동성) → 하락. 고점 뒤에 숏 손절 물량(바이사이드 유동성)."""
     rows = []
-    prev = mid
-    for i in range(n):
-        c = mid + amp * 0.92 * np.sin(2 * np.pi * i / period) + rng.normal(0, 0.05)
-        o = prev
-        rows.append((o, max(o, c) + 0.3, min(o, c) - 0.3, c, 100.0))
-        prev = c
+    c = 100.0
+    for k in range(30):
+        n = 100.5 if k % 2 == 0 else 100.0
+        rows.append((c, max(c, n) + 0.2, min(c, n) - 0.2, n))
+        c = n
+    for n in (101, 102, 103, 104):
+        rows.append((c, n + 0.1, c - 0.1, n))
+        c = n
+    rows.append((104.0, 105.2, 103.9, 105.0))  # 스윙 고점 105.2
+    c = 105.0
+    for n in (104.2, 103.4, 102.6, 101.8, 101.0):
+        rows.append((c, c + 0.1, n - 0.1, n))
+        c = n
     return rows
 
 
 @pytest.fixture
 def cfg():
+    """1h 진입 = 1h 유동성, 4h 구조. 손절폭 제한은 넉넉히 (시나리오 검증용)."""
     return config_from_dict({
         "timeframe": "1h",
-        "bias_timeframe": "4h",
-        "strategy": {"bias_mode": "off", "volume_mult": 0.0, "level_lookback": 200},
+        "liquidity_timeframe": "1h",
+        "structure_timeframe": "4h",
+        "strategy": {"min_stop_atr": 0.1, "max_stop_atr": 50, "enable_ob": False},
         "risk": {"max_consecutive_losses": 0, "daily_loss_limit": 1.0},
-        "costs": {"fee_rate": 0.0, "slippage": 0.0},
+        "costs": {"fee_rate": 0.0, "maker_fee_rate": 0.0, "slippage": 0.0},
     })

@@ -1,45 +1,48 @@
-# 차슐랭 스타일 BTC 자동매매 봇 설정 예시
+# 차슐랭 방식 BTC 자동매매 봇 설정 예시
 # 복사해서 쓰세요:  cp config.example.yaml config.yaml
 # 적지 않은 항목은 bot/config.py 의 기본값을 씁니다. 키 이름을 틀리면 바로 오류가 납니다.
 
-symbol: BTC/USDT:USDT        # 선물(USDT 무기한). 현물이면 BTC/USDT, 업비트면 BTC/KRW
-timeframe: 4h                # 진입 판단 봉 (1h 는 실데이터 백테스트에서 수수료 때문에 더 나빴음)
-bias_timeframe: 1d           # 방향(중기 추세) 판단 봉
+symbol: BTC/USDT:USDT        # 바이낸스 USDT 무기한 선물. 업비트 현물은 BTC/KRW
+timeframe: 15m               # 진입 봉: 내부 구조 전환 확인 (채널은 10분·30분봉 사용, 바이낸스는 10분봉이 없어 15m)
+liquidity_timeframe: 1h      # 내부 유동성(단기 고점·저점)과 핀바를 보는 봉
+structure_timeframe: 4h      # 가격 구조, 외부 유동성, 오더블록을 보는 봉
 timezone: Asia/Seoul         # 일일 손실 한도가 리셋되는 기준 시간대
 initial_equity: 10000        # 백테스트/모의매매 시작 자산 (실거래는 거래소 잔고 사용)
 
 exchange:
   id: binance                # ccxt 거래소 id: binance / bybit / okx / upbit ...
   market_type: future        # future = 롱·숏 / spot = 롱만
-  sandbox: true              # ★ 테스트넷. 실거래 전 반드시 true 로 충분히 돌려보세요
+  sandbox: true              # ★ 바이낸스 선물 테스트넷 (testnet.binancefuture.com 키)
+  demo: false                # 바이낸스 데모 트레이딩 계정을 쓰려면 sandbox: false, demo: true
   leverage: 3                # 거래소에 설정할 레버리지 (실제 노출은 risk.max_leverage 로 다시 제한)
   api_key_env: EXCHANGE_API_KEY      # API 키는 파일에 쓰지 말고 환경변수로
   secret_env: EXCHANGE_API_SECRET
   password_env: EXCHANGE_API_PASSWORD  # OKX passphrase 등 (필요할 때만)
 
 strategy:
-  bias_mode: strict          # strict: 상승 추세면 롱만, 하락 추세면 숏만 / loose: 역추세만 금지 / off
-  ema_fast: 50
-  ema_slow: 200
-  # 핵심 가격대(지지·저항, 매물대)
-  pivot_window: 5
-  level_lookback: 300
-  zone_width_atr: 0.6
-  min_touches: 2
-  target_min_strength: 3.0
-  # 셋업 A: 유동성 스윕(함정) 후 회복
-  enable_sweep: true
-  sweep_min_atr: 0.1
-  sweep_max_atr: 1.5
-  volume_mult: 1.2
-  # 셋업 B: 돌파 후 첫 리테스트
-  enable_retest: true
-  retest_window: 12
-  # 손절/목표
-  stop_buffer_atr: 0.2
-  min_rr: 1.5
-  fallback_rr: 2.0
-  breakeven_at_r: 1.0
+  # 유동성: 스윙 고점 뒤 = 바이사이드(숏 손절 물량), 스윙 저점 뒤 = 셀사이드(롱 손절 물량)
+  liq_pivot_window: 5        # 1h 단기 고점/저점 = 내부 유동성 (좌우 5봉)
+  ext_pivot_window: 3        # 4h 고점/저점 = 외부 유동성, 가격 구조 (좌우 3봉)
+  entry_pivot_window: 2      # 15m 내부 구조 스윙 (좌우 2봉)
+  # 셋업과 트리거
+  enable_sweep: true         # 유동성 훼손 후 진입
+  sweep_levels: all          # all = 내부+외부 / external = 4h 외부 유동성만
+  enable_ob: true            # 오더블록(서플라이/디맨드 존) 터치 후 진입
+  enable_pinbar: true        # 훼손한 1h 봉이 핀바로 안쪽 마감 → 진입
+  enable_choch: true         # 훼손 뒤 15m 내부 구조 전환(직전 스윙 이탈 마감) → 진입
+  arm_bars: 12               # 훼손/터치 후 12봉(15m x 12 = 3시간) 안에 전환이 나와야 함
+  sweep_max_atr: 1.5         # 레벨을 1h ATR x 1.5 보다 더 뚫으면 함정이 아니라 돌파로 보고 패스
+  pinbar_wick: 0.5
+  ob_impulse_atr: 1.5
+  bias_mode: "off"           # "off" = 양방향 (채널 방식) / structure = 4h 구조 방향으로만
+  # 손절·익절 (채널: "부분 익절 후 잔여 물량은 본절 로스")
+  stop_buffer_atr: 0.1
+  min_stop_atr: 0.8          # 손절폭이 1h ATR x 0.8 보다 좁으면 수수료 비중이 커서 패스
+  max_stop_atr: 3.0
+  tp1_r: 1.5                 # 1.5R 에서
+  tp1_fraction: 0.5          # 절반 익절 → 손절을 본절로
+  runner: trail              # 남은 절반: trail = 1h 스윙 따라 손절 이동 / hold = 본절 유지
+  tp2_r: 0                   # 남은 물량 최종 목표 (0 = 없음)
 
 risk:
   risk_per_trade: 0.01       # 한 번 손절 시 자산의 1%만 잃도록 수량 계산
@@ -48,13 +51,14 @@ risk:
   max_consecutive_losses: 3  # 3연패면 그날 신규 진입 중지
 
 costs:                       # 백테스트·모의매매용 (실거래는 실제 체결 기준)
-  fee_rate: 0.0005           # 바이낸스 선물 시장가 0.05% (업비트 KRW 0.05%)
+  fee_rate: 0.0005           # 시장가(진입·손절) 바이낸스 선물 0.05%
+  maker_fee_rate: 0.0002     # 지정가(익절) 0.02%
   slippage: 0.0002
 
 live:
   enabled: false             # ★ 실거래 이중 안전장치: true + 실행 시 --live 둘 다 있어야 실주문
-  poll_seconds: 30
-  history_bars: 1500
+  poll_seconds: 20
+  history_bars: 6000         # 15m x 6000 = 약 62일치로 유동성·구조 계산
   exits: auto                # auto: 선물은 거래소 손절/익절 주문, 현물은 봇이 직접 감시
   state_file: state.json
   log_file: trader.log
@@ -63,8 +67,9 @@ notify:                      # 텔레그램 알림 (환경변수가 비어 있�
   telegram_token_env: TELEGRAM_BOT_TOKEN
   telegram_chat_env: TELEGRAM_CHAT_ID
 
-# ── 업비트 현물(KRW) 예시 ──
+# ── 업비트 현물(KRW, 롱만) 예시 ──
 # symbol: BTC/KRW
 # exchange: {id: upbit, market_type: spot, sandbox: false}
 # risk: {max_leverage: 1}
+# costs: {fee_rate: 0.0005, maker_fee_rate: 0.0005}
 # initial_equity: 10000000

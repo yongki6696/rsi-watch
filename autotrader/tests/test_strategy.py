@@ -1,111 +1,159 @@
 import numpy as np
+import pandas as pd
 
 from bot.config import config_from_dict
 from bot.data import synthetic_ohlcv
-from bot.strategy import compute_bias, generate_signal, prepare_features
-from conftest import make_df, range_market
+from bot.indicators import atr, pivots
+from bot.smc import order_blocks, structure
+from bot.strategy import generate_signal, prepare_features
+from conftest import make_df, mirror, swing_high_prefix
 
 
-def _case(cfg, n, path, last_bar, allow_short=True):
-    """n봉 박스권(지지 ~100, 저항 ~110) 뒤에 path 로 이동하고 마지막 봉 last_bar(o→OHLCV) 로 끝나는 시세."""
-    rows = range_market(n)
-    for c in path:
-        o = rows[-1][3]
-        rows.append((o, max(o, c) + 0.3, min(o, c) - 0.3, c, 100.0))
-    o = rows[-1][3]
-    rows.append((o, *last_bar(o)))
+def _signal(cfg, rows):
     df = make_df(rows)
     f = prepare_features(df, cfg)
-    return generate_signal(f, len(df) - 1, cfg.strategy, allow_short)
+    return generate_signal(f, len(df) - 1, cfg.strategy)
 
 
-def _long_sweep(cfg, sweep_low, close):
-    # 박스 상단(n=106)에서 지지(100) 위로 급락한 뒤, 마지막 봉이 지지 아래를 찌르고 회복
-    return _case(cfg, 106, [106.5, 103.5, 100.9], lambda o: (o + 0.2, sweep_low, close, 300.0))
+def _pinbar_rows(spike_high=105.8, close=102.0):
+    rows = swing_high_prefix()
+    c = rows[-1][3]
+    for n in (101.6, 101.2, 101.8, 101.4):  # 고점 아래에서 횡보
+        rows.append((c, max(c, n) + 0.2, min(c, n) - 0.2, n))
+        c = n
+    rows.append((c, spike_high, c - 0.2, close))  # 고점 위를 찌르고 아래로 마감
+    return rows
 
 
-def _short_sweep(cfg, allow_short=True):
-    # 박스 하단(n=116)에서 저항(110) 아래로 급등한 뒤, 마지막 봉이 저항 위를 찌르고 이탈
-    return _case(cfg, 116, [103.5, 106.5, 109.2], lambda o: (111.6, o - 0.2, 109.1, 300.0), allow_short)
+def _choch_rows(last_close=101.3):
+    rows = swing_high_prefix()
+    rows += [
+        (101.0, 101.9, 100.9, 101.8),
+        (101.8, 102.8, 101.6, 102.6),
+        (102.6, 103.6, 102.4, 103.2),
+        (103.2, 103.3, 101.5, 101.8),   # 내부 구조 저점 101.5
+        (101.8, 103.0, 101.7, 102.9),
+        (102.9, 104.2, 102.7, 104.0),
+        (104.0, 104.9, 103.8, 104.7),
+        (104.7, 105.7, 104.5, 105.4),   # 105.2 고점 훼손 (핀바 아님, 위에서 마감)
+        (105.4, 105.5, 103.9, 104.1),
+        (104.1, 104.3, 102.0, 102.3),
+        (102.3, 102.5, 101.2, last_close),  # 101.5 이탈 마감 → 내부 구조 하락 전환
+    ]
+    return rows
 
 
-def test_sweep_and_reclaim_gives_long(cfg):
-    sig = _long_sweep(cfg, sweep_low=99.3, close=100.9)
+def test_sweep_then_pinbar_gives_short(cfg):
+    sig = _signal(cfg, _pinbar_rows())
     assert sig is not None
-    assert sig.side == "long" and sig.setup == "sweep"
-    assert sig.stop < 99.3 < sig.ref_price < sig.target
-    assert sig.rr >= cfg.strategy.min_rr
-    assert "스윕" in sig.reason
+    assert (sig.side, sig.setup, sig.trigger) == ("short", "sweep", "pinbar")
+    assert sig.level == 105.2 and sig.stop > 105.8
+    assert sig.tp1 < sig.ref_price
+    assert np.isclose(sig.ref_price - sig.tp1, cfg.strategy.tp1_r * (sig.stop - sig.ref_price))
+    assert "바이사이드" in sig.reason and "핀바" in sig.reason
 
 
-def test_close_below_support_is_breakdown_not_trap(cfg):
-    assert _long_sweep(cfg, sweep_low=99.3, close=99.8) is None
+def test_weak_wick_is_not_a_pinbar(cfg):
+    assert _signal(cfg, _pinbar_rows(spike_high=105.4, close=105.1)) is None
 
 
-def test_too_deep_sweep_is_ignored(cfg):
-    assert _long_sweep(cfg, sweep_low=96.0, close=100.9) is None
+def test_too_deep_sweep_is_breakout_not_trap(cfg):
+    assert _signal(cfg, _pinbar_rows(spike_high=112.0, close=104.0)) is None
 
 
-def test_volume_filter_blocks_weak_sweep(cfg):
-    cfg.strategy.volume_mult = 5.0
-    assert _long_sweep(cfg, sweep_low=99.3, close=100.9) is None
+def test_sweep_then_internal_structure_shift_gives_short(cfg):
+    sig = _signal(cfg, _choch_rows())
+    assert sig is not None
+    assert (sig.side, sig.trigger) == ("short", "choch")
+    assert sig.stop > 105.7
+    assert "101.50 이탈" in sig.reason
 
 
-def test_poor_reward_to_risk_is_skipped(cfg):
-    # 꼬리가 깊어 손절폭이 커지면 다음 가격대(박스 중앙 매물대)까지 손익비가 안 나온다
-    assert _long_sweep(cfg, sweep_low=98.4, close=100.9) is None
+def test_structure_shift_needs_close_beyond_swing(cfg):
+    assert _signal(cfg, _choch_rows(last_close=101.6)) is None
 
 
-def test_strict_bias_blocks_trade_without_trend(cfg):
-    assert _long_sweep(cfg, sweep_low=99.3, close=100.9) is not None
-    cfg.strategy.bias_mode = "strict"  # EMA200 워밍업 전이라 방향 미정 → 진입 금지
-    assert _long_sweep(cfg, sweep_low=99.3, close=100.9) is None
+def test_structure_shift_only_fires_on_first_cross(cfg):
+    rows = _choch_rows()
+    rows.append((101.3, 101.4, 100.6, 100.9))  # 이미 전환된 뒤 다음 봉
+    assert _signal(cfg, rows) is None
 
 
-def test_short_sweep_and_spot_disallows_short(cfg):
-    sig = _short_sweep(cfg)
-    assert sig is not None and sig.side == "short" and sig.stop > 111.6 and sig.target < sig.ref_price
-    assert _short_sweep(cfg, allow_short=False) is None
+def test_mirrored_scenarios_give_longs(cfg):
+    sig = _signal(cfg, mirror(_pinbar_rows()))
+    assert sig is not None and (sig.side, sig.trigger) == ("long", "pinbar") and sig.stop < 300 - 105.8
+    sig = _signal(cfg, mirror(_choch_rows()))
+    assert sig is not None and (sig.side, sig.trigger) == ("long", "choch")
+    assert "셀사이드" in sig.reason
 
 
-def test_breakout_retest_gives_long(cfg):
-    cfg.strategy.enable_sweep = False
-    # 박스 상단에서 저항(~110)을 돌파해 위에서 버티다가, 처음으로 저항 상단까지 되돌아와 지지
-    sig = _case(cfg, 106, [111.5, 112.5, 113.0], lambda o: (o + 0.2, 110.1, 111.6, 100.0))
-    assert sig is not None and sig.setup == "retest" and sig.side == "long"
-    assert sig.stop < 108.1 and sig.target > sig.ref_price
+def test_spot_and_bias_filters(cfg):
+    df = make_df(_pinbar_rows())
+    f = prepare_features(df, cfg)
+    assert generate_signal(f, len(df) - 1, cfg.strategy, allow_short=False) is None
+    cfg.strategy.bias_mode = "structure"
+    f.struct[:] = 1  # 4h 상승 구조면 숏 금지
+    assert generate_signal(f, len(df) - 1, cfg.strategy) is None
+    f.struct[:] = -1
+    assert generate_signal(f, len(df) - 1, cfg.strategy) is not None
 
 
-def test_bias_uses_only_closed_higher_timeframe_bars():
-    df = synthetic_ohlcv(3000, seed=3)
-    full = compute_bias(df, "1h", "4h", 5, 20)
-    cut = 2003  # 4시간봉 중간에서 자름
-    part = compute_bias(df.iloc[: cut + 1], "1h", "4h", 5, 20)
-    assert np.array_equal(full[: cut + 1], part, equal_nan=True)
+def test_stop_size_limits(cfg):
+    cfg.strategy.max_stop_atr = 0.5  # 손절폭이 너무 넓으면 패스
+    assert _signal(cfg, _pinbar_rows()) is None
+
+
+def test_structure_state_and_reference_price():
+    # 고점 돌파 → 상승 구조, 기준 가격(출발 저점) 이탈 → 하락 구조
+    rows = [(10.5, 11, 10, 10.8), (10.8, 13, 11, 12.5), (12.5, 12.6, 10.5, 11.0),
+            (11.0, 14, 11.5, 13.8), (13.8, 15, 12.5, 14.5), (14.5, 14.6, 12, 12.5),
+            (12.5, 16, 13, 15.8), (15.8, 15.9, 10, 10.2)]
+    state, ref = structure(make_df(rows, freq="4h"), 1)
+    assert state[3] == 1 and ref[3] == 10.5     # 13 돌파: 기준 = 다리 출발 저점 10.5
+    assert state[6] == 1 and ref[6] == 12       # 15 돌파(BOS): 기준이 12 로 올라감
+    assert state[7] == -1 and ref[7] == 16      # 12 이탈(CHoCH): 하락 구조, 기준 = 고점 16
+
+
+def test_order_block_is_last_opposite_candle_before_impulse():
+    rows = [(100, 100.6, 99.6, 100.2) if k % 2 else (100.2, 100.7, 99.7, 100) for k in range(20)]
+    rows += [(100, 100.4, 98.9, 99.2),      # 스윙 저점 98.9
+             (99.2, 100.8, 99.1, 100.6),
+             (100.6, 101.5, 100.4, 101.3),  # 마지막 양봉 = 오더블록 100.4~101.5
+             (101.3, 101.4, 96.0, 96.5),    # 장대 음봉: 98.9 이탈 = 임펄스
+             (96.5, 97.5, 96.2, 97.3),
+             (97.3, 100.9, 97.1, 100.5)]    # 서플라이 존 터치
+    df = make_df(rows, freq="4h")
+    z = order_blocks(df, "4h", df, "4h", 1, 1.5, 180, 14)
+    assert list(z.side) == [1]
+    assert (z.low[0], z.high[0]) == (100.4, 101.5)
+    assert z.touched[0] == len(rows) - 1
 
 
 def test_signals_have_no_lookahead():
     """i 시점 신호는 i 이후 데이터를 붙여도 바뀌면 안 된다 (백테스트 신뢰성의 핵심)."""
-    cfg = config_from_dict({"timeframe": "1h", "bias_timeframe": "4h", "strategy": {
-        "bias_mode": "loose", "volume_mult": 1.0, "level_lookback": 200, "ema_slow": 50}})
-    df = synthetic_ohlcv(1500, seed=11)
+    cfg = config_from_dict({"strategy": {"min_stop_atr": 0.3}})
+    df = synthetic_ohlcv(4000, seed=11, timeframe="15m")
     full = prepare_features(df, cfg)
     checked = 0
-    for i in range(300, 1500, 7):
+    for i in range(600, 4000, 3):
         a = generate_signal(full, i, cfg.strategy)
+        if a is None and i % 30:
+            continue
         part = prepare_features(df.iloc[: i + 1], cfg)
         b = generate_signal(part, i, cfg.strategy)
         assert (a is None) == (b is None), i
         if a is not None:
             checked += 1
-            assert (a.side, a.setup) == (b.side, b.setup)
-            assert np.isclose(a.stop, b.stop) and np.isclose(a.target, b.target)
-    assert checked > 0
+            assert (a.side, a.setup, a.trigger) == (b.side, b.setup, b.trigger)
+            assert np.isclose(a.stop, b.stop) and np.isclose(a.tp1, b.tp1)
+    assert checked >= 5
 
 
-def test_only_first_retest_counts(cfg):
-    cfg.strategy.enable_sweep = False
-    # 돌파 후 이미 한 번 저항 상단까지 되돌아왔던 경우(112.5 → 110.2) 두 번째 리테스트는 무시
-    rows_path = [111.5, 112.5, 110.4, 112.8]
-    sig = _case(cfg, 106, rows_path, lambda o: (o + 0.2, 110.1, 111.6, 100.0))
-    assert sig is None
+def test_atr_and_pivots():
+    df = make_df([(10, 11, 9, 10)] * 30)
+    assert np.isclose(atr(df, 14).iloc[-1], 2.0)
+    high = np.array([1, 2, 3, 9, 3, 2, 1, 2, 3, 4, 5], float)
+    low = np.array([5, 4, 3, 2, 3, 4, 5, 4, 1, 4, 5], float)
+    ph, pl = pivots(high, low, 2)
+    assert list(ph) == [3] and list(pl) == [3, 8]
+    assert isinstance(df.index, pd.DatetimeIndex)

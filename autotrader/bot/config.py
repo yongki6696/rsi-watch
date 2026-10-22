@@ -16,7 +16,8 @@ import yaml
 class ExchangeParams:
     id: str = "binance"            # ccxt 거래소 id: binance, bybit, okx, upbit ...
     market_type: str = "future"    # future(롱/숏) | spot(롱만)
-    sandbox: bool = True           # 테스트넷 사용 여부 (실거래 전 반드시 true로 검증)
+    sandbox: bool = True           # 테스트넷 사용 (실거래 전 반드시 true로 검증)
+    demo: bool = False             # 바이낸스 '데모 트레이딩' 계정 사용 (sandbox 대신)
     leverage: int = 3              # 선물 레버리지 (거래소에 설정; 실제 노출은 risk.max_leverage로 제한)
     api_key_env: str = "EXCHANGE_API_KEY"
     secret_env: str = "EXCHANGE_API_SECRET"
@@ -25,36 +26,31 @@ class ExchangeParams:
 
 @dataclass
 class StrategyParams:
-    # 지표
     atr_period: int = 14
-    ema_fast: int = 50             # 상위 타임프레임(중기 방향) 빠른 EMA
-    ema_slow: int = 200            # 상위 타임프레임 느린 EMA
-    bias_mode: str = "strict"      # strict: 추세 방향만 / loose: 역추세 금지(중립 허용) / off
-    # 핵심 가격대(지지·저항) 탐지
-    pivot_window: int = 5          # 스윙 고점/저점 판정 좌우 봉 수
-    level_lookback: int = 300      # 가격대 탐색 구간(봉)
-    vp_bins: int = 60              # 매물대(볼륨 프로파일) 구간 수
-    hvn_quantile: float = 0.8      # 이 분위수 이상 거래량이 몰린 가격대를 매물대로 인정
-    zone_width_atr: float = 0.6    # 같은 가격대로 묶는 폭(ATR 배수)
-    min_touches: int = 2           # 스윙 기반 가격대가 되려면 최소 터치 수(쌍바닥/쌍봉)
-    target_min_strength: float = 3.0  # 목표가로 삼을 '핵심' 가격대 최소 강도 (터치 수 + 3 x 매물대 강도)
-    # 셋업 1: 유동성 스윕(함정) 후 되돌림
-    enable_sweep: bool = True
-    sweep_min_atr: float = 0.1     # 가격대를 최소 이만큼 찌르고
-    sweep_max_atr: float = 1.5     # 이보다 깊으면 함정이 아니라 진짜 이탈로 봄
-    sweep_clean_bars: int = 3      # 직전 N봉 종가가 가격대 위(아래)에 있었어야 함
-    reclaim_close_pos: float = 0.5 # 봉 내 종가 위치(0=저가,1=고가). 롱은 이 값 이상이어야 함
-    volume_mult: float = 1.2       # 스윕/돌파 봉 거래량 >= 평균 x 배수 (0이면 끔)
-    volume_sma: int = 20
-    # 셋업 2: 돌파 후 리테스트(저항→지지 전환)
-    enable_retest: bool = True
-    retest_window: int = 12        # 돌파 후 이 봉 수 안에 첫 리테스트가 와야 함
-    retest_tolerance_atr: float = 0.2
-    # 청산 / 손익비
-    stop_buffer_atr: float = 0.2   # 손절은 꼬리/가격대 바깥 + 버퍼
-    min_rr: float = 1.5            # 손익비 이 미만이면 진입 안 함
-    fallback_rr: float = 2.0       # 반대편 가격대가 없을 때 목표 손익비
-    breakeven_at_r: float = 1.0    # +1R 도달 시 손절을 본절로 (0이면 끔)
+    # 유동성: 스윙 고점 뒤 = 바이사이드(숏 손절 물량), 스윙 저점 뒤 = 셀사이드(롱 손절 물량)
+    liq_pivot_window: int = 5      # 유동성 봉(1h) 단기 고점/저점 = 내부 유동성. 좌우 N봉
+    ext_pivot_window: int = 3      # 구조 봉(4h) 고점/저점 = 외부 유동성 + 가격 구조. 좌우 N봉
+    entry_pivot_window: int = 2    # 진입 봉 내부 구조(스윙) 판정. 좌우 N봉
+    # 셋업
+    enable_sweep: bool = True      # 유동성 훼손(스윕) 후 진입
+    sweep_levels: str = "all"      # all: 내부+외부 유동성 / external: 4h 외부 유동성만
+    enable_ob: bool = True         # 오더블록(서플라이/디맨드 존) 터치 후 진입
+    enable_pinbar: bool = True     # 트리거 ①: 훼손한 봉이 핀바로 안쪽 마감
+    enable_choch: bool = True      # 트리거 ②: 훼손 후 내부 구조 전환(직전 스윙 이탈 마감)
+    arm_bars: int = 12             # 훼손/터치 후 이 봉 수 안에 전환이 나와야 함
+    sweep_max_atr: float = 1.5     # 레벨을 이보다 더 뚫으면(유동성 봉 ATR 기준) 함정이 아니라 돌파로 봄
+    pinbar_wick: float = 0.5       # 핀바: 반대쪽 꼬리가 봉 길이의 50% 이상
+    ob_impulse_atr: float = 1.5    # 구조 봉 몸통이 ATR x 배수 이상 + 직전 스윙 돌파 = 임펄스
+    ob_max_age: int = 180          # 오더블록 유효 기간(구조 봉 수, 4h x 180 = 30일)
+    bias_mode: str = "off"         # off: 양방향(채널 방식) / structure: 4h 구조 방향으로만
+    # 손절 / 익절
+    stop_buffer_atr: float = 0.1   # 손절 = 훼손 꼬리 끝 + 버퍼
+    min_stop_atr: float = 0.8      # 손절폭이 이보다 좁으면 수수료 비중이 커서 패스 (실데이터 검증으로 정함)
+    max_stop_atr: float = 3.0      # 손절폭이 이보다 넓으면 패스
+    tp1_r: float = 1.5             # 1차 부분 익절 위치 (R 배수)
+    tp1_fraction: float = 0.5      # 1차 익절 비중. 이후 손절을 본절로
+    runner: str = "trail"          # 남은 물량: trail(유동성 봉 스윙 따라 손절 이동) / hold(본절 유지)
+    tp2_r: float = 0.0             # 남은 물량 최종 목표 (R 배수, 0 이면 없음)
 
 
 @dataclass
@@ -67,7 +63,8 @@ class RiskParams:
 
 @dataclass
 class CostParams:
-    fee_rate: float = 0.0005       # 편도 수수료
+    fee_rate: float = 0.0005       # 시장가(테이커) 수수료: 진입, 손절
+    maker_fee_rate: float = 0.0002 # 지정가(메이커) 수수료: 익절 주문
     slippage: float = 0.0002       # 시장가 체결 미끄러짐
 
 
@@ -75,7 +72,7 @@ class CostParams:
 class LiveParams:
     enabled: bool = False          # 실거래 이중 안전장치: 이 값과 --live 플래그가 모두 있어야 실주문
     poll_seconds: int = 30
-    history_bars: int = 1500       # 매 판단마다 불러올 봉 수 (4h x 1500 = 250일: 일봉 EMA200 워밍업 포함)
+    history_bars: int = 6000       # 매 판단마다 쓰는 봉 수 (15m x 6000 = 약 62일치 유동성/구조)
     exits: str = "auto"            # auto | exchange(거래소 스탑/익절 주문) | software(봇이 직접 감시)
     state_file: str = "state.json"
     log_file: str = "trader.log"
@@ -90,8 +87,9 @@ class NotifyParams:
 @dataclass
 class Config:
     symbol: str = "BTC/USDT:USDT"  # ccxt 심볼. 현물: BTC/USDT, 업비트: BTC/KRW
-    timeframe: str = "4h"          # 진입 판단 타임프레임(단기). 1h 는 수수료 비중이 커서 백테스트 결과가 더 나빴음
-    bias_timeframe: str = "1d"     # 방향 판단 타임프레임(중기)
+    timeframe: str = "15m"         # 진입(트리거) 봉: 내부 구조 전환·핀바 확인
+    liquidity_timeframe: str = "1h"  # 내부 유동성(단기 고점/저점) 봉
+    structure_timeframe: str = "4h"  # 가격 구조·외부 유동성·오더블록 봉
     timezone: str = "Asia/Seoul"   # 일일 손실 한도 리셋 기준
     initial_equity: float = 10_000.0  # 백테스트/모의매매 시작 자산
     exchange: ExchangeParams = field(default_factory=ExchangeParams)
@@ -130,6 +128,10 @@ def config_from_dict(data: dict[str, Any]) -> Config:
         "live": LiveParams,
         "notify": NotifyParams,
     }
+    strat = dict(data.get("strategy") or {})
+    if strat.get("bias_mode") is False:  # YAML 에서 따옴표 없는 off 는 False 로 읽힌다
+        strat["bias_mode"] = "off"
+        data["strategy"] = strat
     built = {name: _build(cls, data.pop(name, None) or {}, name) for name, cls in sections.items()}
     cfg = _build(Config, data, "root")
     for name, value in built.items():
@@ -150,13 +152,21 @@ def validate(cfg: Config) -> None:
 
     if cfg.exchange.market_type not in ("spot", "future"):
         raise ValueError("exchange.market_type 은 spot 또는 future 여야 합니다")
-    if cfg.strategy.bias_mode not in ("strict", "loose", "off"):
-        raise ValueError("strategy.bias_mode 은 strict / loose / off 중 하나여야 합니다")
+    p = cfg.strategy
+    if p.bias_mode not in ("off", "structure"):
+        raise ValueError("strategy.bias_mode 은 off / structure 중 하나여야 합니다")
+    if p.sweep_levels not in ("all", "external"):
+        raise ValueError("strategy.sweep_levels 는 all / external 중 하나여야 합니다")
+    if p.runner not in ("trail", "hold"):
+        raise ValueError("strategy.runner 는 trail / hold 중 하나여야 합니다")
+    if not 0 <= p.tp1_fraction <= 1 or p.tp1_r <= 0:
+        raise ValueError("tp1_fraction 은 0~1, tp1_r 은 양수여야 합니다")
     if cfg.live.exits not in ("auto", "exchange", "software"):
         raise ValueError("live.exits 은 auto / exchange / software 중 하나여야 합니다")
-    if timeframe_seconds(cfg.bias_timeframe) < timeframe_seconds(cfg.timeframe):
-        raise ValueError("bias_timeframe 은 timeframe 보다 같거나 길어야 합니다")
+    tf, lq, st = (timeframe_seconds(x) for x in (cfg.timeframe, cfg.liquidity_timeframe, cfg.structure_timeframe))
+    if not tf <= lq <= st:
+        raise ValueError("timeframe <= liquidity_timeframe <= structure_timeframe 순서여야 합니다")
     if not 0 < cfg.risk.risk_per_trade <= 0.05:
         raise ValueError("risk.risk_per_trade 는 0 초과 0.05(5%) 이하로 두세요")
-    if cfg.strategy.min_rr <= 0 or cfg.strategy.fallback_rr <= 0:
-        raise ValueError("min_rr / fallback_rr 은 양수여야 합니다")
+    if cfg.exchange.sandbox and cfg.exchange.demo:
+        raise ValueError("exchange.sandbox 와 exchange.demo 는 동시에 켤 수 없습니다")
