@@ -50,9 +50,11 @@ class StrategyParams:
     stop_buffer_atr: float = 0.1   # 손절 = 훼손 꼬리 끝 + 버퍼
     min_stop_atr: float = 0.8      # 손절폭이 이보다 좁으면 수수료 비중이 커서 패스 (실데이터 검증으로 정함)
     max_stop_atr: float = 3.0      # 손절폭이 이보다 넓으면 패스
+    entry_mode: str = "market"     # market: 다음 봉 시장가 / limit: 신호 봉 종가에 지정가(메이커 수수료)
+    limit_wait_bars: int = 4       # 지정가 진입 대기 봉 수. 그 안에 안 걸리면 취소
     tp1_r: float = 1.5             # 1차 부분 익절 위치 (R 배수)
     tp1_fraction: float = 0.5      # 1차 익절 비중. 이후 손절을 본절로
-    runner: str = "trail"          # 남은 물량: trail(유동성 봉 스윙 따라 손절 이동) / hold(본절 유지)
+    runner: str = "trail"          # 남은 물량: trail(1h 스윙 따라 손절 이동) / trail_ext(4h 스윙) / hold(본절 유지)
     tp2_r: float = 0.0             # 남은 물량 최종 목표 (R 배수, 0 이면 없음)
 
 
@@ -160,8 +162,10 @@ def validate(cfg: Config) -> None:
         raise ValueError("strategy.bias_mode 은 off / structure 중 하나여야 합니다")
     if p.sweep_levels not in ("all", "external"):
         raise ValueError("strategy.sweep_levels 는 all / external 중 하나여야 합니다")
-    if p.runner not in ("trail", "hold"):
-        raise ValueError("strategy.runner 는 trail / hold 중 하나여야 합니다")
+    if p.runner not in ("trail", "trail_ext", "hold"):
+        raise ValueError("strategy.runner 는 trail / trail_ext / hold 중 하나여야 합니다")
+    if p.entry_mode not in ("market", "limit"):
+        raise ValueError("strategy.entry_mode 는 market / limit 중 하나여야 합니다")
     if not 0 <= p.tp1_fraction <= 1 or p.tp1_r <= 0:
         raise ValueError("tp1_fraction 은 0~1, tp1_r 은 양수여야 합니다")
     if cfg.live.exits not in ("auto", "exchange", "software"):

@@ -92,6 +92,13 @@ def test_paper_stop_loss(setup):
     assert trader.pos is None and trader.broker.equity() < cfg.initial_equity
 
 
+def test_live_refuses_limit_entry_mode(setup, tmp_path):
+    cfg, df, feed, trader, state = setup
+    cfg.strategy.entry_mode = "limit"
+    with pytest.raises(ValueError, match="지정가"):
+        live.LiveTrader(cfg, feed, PaperBroker(cfg), tmp_path / "s2.json", Silent())
+
+
 def test_stale_bar_is_not_traded(setup):
     cfg, df, feed, trader, state = setup
     feed.offset = pd.Timedelta(minutes=45)  # 1시간봉이 마감된 지 45분 지남

@@ -91,6 +91,9 @@ class LiveTrader:
         self.pos: Position | None = Position.from_dict(st["position"]) if st.get("position") else None
         self.risk = RiskManager(cfg.risk, cfg.timezone, cfg.effective_max_leverage, st.get("risk"))
         self.tf = pd.Timedelta(seconds=timeframe_seconds(cfg.timeframe))
+        if cfg.strategy.entry_mode != "market":
+            raise ValueError("실시간 매매는 아직 지정가 진입(entry_mode: limit)을 지원하지 않습니다. "
+                             "백테스트와 결과가 달라지므로 market 으로 두세요")
         broker.startup_check(self.pos)
 
     # ── 상태 저장 ──
@@ -165,7 +168,7 @@ class LiveTrader:
             ex, px = fills[-1]
             self._closed(trade_record(pos, ex, px, now.isoformat()))
             return
-        if feats is not None and pos.tp1_done and self.cfg.strategy.runner == "trail":
+        if feats is not None and pos.tp1_done:
             new = trail_stop(feats, len(feats.index) - 1, pos.side, pos.stop, self.cfg.strategy)
             if new is not None:
                 self.broker.update_stop(pos, new)

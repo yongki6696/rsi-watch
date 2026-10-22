@@ -40,9 +40,11 @@ strategy:
   stop_buffer_atr: 0.1
   min_stop_atr: 0.8          # 손절폭이 1h ATR x 0.8 보다 좁으면 수수료 비중이 커서 패스
   max_stop_atr: 3.0
+  entry_mode: market         # market = 다음 봉 시장가 / limit = 신호 봉 종가 지정가 (백테스트 전용, 실시간 미지원)
+  limit_wait_bars: 4
   tp1_r: 1.5                 # 1.5R 에서
   tp1_fraction: 0.5          # 절반 익절 → 손절을 본절로
-  runner: trail              # 남은 절반: trail = 1h 스윙 따라 손절 이동 / hold = 본절 유지
+  runner: trail              # 남은 절반: trail = 1h 스윙 / trail_ext = 4h 스윙 따라 손절 이동 / hold = 본절 유지
   tp2_r: 0                   # 남은 물량 최종 목표 (0 = 없음)
 
 risk:

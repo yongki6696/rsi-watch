@@ -115,3 +115,39 @@ def test_backtest_runs_on_synthetic_data():
 def test_costs_default_maker_cheaper_than_taker():
     c = CostParams()
     assert c.maker_fee_rate < c.fee_rate
+
+
+def test_limit_entry_fills_only_when_price_trades_through(cfg, monkeypatch):
+    cfg.strategy.entry_mode = "limit"
+    cfg.strategy.runner = "hold"
+    rows = ([(100, 101, 99, 100)] * 11
+            + [(100.5, 101, 100.0, 100.8),   # 저가가 지정가(100)에 '닿기만' → 미체결
+               (100.8, 101, 99.5, 100.6),    # 100 아래로 뚫음 → 100 에 체결, 이 봉에선 익절 안 봄
+               (100.6, 108, 100.2, 107)]     # 1차 익절
+            + [(107, 107.5, 99.8, 100.5)] * 2)
+    df = make_df(rows)
+
+    def fake_signal(f, i, p, allow_short=True):
+        if i == 10:
+            return Signal("long", "sweep", "choch", 100, 95, 107.5, 0.0, 99, f.index[i], "test")
+        return None
+
+    monkeypatch.setattr(backtest, "generate_signal", fake_signal)
+    tr = backtest.run_backtest(df, cfg).trades.iloc[0]
+    assert tr["entry"] == 100 and tr["opened_at"].startswith(str(df.index[12].date()))
+    assert pd.Timestamp(tr["opened_at"]) == df.index[12]
+    assert tr["tp1_done"] and tr["reason"] == "breakeven"
+
+
+def test_limit_entry_expires_when_target_hit_first(cfg, monkeypatch):
+    cfg.strategy.entry_mode = "limit"
+    rows = [(100, 101, 99, 100)] * 11 + [(100.5, 108, 100.2, 107)] + [(107, 107.5, 98, 99)] * 3
+    df = make_df(rows)
+
+    def fake_signal(f, i, p, allow_short=True):
+        if i == 10:
+            return Signal("long", "sweep", "choch", 100, 95, 107.5, 0.0, 99, f.index[i], "test")
+        return None
+
+    monkeypatch.setattr(backtest, "generate_signal", fake_signal)
+    assert backtest.run_backtest(df, cfg).trades.empty  # 체결 전에 목표 도달 → 기회 놓침

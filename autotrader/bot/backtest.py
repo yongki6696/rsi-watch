@@ -1,7 +1,10 @@
 """봉 단위 백테스트.
 
 순서 (각 진입 봉 i):
-  1) 직전 봉에서 나온 신호가 있으면 i 봉 시가에 시장가 진입
+  1) 대기 중인 신호가 있으면 진입
+     - market: i 봉 시가에 시장가 (테이커 수수료 + 슬리피지)
+     - limit : 신호 봉 종가에 지정가. 가격이 그 값을 '뚫고' 지나가야 체결로 본다(대기열 고려).
+               체결된 봉에서는 익절은 보지 않고 손절만 본다 (체결 전후 순서를 모르므로 보수적으로)
   2) 보유 포지션의 손절/1차 익절/최종 목표를 i 봉 고가·저가로 판정 (보수적 순서, trade.plan_exits)
   3) 1차 익절 뒤 남은 물량은 확정된 유동성 봉 스윙을 따라 손절 이동 (runner: trail)
   4) i 봉 마감 후 신호 계산 → 다음 봉에 진입 예약
@@ -29,15 +32,31 @@ class BacktestResult:
 
 
 def open_from_signal(sig: Signal, price: float, equity: float, risk: RiskManager, cfg: Config,
-                     t: pd.Timestamp) -> Position | None:
-    """신호를 실제 진입가(슬리피지 반영)로 다시 검증하고 수량을 정해 포지션을 만든다."""
+                     t: pd.Timestamp, fee_rate: float | None = None) -> Position | None:
+    """신호를 실제 진입가로 다시 검증하고 수량을 정해 포지션을 만든다."""
     if not entry_valid(sig.side, price, sig.stop, sig.tp1):
         return None
     qty = risk.size(equity, price, sig.stop)
     if qty <= 0:
         return None
     return new_position(sig.side, qty, price, sig.stop, sig.tp1, sig.tp2, cfg.strategy.tp1_fraction,
-                        t.isoformat(), f"{sig.setup}/{sig.trigger}", price * qty * cfg.costs.fee_rate)
+                        t.isoformat(), f"{sig.setup}/{sig.trigger}",
+                        price * qty * (cfg.costs.fee_rate if fee_rate is None else fee_rate))
+
+
+def limit_fill(sig: Signal, o: float, h: float, l: float) -> float | None:
+    """지정가(신호 봉 종가) 진입이 이 봉에서 체결되면 체결가, 아니면 None."""
+    lim = sig.ref_price
+    if sig.side == "long":
+        return min(o, lim) if l < lim else None
+    return max(o, lim) if h > lim else None
+
+
+def limit_expired(sig: Signal, h: float, l: float) -> bool:
+    """체결 전에 1차 목표나 손절에 먼저 닿았으면 기회가 지나간 것."""
+    if sig.side == "long":
+        return h >= sig.tp1 or l <= sig.stop
+    return l <= sig.tp1 or h >= sig.stop
 
 
 def run_backtest(df: pd.DataFrame, cfg: Config) -> BacktestResult:
@@ -47,23 +66,33 @@ def run_backtest(df: pd.DataFrame, cfg: Config) -> BacktestResult:
     equity = cfg.initial_equity
     pos: Position | None = None
     pending: Signal | None = None
+    pending_until = -1
     trades: list[dict] = []
     curve = np.empty(len(df))
+    limit = p.entry_mode == "limit"
 
     for i, t in enumerate(f.index):
         risk.roll_day(t, equity)
         o, h, l = f.open[i], f.high[i], f.low[i]
+        bar = (o, h, l)
 
         if pending is not None:
-            fill = slipped(o, pending.side, True, c.slippage)
-            pos = open_from_signal(pending, fill, equity, risk, cfg, t)
+            if not limit:
+                pos = open_from_signal(pending, slipped(o, pending.side, True, c.slippage), equity, risk, cfg, t)
+                pending = None
+            elif (fill := limit_fill(pending, o, h, l)) is not None:
+                pos = open_from_signal(pending, fill, equity, risk, cfg, t, c.maker_fee_rate)
+                pending = None
+                if pos:  # 체결 봉: 손절만 판정
+                    bar = (fill, fill, l) if pos.is_long else (fill, h, fill)
+            elif i >= pending_until or limit_expired(pending, h, l):
+                pending = None
             if pos:
                 equity += pos.realized  # 진입 수수료
-            pending = None
 
         if pos is not None:
             last: Exit | None = None
-            for ex in plan_exits(pos, o, h, l):
+            for ex in plan_exits(pos, *bar):
                 price, fee = exit_fill(ex, pos.side, c)
                 equity += apply_exit(pos, ex, price, fee)
                 last = ex
@@ -71,13 +100,14 @@ def run_backtest(df: pd.DataFrame, cfg: Config) -> BacktestResult:
                 trades.append(trade_record(pos, last, price, t.isoformat()))
                 risk.on_trade_closed(pos.realized)
                 pos = None
-            elif pos.tp1_done and p.runner == "trail":
+            elif pos.tp1_done:
                 new = trail_stop(f, i, pos.side, pos.stop, p)
                 if new is not None:
                     pos.stop = new
 
-        if pos is None and risk.can_trade():
+        if pos is None and pending is None and risk.can_trade():
             pending = generate_signal(f, i, p, cfg.allow_short)
+            pending_until = i + p.limit_wait_bars
 
         curve[i] = equity + (pos.gross(f.close[i], pos.qty) if pos else 0.0)
 

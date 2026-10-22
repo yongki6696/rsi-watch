@@ -57,8 +57,7 @@ class Features:
     piv_lo: np.ndarray
     short_ev: Events
     long_ev: Events
-    trail_hi: tuple[np.ndarray, np.ndarray]  # (확정 봉, 가격) 유동성 봉 스윙 고점 — 숏 트레일링
-    trail_lo: tuple[np.ndarray, np.ndarray]  # 유동성 봉 스윙 저점 — 롱 트레일링
+    trail: dict  # {(runner, 'hi'|'lo'): (확정 봉, 가격)} 트레일링 기준 스윙 (trail=1h, trail_ext=4h)
 
 
 def prepare_features(df: pd.DataFrame, cfg: Config) -> Features:
@@ -87,10 +86,11 @@ def prepare_features(df: pd.DataFrame, cfg: Config) -> Features:
     lq_start[lq_known[ok]] = np.searchsorted(df.index.asi8, lq.index.asi8[ok], side="left")
 
     trail = {}
-    for side, m in (("hi", lv.side == 1), ("lo", lv.side == -1)):
-        m = m & ~lv.external
-        order = np.argsort(lv.known[m], kind="stable")
-        trail[side] = (lv.known[m][order], lv.price[m][order])
+    for runner, ext in (("trail", False), ("trail_ext", True)):
+        for side, m in (("hi", lv.side == 1), ("lo", lv.side == -1)):
+            m = m & (lv.external == ext)
+            order = np.argsort(lv.known[m], kind="stable")
+            trail[(runner, side)] = (lv.known[m][order], lv.price[m][order])
 
     return Features(
         index=df.index,
@@ -102,7 +102,7 @@ def prepare_features(df: pd.DataFrame, cfg: Config) -> Features:
         piv_hi=ph, piv_lo=pl,
         short_ev=build_events(lv, zones, n, 1, p.enable_sweep, p.enable_ob, p.sweep_levels == "external"),
         long_ev=build_events(lv, zones, n, -1, p.enable_sweep, p.enable_ob, p.sweep_levels == "external"),
-        trail_hi=trail["hi"], trail_lo=trail["lo"],
+        trail=trail,
     )
 
 
@@ -195,8 +195,10 @@ def generate_signal(f: Features, i: int, p: StrategyParams, allow_short: bool = 
 
 
 def trail_stop(f: Features, i: int, side: str, current: float, p: StrategyParams) -> float | None:
-    """남은 물량 손절을 i 봉까지 확정된 마지막 유동성 봉 스윙 너머로 옮길 가격 (더 유리할 때만)."""
-    known, price = f.trail_lo if side == "long" else f.trail_hi
+    """남은 물량 손절을 i 봉까지 확정된 마지막 스윙(trail=1h, trail_ext=4h) 너머로 옮길 가격 (더 유리할 때만)."""
+    if p.runner not in ("trail", "trail_ext"):
+        return None
+    known, price = f.trail[(p.runner, "lo" if side == "long" else "hi")]
     k = int(np.searchsorted(known, i, side="right")) - 1
     if k < 0 or not np.isfinite(f.atr[i]):
         return None
