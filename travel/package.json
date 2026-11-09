@@ -1,0 +1,8 @@
+{
+  "name": "eodigaji",
+  "private": true,
+  "description": "어디가지 — 나라별 최저가 항공권 + 가격 하락 알림 PWA",
+  "scripts": {
+    "test": "node --test test/*.test.js test/*.test.mjs"
+  }
+}

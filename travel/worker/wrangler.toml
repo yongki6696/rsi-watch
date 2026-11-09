@@ -1,0 +1,18 @@
+name = "eodigaji"
+main = "index.js"
+compatibility_date = "2026-10-01"
+
+# 3시간마다 즐겨찾기 가격 확인 (UTC 기준)
+[triggers]
+crons = ["0 */3 * * *"]
+
+[vars]
+ALLOWED_ORIGIN = "*"
+# 알림을 눌렀을 때 열 앱 주소 (본인 GitHub Pages 주소로 바꾸세요)
+APP_URL = "https://yongki6696.github.io/rsi-watch/travel/"
+
+# 앱이 꺼져 있을 때 알림을 받으려면 KV를 만들고 아래 주석을 풀어 id를 넣으세요.
+#   npx wrangler kv namespace create WATCH
+# [[kv_namespaces]]
+# binding = "WATCH"
+# id = "여기에_KV_ID"

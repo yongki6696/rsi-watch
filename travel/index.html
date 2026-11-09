@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="왕복 날짜만 넣으면 나라별 최저가 항공권을 시간대별로 골라 보여주고, 즐겨찾기한 항공편 가격이 내려가면 알려주는 여행 앱">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="어디가지">
+<meta name="theme-color" content="#f4f6fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1020" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>어디가지</title>
+<style>
+:root {
+  --bg: #f4f6fb; --surface: #ffffff; --surface2: #eef2f8; --border: #e2e8f0;
+  --text: #0f172a; --text2: #475569; --muted: #8a97ab;
+  --accent: #2563eb; --accent-text: #ffffff; --accent-soft: #e6eeff;
+  --down: #047857; --down-soft: #e3f6ee; --up: #c2410c; --danger: #dc2626;
+  --dawn: #4f46e5; --morning: #b45309; --afternoon: #0369a1; --evening: #7e22ce;
+  --dawn-bg: #eceafe; --morning-bg: #fdf1dc; --afternoon-bg: #e0f1fb; --evening-bg: #f3e8fd;
+  --shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 4px 16px rgba(15, 23, 42, .05);
+  --radius: 16px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1020; --surface: #131b2f; --surface2: #1a2440; --border: #26324f;
+    --text: #e8edf7; --text2: #aab5ca; --muted: #6f7c95;
+    --accent: #6b97ff; --accent-text: #0b1020; --accent-soft: rgba(107, 151, 255, .16);
+    --down: #34d399; --down-soft: rgba(52, 211, 153, .14); --up: #fb923c; --danger: #f87171;
+    --dawn: #a5b4fc; --morning: #fcd34d; --afternoon: #7dd3fc; --evening: #d8b4fe;
+    --dawn-bg: rgba(165, 180, 252, .14); --morning-bg: rgba(252, 211, 77, .13);
+    --afternoon-bg: rgba(125, 211, 252, .13); --evening-bg: rgba(216, 180, 254, .14);
+    --shadow: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b1020; --surface: #131b2f; --surface2: #1a2440; --border: #26324f;
+  --text: #e8edf7; --text2: #aab5ca; --muted: #6f7c95;
+  --accent: #6b97ff; --accent-text: #0b1020; --accent-soft: rgba(107, 151, 255, .16);
+  --down: #34d399; --down-soft: rgba(52, 211, 153, .14); --up: #fb923c; --danger: #f87171;
+  --dawn: #a5b4fc; --morning: #fcd34d; --afternoon: #7dd3fc; --evening: #d8b4fe;
+  --dawn-bg: rgba(165, 180, 252, .14); --morning-bg: rgba(252, 211, 77, .13);
+  --afternoon-bg: rgba(125, 211, 252, .13); --evening-bg: rgba(216, 180, 254, .14);
+  --shadow: none;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--bg); color: var(--text); min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  font-size: 15px; line-height: 1.45;
+}
+button, input, select { font: inherit; color: inherit; }
+a { color: var(--accent); }
+.hidden { display: none !important; }
+.num { font-variant-numeric: tabular-nums; }
+
+header.top {
+  position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(12px); -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  padding: calc(env(safe-area-inset-top) + 12px) 16px 10px;
+}
+.top-inner { max-width: 720px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand img { width: 30px; height: 30px; border-radius: 9px; }
+.brand h1 { font-size: 19px; letter-spacing: -.4px; }
+.brand p { font-size: 12px; color: var(--text2); }
+.source-pill { font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 99px; background: var(--surface2); color: var(--text2); white-space: nowrap; }
+.source-pill.live { background: var(--down-soft); color: var(--down); }
+
+main { max-width: 720px; margin: 0 auto; padding: 4px 16px calc(env(safe-area-inset-bottom) + 96px); }
+.view { display: none; }
+.view.active { display: block; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; margin-bottom: 12px; }
+.card h3 { font-size: 15px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.hint { font-size: 12.5px; color: var(--text2); margin-top: 8px; }
+
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field > span { font-size: 12px; font-weight: 600; color: var(--text2); }
+.field input, .field select {
+  width: 100%; min-width: 0; height: 46px; padding: 0 12px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--surface2); outline: none; -webkit-appearance: none; appearance: none;
+}
+.field select { background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 18px) 20px, calc(100% - 13px) 20px; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 30px; }
+.field input:focus, .field select:focus { border-color: var(--accent); }
+.dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  border: 1px solid var(--border); background: var(--surface); border-radius: 99px; padding: 6px 12px;
+  font-size: 13px; font-weight: 600; color: var(--text2); cursor: pointer; white-space: nowrap;
+}
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.search .chips { margin-top: 12px; }
+.search-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.trip-label { font-size: 13px; color: var(--text2); }
+.trip-label b { color: var(--text); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px; padding: 0 14px;
+  border-radius: 12px; border: 1px solid var(--border); background: var(--surface); font-weight: 600; font-size: 14px;
+  cursor: pointer; touch-action: manipulation; white-space: nowrap;
+}
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .5; cursor: default; transform: none; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); height: 46px; padding: 0 20px; font-size: 15px; }
+.btn.danger { color: var(--danger); }
+.btn.small { height: 32px; padding: 0 10px; font-size: 13px; border-radius: 10px; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+
+.res-head { margin: 18px 2px 10px; }
+.res-head h2 { font-size: 17px; letter-spacing: -.3px; }
+.res-meta { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.filters { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.filters::-webkit-scrollbar { display: none; }
+.filters .chips { flex-wrap: nowrap; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text2); white-space: nowrap; padding: 6px 10px; border-radius: 99px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
+.toggle input { accent-color: var(--accent); }
+
+.legend { display: flex; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--text2); margin: -2px 2px 12px; align-items: center; }
+
+.country { padding: 0; overflow: hidden; }
+.c-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px 10px; }
+.c-flag { font-size: 28px; line-height: 1; }
+.c-title { flex: 1; min-width: 0; }
+.c-title h3 { font-size: 17px; margin: 0; letter-spacing: -.3px; }
+.c-cities { font-size: 12.5px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-min { text-align: right; }
+.c-min small { display: block; font-size: 11px; color: var(--muted); }
+.c-min b { font-size: 18px; letter-spacing: -.3px; }
+.c-rank { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 2px 6px; margin-right: 4px; vertical-align: 2px; }
+
+.flights { list-style: none; }
+.flight { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.f-title { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.f-title .code { font-size: 11px; font-weight: 600; color: var(--muted); }
+.f-title .airline { font-weight: 500; color: var(--text2); font-size: 13px; }
+.legs { margin-top: 6px; display: grid; gap: 6px; }
+.leg { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: start; font-size: 13px; }
+.leg-lbl { font-size: 11px; color: var(--muted); line-height: 20px; white-space: nowrap; }
+.leg-body { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; }
+.leg-times { line-height: 20px; white-space: nowrap; }
+.leg time { font-weight: 700; font-size: 14px; }
+.leg sup { font-size: 10px; color: var(--up); font-weight: 700; margin-left: 1px; }
+.leg .meta { flex-basis: 100%; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+.leg .date { color: var(--text2); font-size: 12px; margin-right: 4px; }
+@media (min-width: 560px) { .leg .meta { flex-basis: auto; } }
+.slot { font-size: 11px; font-weight: 700; border-radius: 6px; padding: 1px 6px; }
+.slot.dawn { color: var(--dawn); background: var(--dawn-bg); }
+.slot.morning { color: var(--morning); background: var(--morning-bg); }
+.slot.afternoon { color: var(--afternoon); background: var(--afternoon-bg); }
+.slot.evening { color: var(--evening); background: var(--evening-bg); }
+.stops { color: var(--up); }
+.f-side { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.price { font-size: 17px; font-weight: 800; letter-spacing: -.3px; }
+.f-actions { display: flex; gap: 6px; }
+.star {
+  width: 36px; height: 32px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface);
+  font-size: 17px; line-height: 1; cursor: pointer; color: var(--muted);
+}
+.star[aria-pressed="true"] { color: #f59e0b; border-color: #f59e0b; background: color-mix(in srgb, #f59e0b 12%, transparent); }
+.book { display: inline-flex; align-items: center; height: 32px; padding: 0 10px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.c-foot { display: flex; justify-content: space-between; gap: 10px; padding: 10px 16px 12px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
+.c-foot a { text-decoration: none; font-weight: 600; white-space: nowrap; }
+
+.empty { text-align: center; padding: 40px 20px; color: var(--text2); }
+.empty .big { font-size: 40px; margin-bottom: 8px; }
+.empty h3 { color: var(--text); font-size: 16px; margin-bottom: 4px; justify-content: center; }
+.loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; color: var(--text2); }
+.spinner { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid var(--border); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-box { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); border-radius: 12px; padding: 12px 14px; font-size: 13.5px; margin-top: 12px; }
+
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--accent-soft); font-size: 13.5px; margin-bottom: 12px; }
+.fav-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 2px 12px; }
+.fav-toolbar .sub { font-size: 12px; color: var(--muted); display: block; }
+.fav { padding: 14px 16px; }
+.fav-top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.fav-route { font-size: 15px; font-weight: 700; }
+.fav-dates { font-size: 12.5px; color: var(--text2); margin-top: 2px; }
+.fav-price { text-align: right; }
+.fav-price .now { font-size: 20px; font-weight: 800; letter-spacing: -.4px; }
+.delta { font-size: 12.5px; font-weight: 700; }
+.delta.down { color: var(--down); }
+.delta.up { color: var(--up); }
+.delta.same { color: var(--muted); }
+.fav-mid { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 12px; align-items: end; margin-top: 10px; }
+.spark { width: 120px; height: 40px; }
+.spark path { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.spark circle { fill: var(--accent); }
+.fav-stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 10px; }
+.fav-stats b { color: var(--text2); font-weight: 600; }
+.fav-bottom { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.target { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text2); }
+.target input { width: 108px; height: 32px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); padding: 0 8px; outline: none; text-align: right; }
+.target input:focus { border-color: var(--accent); }
+.status { font-size: 11.5px; font-weight: 700; border-radius: 6px; padding: 2px 7px; background: var(--surface2); color: var(--text2); }
+.status.warn { color: var(--up); }
+.fav.expired { opacity: .55; }
+
+.sec-title { font-size: 14px; color: var(--text2); margin: 22px 2px 8px; }
+.alert-log { list-style: none; }
+.alert-log li { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; font-size: 13px; }
+.alert-log time { font-size: 11.5px; color: var(--muted); display: block; margin-bottom: 2px; }
+.alert-log p { white-space: pre-line; color: var(--text2); }
+
+.radio { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; cursor: pointer; }
+.radio input { margin-top: 3px; accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
+.radio b { display: block; font-size: 14px; }
+.radio small { display: block; font-size: 12.5px; color: var(--text2); }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0 12px; }
+.setting-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ok-text { color: var(--down); font-size: 13px; font-weight: 600; }
+.err-text { color: var(--danger); font-size: 13px; font-weight: 600; }
+.pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--surface2); color: var(--text2); }
+
+nav.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; justify-content: center;
+  background: color-mix(in srgb, var(--surface) 92%, transparent); border-top: 1px solid var(--border);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  padding: 6px 8px calc(env(safe-area-inset-bottom) + 6px);
+}
+.tabbar-inner { display: flex; width: 100%; max-width: 480px; }
+.tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; font-size: 11.5px; font-weight: 600; color: var(--muted); text-decoration: none; position: relative; }
+.tab svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tab.active { color: var(--accent); }
+.tab .badge { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+
+#toast {
+  position: fixed; left: 16px; right: 16px; margin: 0 auto; width: fit-content; max-width: 420px;
+  bottom: calc(env(safe-area-inset-bottom) + 84px); transform: translateY(20px);
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 13.5px; font-weight: 600;
+  opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50; white-space: pre-line; text-align: center;
+}
+#toast.show { opacity: 1; transform: translateY(0); }
+
+@media (max-width: 380px) {
+  .flight { padding: 12px 12px; }
+  .c-head { padding: 12px 12px 8px; }
+  .leg { grid-template-columns: 36px minmax(0, 1fr); }
+  .fav-mid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <img src="icon.svg" alt="">
+      <div>
+        <h1>어디가지</h1>
+        <p>날짜만 넣으면 가장 싼 나라부터</p>
+      </div>
+    </div>
+    <span id="source-pill" class="source-pill">데모 데이터</span>
+  </div>
+</header>
+
+<main>
+  <!-- 검색 -->
+  <section id="view-search" class="view active" aria-label="항공권 검색">
+    <form id="search-form" class="card search" autocomplete="off">
+      <label class="field"><span>출발</span><select id="origin"></select></label>
+      <div class="dates">
+        <label class="field"><span>가는 날</span><input type="date" id="depart" required></label>
+        <label class="field"><span>오는 날</span><input type="date" id="return" required></label>
+      </div>
+      <div class="chips" id="nights-chips" aria-label="여행 기간 빠른 선택"></div>
+      <div class="search-foot">
+        <span class="trip-label" id="trip-label"></span>
+        <button class="btn primary" type="submit" id="search-btn">최저가 찾기</button>
+      </div>
+      <div id="form-error" class="error-box hidden" role="alert"></div>
+    </form>
+
+    <div id="results" class="hidden">
+      <div class="res-head">
+        <h2 id="res-title"></h2>
+        <div class="res-meta" id="res-meta"></div>
+      </div>
+      <div class="filters">
+        <label class="toggle"><input type="checkbox" id="direct-only"> 직항만</label>
+        <div class="chips" id="region-chips"></div>
+      </div>
+      <div class="legend" aria-hidden="true">
+        출발 시각 <span class="slot dawn">새벽 0–6</span><span class="slot morning">오전 6–12</span><span class="slot afternoon">오후 12–18</span><span class="slot evening">저녁 18–24</span>
+      </div>
+      <div id="country-list"></div>
+    </div>
+
+    <div id="search-empty" class="empty">
+      <div class="big">🌏</div>
+      <h3>어디로 떠나볼까요?</h3>
+      <p>왕복 날짜를 고르고 <b>최저가 찾기</b>를 누르면<br>가장 싼 나라부터 항공권 5개씩 보여드려요.</p>
+    </div>
+  </section>
+
+  <!-- 즐겨찾기 -->
+  <section id="view-favorites" class="view" aria-label="즐겨찾기">
+    <div id="notif-banner" class="banner hidden">
+      <span>가격이 내려가면 알림을 받으시겠어요?</span>
+      <button class="btn small" id="banner-enable" type="button">알림 켜기</button>
+    </div>
+    <div class="fav-toolbar">
+      <div>
+        <b id="fav-count">즐겨찾기</b>
+        <span class="sub" id="fav-checked"></span>
+      </div>
+      <button class="btn" id="check-now" type="button">지금 가격 확인</button>
+    </div>
+    <div id="fav-list"></div>
+    <h3 class="sec-title">알림 기록</h3>
+    <ol id="alert-log" class="alert-log"></ol>
+  </section>
+
+  <!-- 설정 -->
+  <section id="view-settings" class="view" aria-label="설정">
+    <div class="card">
+      <h3>가격 데이터</h3>
+      <label class="radio"><input type="radio" name="source" value="demo">
+        <span><b>데모 데이터</b><small>가상의 가격으로 바로 써볼 수 있어요. 3시간마다 가격이 조금씩 바뀝니다.</small></span></label>
+      <label class="radio"><input type="radio" name="source" value="live">
+        <span><b>실제 가격 (Travelpayouts)</b><small>직접 배포한 서버가 필요해요. 설정 방법은 travel/README.md에 있어요.</small></span></label>
+      <div id="live-fields">
+        <label class="field"><span>서버 주소</span><input id="server-url" type="url" inputmode="url" placeholder="https://eodigaji.내계정.workers.dev"></label>
+        <div class="btn-row">
+          <button class="btn small" id="test-server" type="button">연결 테스트</button>
+          <span id="server-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>알림</h3>
+      <div class="setting-row">
+        <span>브라우저 알림 <span class="pill" id="perm-state">-</span></span>
+        <button class="btn small" id="enable-notif" type="button">알림 켜기</button>
+      </div>
+      <p class="hint hidden" id="perm-denied" style="margin:-4px 0 12px">알림이 차단돼 있어요. 브라우저의 사이트 설정에서 알림을 허용해 주세요.</p>
+      <div class="setting-grid">
+        <label class="field"><span>확인 주기 (앱 열려 있을 때)</span>
+          <select id="interval">
+            <option value="15">15분마다</option>
+            <option value="30">30분마다</option>
+            <option value="60">1시간마다</option>
+            <option value="180">3시간마다</option>
+          </select></label>
+        <label class="field"><span>이만큼 내려가면 알림</span>
+          <select id="min-drop">
+            <option value="1000">₩1,000 이상</option>
+            <option value="5000">₩5,000 이상</option>
+            <option value="10000">₩10,000 이상</option>
+            <option value="30000">₩30,000 이상</option>
+          </select></label>
+      </div>
+      <p class="hint">즐겨찾기한 뒤 <b>최저가를 새로 찍을 때</b>마다 알려드려요. 목표가를 정해두면 그 가격 이하가 됐을 때도 알려드려요.</p>
+      <p class="hint">iPhone은 Safari에서 <b>공유 → 홈 화면에 추가</b>한 뒤 그 아이콘으로 열어야 알림을 받을 수 있어요.</p>
+    </div>
+
+    <div class="card">
+      <h3>앱이 꺼져 있을 때도 알림 <span class="pill">선택</span></h3>
+      <p class="hint" style="margin-top:0">실제 가격 서버가 3시간마다 대신 확인해서 <b>ntfy</b> 앱으로 휴대폰에 푸시를 보내요. ntfy 앱(무료)을 설치하고 아래 토픽을 구독하세요.</p>
+      <label class="field" style="margin-top:10px"><span>ntfy 토픽 (남이 추측하기 어려운 이름)</span><input id="ntfy-topic" autocapitalize="off" spellcheck="false"></label>
+      <div class="btn-row">
+        <button class="btn small" id="sync-watch" type="button">서버에 즐겨찾기 등록</button>
+        <button class="btn small" id="test-push" type="button">테스트 푸시</button>
+        <span id="watch-status"></span>
+      </div>
+    </div>
+
+    <div class="card" id="demo-tools">
+      <h3>데모 도구</h3>
+      <p class="hint" style="margin-top:0">시간을 몇 시간 앞으로 돌려서 즐겨찾기한 항공편 가격이 내려가는 상황을 만들어요. 알림이 어떻게 오는지 확인해 보세요.</p>
+      <div class="btn-row">
+        <button class="btn small" id="simulate-drop" type="button">가격 하락 시뮬레이션</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <button class="btn danger small" id="reset" type="button">즐겨찾기·설정 모두 지우기</button>
+    </div>
+  </section>
+</main>
+
+<nav class="tabbar" aria-label="메뉴">
+  <div class="tabbar-inner">
+    <a class="tab active" href="#search" data-tab="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>검색
+    </a>
+    <a class="tab" href="#favorites" data-tab="favorites">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>즐겨찾기
+      <span class="badge hidden" id="fav-badge"></span>
+    </a>
+    <a class="tab" href="#settings" data-tab="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>설정
+    </a>
+  </div>
+</nav>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="data.js"></script>
+<script src="core.js"></script>
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
