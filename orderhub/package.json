@@ -1,0 +1,20 @@
+{
+  "name": "orderhub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "오더허브 - 스마트스토어·쿠팡·11번가 주문 수집, 발주/송장 관리, 신규주문 휴대폰 알림 웹앱",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "3.0.3",
+    "web-push": "3.6.7"
+  }
+}

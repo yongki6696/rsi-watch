@@ -1,0 +1,17 @@
+{
+  "name": "오더허브 - 주문 수집·발송 관리",
+  "short_name": "오더허브",
+  "description": "스마트스토어·쿠팡·11번가 주문을 한 곳에서 확인하고 발주·송장·발송까지 처리합니다.",
+  "lang": "ko",
+  "start_url": "/#/orders/new",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f6fb",
+  "theme_color": "#2563eb",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

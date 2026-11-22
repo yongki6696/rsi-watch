@@ -1,0 +1,404 @@
+'use strict';
+// 테스트용 가짜 마켓 서버: 네이버 커머스API / 쿠팡 Wing / 11번가 / 텔레그램 / ntfy
+// 실제 API 와 같은 방식으로 인증(서명)을 검증한다.
+const http = require('node:http');
+const crypto = require('node:crypto');
+const bcrypt = require('bcryptjs');
+
+const NAVER = { clientId: 'naverClient', secret: '$2a$04$abcdefghijklmnopqrstuu' };
+const COUPANG = { vendorId: 'A00012345', accessKey: 'coupangAccess', secretKey: 'coupangSecret' };
+const ELEVEN = { apiKey: 'elevenKey' };
+
+const NAVER_COURIERS = new Set(['CJGLS', 'HYUNDAI', 'HANJIN', 'KGB', 'EPOST', 'KDEXP']);
+const COUPANG_COURIERS = new Set(['CJGLS', 'HYUNDAI', 'HANJIN', 'KGB', 'EPOST', 'KDEXP']);
+const ELEVEN_COURIERS = new Set(['00034', '00012', '00011', '00007', '00002']);
+
+// 11번가 응답용 EUC-KR 바이트 (Python 으로 미리 인코딩)
+const EUCKR = {
+  '김십일': 'b1e8bdcac0cf',
+  '무선 마우스': 'b9abbcb120b8b6bfecbdba',
+  '서울특별시 마포구 월드컵로 1': 'bcadbfefc6afbab0bdc320b8b6c6f7b1b820bff9b5e5c4c5b7ce2031',
+  '101동 202호': '313031b5bf20323032c8a3',
+};
+
+function kstIso(d = new Date()) {
+  const k = new Date(d.getTime() + 9 * 3600000);
+  return k.toISOString().replace('Z', '+09:00');
+}
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+  });
+}
+
+// 큰 숫자 ID 를 따옴표 없는 숫자로 내보내기 (실제 쿠팡처럼)
+function jsonRawIds(obj) {
+  return JSON.stringify(obj).replace(/"#(\d+)"/g, '$1');
+}
+
+function createState() {
+  return {
+    naver: { tokens: new Set(), orders: new Map(), changes: [], calls: { confirm: [], dispatch: [], token: 0 } },
+    coupang: { sheets: new Map(), calls: { ack: [], invoices: [], list: [], single: [] }, rejectAuth: false },
+    eleven: { orders: new Map(), cancelReq: [], canceled: [], calls: { pack: [], deliver: [] } },
+    telegram: { messages: [] },
+    ntfy: { messages: [] },
+  };
+}
+
+// ---------------- 네이버 ----------------
+function naverAddOrder(state, { productOrderId, orderId, packageNumber = null, name = '홍길동', product = '블루투스 이어폰', option = '화이트', qty = 1, amount = 39900, status = 'PAYED', place = 'NOT_YET', claimType = null, claimStatus = null }) {
+  const detail = {
+    order: { orderId, orderDate: kstIso(), paymentDate: kstIso(), ordererName: name, ordererTel: '010-1111-2222' },
+    productOrder: {
+      productOrderId,
+      packageNumber,
+      productOrderStatus: status,
+      placeOrderStatus: place,
+      claimType,
+      claimStatus,
+      productName: product,
+      productOption: option,
+      quantity: qty,
+      unitPrice: amount / qty,
+      totalPaymentAmount: amount,
+      deliveryFeeAmount: 0,
+      shippingDueDate: kstIso(new Date(Date.now() + 2 * 86400000)),
+      shippingMemo: '문 앞에 놓아주세요',
+      shippingAddress: { name, tel1: '010-1111-2222', tel2: '', zipCode: '06236', baseAddress: '서울특별시 강남구 테헤란로 152', detailedAddress: '21층' },
+    },
+    delivery: {},
+  };
+  state.naver.orders.set(productOrderId, detail);
+  naverChange(state, productOrderId);
+  return detail;
+}
+
+let changeSeq = 0;
+function naverChange(state, productOrderId) {
+  const d = state.naver.orders.get(productOrderId);
+  state.naver.changes.push({
+    seq: ++changeSeq,
+    orderId: d.order.orderId,
+    productOrderId,
+    lastChangedType: 'PAYED',
+    lastChangedDate: kstIso(),
+    productOrderStatus: d.productOrder.productOrderStatus,
+  });
+}
+
+async function handleNaver(state, req, res, url) {
+  const send = (status, obj) => {
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(obj));
+  };
+  const path = url.pathname.replace('/external', '');
+  if (path === '/v1/oauth2/token' && req.method === 'POST') {
+    const form = new URLSearchParams(await readBody(req));
+    const ts = Number(form.get('timestamp'));
+    if (form.get('client_id') !== NAVER.clientId) return send(400, { code: 'BadRequest', message: 'invalid client_id' });
+    if (!ts || Math.abs(Date.now() - ts) > 5 * 60000) return send(400, { code: 'BadRequest', message: 'timestamp expired' });
+    const expected = Buffer.from(bcrypt.hashSync(`${NAVER.clientId}_${ts}`, NAVER.secret)).toString('base64');
+    if (form.get('client_secret_sign') !== expected) return send(401, { code: 'Unauthorized', message: 'invalid client_secret_sign' });
+    if (form.get('grant_type') !== 'client_credentials' || form.get('type') !== 'SELF') return send(400, { code: 'BadRequest', message: 'bad grant/type' });
+    const token = `tok-${crypto.randomBytes(6).toString('hex')}`;
+    state.naver.tokens.add(token);
+    state.naver.calls.token++;
+    return send(200, { access_token: token, expires_in: 10800, token_type: 'Bearer' });
+  }
+  const auth = req.headers.authorization || '';
+  if (!state.naver.tokens.has(auth.replace('Bearer ', ''))) return send(401, { code: 'GW.AUTHN', message: 'invalid token' });
+
+  if (path === '/v1/pay-order/seller/product-orders/last-changed-statuses' && req.method === 'GET') {
+    const from = new Date(url.searchParams.get('lastChangedFrom'));
+    const to = url.searchParams.get('lastChangedTo') ? new Date(url.searchParams.get('lastChangedTo')) : new Date(from.getTime() + 86400000);
+    if (isNaN(from) || isNaN(to)) return send(400, { code: '4000', message: 'bad date' });
+    if (to - from > 24 * 3600000) return send(400, { code: '104139', message: '조회 가능한 날짜 범위를 초과' });
+    // 실제 API 처럼: moreSequence 이상인 항목만, 2건씩 끊어서 more 페이지 동작 검증
+    const minSeq = Number(url.searchParams.get('moreSequence') || 0);
+    const all = state.naver.changes.filter((c) => {
+      const t = new Date(c.lastChangedDate);
+      return t >= from && t <= to && c.seq >= minSeq;
+    });
+    const page = all.slice(0, 2).map(({ seq, ...rest }) => rest);
+    const data = { lastChangeStatuses: page, count: page.length };
+    if (all.length > 2) data.more = { moreFrom: all[2].lastChangedDate, moreSequence: String(all[2].seq) };
+    return send(200, { timestamp: kstIso(), traceId: 't', data });
+  }
+  if (path === '/v1/pay-order/seller/product-orders/query' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req));
+    if (!Array.isArray(body.productOrderIds) || body.productOrderIds.length > 300) return send(400, { code: '4000', message: 'bad ids' });
+    const data = body.productOrderIds.map((id) => state.naver.orders.get(id)).filter(Boolean);
+    return send(200, { timestamp: kstIso(), traceId: 't', data });
+  }
+  if (path === '/v1/pay-order/seller/product-orders/confirm' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req));
+    state.naver.calls.confirm.push(body);
+    const ok = [];
+    for (const id of body.productOrderIds) {
+      const d = state.naver.orders.get(id);
+      if (d) {
+        d.productOrder.placeOrderStatus = 'OK';
+        ok.push({ productOrderId: id, isReceiverAddressChanged: false });
+      }
+    }
+    return send(200, { timestamp: kstIso(), traceId: 't', data: { successProductOrderInfos: ok, failProductOrderInfos: [] } });
+  }
+  if (path === '/v1/pay-order/seller/product-orders/dispatch' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req));
+    state.naver.calls.dispatch.push(body);
+    const ok = [];
+    const fail = [];
+    for (const x of body.dispatchProductOrders || []) {
+      const d = state.naver.orders.get(x.productOrderId);
+      if (!d) fail.push({ productOrderId: x.productOrderId, code: '100001', message: '상품 주문을 찾을 수 없음' });
+      else if (x.deliveryMethod !== 'DELIVERY' || !NAVER_COURIERS.has(x.deliveryCompanyCode)) fail.push({ productOrderId: x.productOrderId, code: '104119', message: '택배사 코드 확인' });
+      else if (!/^\d{8,}$/.test(x.trackingNumber) || x.trackingNumber.startsWith('000')) fail.push({ productOrderId: x.productOrderId, code: '104122', message: '배송 송장 오류(비유효 송장)' });
+      else if (!/\+09:00$/.test(x.dispatchDate)) fail.push({ productOrderId: x.productOrderId, code: '4000', message: 'dispatchDate' });
+      else {
+        d.productOrder.productOrderStatus = 'DELIVERING';
+        d.delivery = { deliveryCompany: x.deliveryCompanyCode, trackingNumber: x.trackingNumber };
+        ok.push(x.productOrderId);
+        naverChange(state, x.productOrderId);
+      }
+    }
+    return send(200, { timestamp: kstIso(), traceId: 't', data: { successProductOrderIds: ok, failProductOrderInfos: fail } });
+  }
+  return send(404, { code: 'NotFound', message: path });
+}
+
+// ---------------- 쿠팡 ----------------
+function coupangAddSheet(state, { shipmentBoxId, orderId, vendorItemId, name = '이쿠팡', product = '스테인리스 텀블러', option = '실버', qty = 1, price = 18900, status = 'ACCEPT' }) {
+  const sheet = {
+    shipmentBoxId: `#${shipmentBoxId}`,
+    orderId: `#${orderId}`,
+    orderedAt: '2026-11-22T14:00:00',
+    paidAt: '2026-11-22T14:00:30',
+    status,
+    orderer: { name, email: 'a***@x.com', safeNumber: '0504-1234-5678' },
+    receiver: { name, safeNumber: '0504-1234-5678', addr1: '경기도 성남시 분당구 판교역로 166', addr2: 'A동 3층', postCode: '13529' },
+    parcelPrintMessage: '부재 시 경비실',
+    shippingPrice: { currencyCode: 'KRW', units: 0, nanos: 0 },
+    remotePrice: 0,
+    orderItems: [
+      {
+        vendorItemId: `#${vendorItemId}`,
+        vendorItemName: `${product}, ${option}`,
+        sellerProductName: product,
+        sellerProductItemName: option,
+        shippingCount: qty,
+        cancelCount: 0,
+        holdCountForCancel: 0,
+        salesPrice: { currencyCode: 'KRW', units: price, nanos: 0 },
+        orderPrice: { currencyCode: 'KRW', units: price * qty, nanos: 0 },
+        externalVendorSkuCode: 'TMB-01',
+        estimatedShippingDate: '2026-11-24',
+      },
+    ],
+    overseaShippingInfoDto: { personalCustomsClearanceCode: '' },
+    deliveryCompanyName: '',
+    invoiceNumber: '',
+  };
+  state.coupang.sheets.set(String(shipmentBoxId), sheet);
+  return sheet;
+}
+
+function verifyCoupang(state, req, url) {
+  const m = String(req.headers.authorization || '').match(/^CEA algorithm=HmacSHA256, access-key=([^,]+), signed-date=(\d{6}T\d{6}Z), signature=([0-9a-f]{64})$/);
+  if (!m) return 'malformed authorization';
+  if (m[1] !== COUPANG.accessKey) return 'unknown access key';
+  const sd = m[2];
+  const t = Date.UTC(2000 + Number(sd.slice(0, 2)), Number(sd.slice(2, 4)) - 1, Number(sd.slice(4, 6)), Number(sd.slice(7, 9)), Number(sd.slice(9, 11)), Number(sd.slice(11, 13)));
+  if (Math.abs(Date.now() - t) > 5 * 60000) return 'signed-date expired';
+  const rawQuery = url.search ? url.search.slice(1) : '';
+  const expected = crypto.createHmac('sha256', COUPANG.secretKey).update(sd + req.method + url.pathname + rawQuery).digest('hex');
+  if (state.coupang.rejectAuth || expected !== m[3]) return 'Invalid signature';
+  return null;
+}
+
+async function handleCoupang(state, req, res, url) {
+  const send = (status, obj) => {
+    res.writeHead(status, { 'Content-Type': 'application/json;charset=UTF-8' });
+    res.end(typeof obj === 'string' ? obj : jsonRawIds(obj));
+  };
+  const authErr = verifyCoupang(state, req, url);
+  if (authErr) return send(401, { code: 'ERROR', message: authErr });
+  let m;
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/(v4|v5)\/vendors\/([^/]+)\/ordersheets$/)) && req.method === 'GET') {
+    if (m[2] !== COUPANG.vendorId) return send(403, { code: 'ERROR', message: 'vendor mismatch' });
+    const from = url.searchParams.get('createdAtFrom');
+    const to = url.searchParams.get('createdAtTo');
+    if (!/^\d{4}-\d{2}-\d{2}\+09:00$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}\+09:00$/.test(to || '')) return send(400, { code: 'ERROR', message: 'invalid createdAt format' });
+    const status = url.searchParams.get('status');
+    state.coupang.calls.list.push({ version: m[1], status });
+    const all = [...state.coupang.sheets.values()].filter((s) => s.status === status);
+    const per = Number(url.searchParams.get('maxPerPage') || 50);
+    const start = Number(url.searchParams.get('nextToken') || 0);
+    const page = all.slice(start, start + Math.min(per, 1)); // 1건씩 끊어서 nextToken 동작 검증
+    return send(200, { code: 200, message: 'OK', data: page, nextToken: start + 1 < all.length ? String(start + 1) : '' });
+  }
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/(v4|v5)\/vendors\/([^/]+)\/ordersheets\/(\d+)$/)) && req.method === 'GET') {
+    state.coupang.calls.single.push(m[3]);
+    const s = state.coupang.sheets.get(m[3]);
+    if (!s) return send(404, { code: 'ERROR', message: 'not found' });
+    return send(200, { code: 200, message: 'OK', data: s });
+  }
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v4\/vendors\/([^/]+)\/ordersheets\/acknowledgement$/)) && req.method === 'PUT') {
+    const raw = await readBody(req);
+    state.coupang.calls.ack.push(raw);
+    const ids = (raw.match(/"shipmentBoxIds":\[([0-9,]+)\]/) || [])[1];
+    if (!ids) return send(400, { code: 'ERROR', message: 'shipmentBoxIds must be numbers' });
+    const list = ids.split(',').map((id) => {
+      const s = state.coupang.sheets.get(id);
+      if (s && s.status === 'ACCEPT') s.status = 'INSTRUCT';
+      return { shipmentBoxId: `#${id}`, succeed: !!s, resultCode: s ? 'OK' : 'NOT_FOUND', retryRequired: false, resultMessage: s ? '' : '없는 발주서' };
+    });
+    return send(200, { code: 200, message: 'OK', data: { responseCode: list.every((x) => x.succeed) ? 0 : 1, responseMessage: 'SUCCESS', responseList: list } });
+  }
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v4\/vendors\/([^/]+)\/orders\/invoices$/)) && req.method === 'POST') {
+    const raw = await readBody(req);
+    state.coupang.calls.invoices.push(raw);
+    const dtos = [...raw.matchAll(/\{"shipmentBoxId":(\d+),"orderId":(\d+),"vendorItemId":(\d+),"deliveryCompanyCode":"([A-Z]+)","invoiceNumber":"([^"]+)"/g)];
+    if (!dtos.length) return send(400, { code: 'ERROR', message: 'bad orderSheetInvoiceApplyDtos' });
+    const list = dtos.map(([, boxId, , , code, inv]) => {
+      const s = state.coupang.sheets.get(boxId);
+      let ok = !!s && s.status === 'INSTRUCT' && COUPANG_COURIERS.has(code);
+      if (ok) {
+        s.status = 'DEPARTURE';
+        s.invoiceNumber = inv;
+      }
+      return { shipmentBoxId: `#${boxId}`, succeed: ok, resultCode: ok ? 'OK' : 'FAIL', retryRequired: false, resultMessage: ok ? '' : `상품준비중 상태가 아님/택배사 오류 (${s?.status})` };
+    });
+    return send(200, { code: 200, message: 'OK', data: { responseCode: list.every((x) => x.succeed) ? 0 : 99, responseMessage: 'done', responseList: list } });
+  }
+  return send(404, { code: 'ERROR', message: `no route ${req.method} ${url.pathname}` });
+}
+
+// ---------------- 11번가 ----------------
+function elevenAddOrder(state, { ordNo, ordPrdSeq = '1', dlvNo, state: st = 'NEW', qty = 1, amount = 25000 }) {
+  state.eleven.orders.set(`${ordNo}-${ordPrdSeq}`, { ordNo, ordPrdSeq, dlvNo, st, qty, amount, addPrdYn: 'N', addPrdNo: '' });
+}
+
+function elevenXml(orders) {
+  const parts = [Buffer.from('<?xml version="1.0" encoding="euc-kr" standalone="yes"?><ns2:orders xmlns:ns2="http://skt.tmall.business.openapi.spring.service.client.domain/">', 'latin1')];
+  if (!orders.length) parts.push(Buffer.from('<ns2:result_code>0</ns2:result_code><ns2:result_text>no data</ns2:result_text>', 'latin1'));
+  for (const o of orders) {
+    const field = (k, v) => Buffer.concat([Buffer.from(`<${k}>`), EUCKR[v] ? Buffer.from(EUCKR[v], 'hex') : Buffer.from(String(v)), Buffer.from(`</${k}>`)]);
+    parts.push(Buffer.from('<ns2:order>'));
+    parts.push(
+      field('ordNo', o.ordNo),
+      field('ordPrdSeq', o.ordPrdSeq),
+      field('dlvNo', o.dlvNo),
+      field('prdNm', '무선 마우스'),
+      field('slctPrdOptNm', 'Black'),
+      field('ordQty', o.qty),
+      field('selPrc', o.amount / o.qty),
+      field('ordPayAmt', o.amount),
+      field('ordNm', '김십일'),
+      field('ordPrtblTel', '010-3333-4444'),
+      field('rcvrNm', '김십일'),
+      field('rcvrPrtblNo', '010-3333-4444'),
+      field('rcvrMailNo', '03932'),
+      field('rcvrBaseAddr', '서울특별시 마포구 월드컵로 1'),
+      field('rcvrDtlsAddr', '101동 202호'),
+      field('ordDt', '2026-11-22 13:10:00'),
+      field('ordStlEndDt', '2026-11-22 13:11:00'),
+      field('addPrdYn', o.addPrdYn),
+      field('addPrdNo', o.addPrdNo || '')
+    );
+    parts.push(Buffer.from('</ns2:order>'));
+  }
+  parts.push(Buffer.from('</ns2:orders>'));
+  return Buffer.concat(parts);
+}
+
+function handleEleven(state, req, res, url) {
+  const sendXml = (status, buf) => {
+    res.writeHead(status, { 'Content-Type': 'text/xml' }); // charset 없음 → XML 선언(euc-kr)으로 판단해야 함
+    res.end(buf);
+  };
+  const result = (code, text) => sendXml(200, Buffer.from(`<?xml version="1.0" encoding="euc-kr"?><ResultOrder><result_code>${code}</result_code><result_text>${text}</result_text></ResultOrder>`, 'latin1'));
+  if (req.headers.openapikey !== ELEVEN.apiKey) return sendXml(200, Buffer.from('<ResultOrder><result_code>-1</result_code><result_text>invalid key</result_text></ResultOrder>'));
+  const p = url.pathname.replace('/rest', '').split('/').filter(Boolean);
+  const isRange = (a, b) => /^\d{12}$/.test(a) && /^\d{12}$/.test(b);
+  const orders = [...state.eleven.orders.values()];
+  if (p[0] === 'ordservices' && p[1] === 'complete' && p.length === 4) {
+    if (!isRange(p[2], p[3])) return result('-1', 'bad range');
+    return sendXml(200, elevenXml(orders.filter((o) => o.st === 'NEW')));
+  }
+  if (p[0] === 'ordservices' && p[1] === 'packaging' && p.length === 4) return sendXml(200, elevenXml(orders.filter((o) => o.st === 'CONFIRMED')));
+  if (p[0] === 'claimservice' && p[1] === 'cancelorders') return sendXml(200, elevenXml(orders.filter((o) => state.eleven.cancelReq.includes(`${o.ordNo}-${o.ordPrdSeq}`))));
+  if (p[0] === 'claimservice' && p[1] === 'canceledorders') return sendXml(200, elevenXml(orders.filter((o) => o.st === 'CANCELED')));
+  if (p[0] === 'ordservices' && p[1] === 'reqpackaging' && p.length === 7) {
+    const [, , ordNo, seq, addYn, addNo, dlvNo] = p;
+    state.eleven.calls.pack.push({ ordNo, seq, addYn, addNo, dlvNo });
+    const o = state.eleven.orders.get(`${ordNo}-${seq}`);
+    if (!o || o.dlvNo !== dlvNo || addNo !== 'null') return result('-1', 'bad order');
+    o.st = 'CONFIRMED';
+    return result('0', 'ok');
+  }
+  if (p[0] === 'ordservices' && p[1] === 'reqdelivery' && p.length === 7) {
+    const [, , sendDt, mthd, etprs, invc, dlvNo] = p;
+    state.eleven.calls.deliver.push({ sendDt, mthd, etprs, invc, dlvNo });
+    if (!/^\d{12}$/.test(sendDt) || mthd !== '01' || !ELEVEN_COURIERS.has(etprs)) return result('-1', 'bad param');
+    const targets = orders.filter((o) => o.dlvNo === dlvNo && o.st === 'CONFIRMED');
+    if (!targets.length) return result('-1', 'not packaging');
+    targets.forEach((o) => (o.st = 'SHIPPED'));
+    return result('0', 'ok');
+  }
+  return result('-1', `no route ${url.pathname}`);
+}
+
+// ---------------- 텔레그램 / ntfy ----------------
+async function handleTelegram(state, req, res, url) {
+  const send = (obj) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(obj));
+  };
+  const m = url.pathname.match(/^\/tg\/bot([^/]+)\/(\w+)$/);
+  if (!m || m[1] !== 'TGTOKEN') return send({ ok: false, description: 'Unauthorized' });
+  const body = JSON.parse((await readBody(req)) || '{}');
+  if (m[2] === 'sendMessage') {
+    state.telegram.messages.push(body);
+    return send({ ok: true, result: { message_id: state.telegram.messages.length } });
+  }
+  if (m[2] === 'getUpdates') return send({ ok: true, result: [{ update_id: 1, message: { chat: { id: 12345, first_name: '셀러' }, text: '안녕' } }] });
+  return send({ ok: false, description: 'unknown method' });
+}
+
+async function handleNtfy(state, req, res) {
+  const body = JSON.parse((await readBody(req)) || '{}');
+  state.ntfy.messages.push(body);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ id: 'x', topic: body.topic }));
+}
+
+function startMock() {
+  const state = createState();
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    try {
+      if (url.pathname.startsWith('/external/')) return await handleNaver(state, req, res, url);
+      if (url.pathname.startsWith('/v2/providers/')) return await handleCoupang(state, req, res, url);
+      if (url.pathname.startsWith('/rest/')) return handleEleven(state, req, res, url);
+      if (url.pathname.startsWith('/tg/')) return await handleTelegram(state, req, res, url);
+      if (url.pathname.startsWith('/ntfy')) return await handleNtfy(state, req, res);
+      res.writeHead(404);
+      res.end();
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ code: 'ERROR', message: e.message }));
+    }
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const url = `http://127.0.0.1:${server.address().port}`;
+      resolve({ url, state, close: () => new Promise((r) => server.close(r)) });
+    });
+  });
+}
+
+module.exports = { startMock, naverAddOrder, naverChange, coupangAddSheet, elevenAddOrder, NAVER, COUPANG, ELEVEN };
