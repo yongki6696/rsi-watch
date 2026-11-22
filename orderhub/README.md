@@ -96,12 +96,12 @@ npm start
 
 **② 접속용 키 만들기 (Cloud Shell)** - 콘솔 오른쪽 위 **`>_` 아이콘(Cloud Shell)** 을 눌러 검은 창을 열고, 아래 두 줄을 차례로 붙여넣습니다
 ```bash
-ssh-keygen -t ed25519 -N "" -f ~/.ssh/orderhub
+ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/orderhub
 ```
 ```bash
 cat ~/.ssh/orderhub.pub
 ```
-- 화면에 나온 `ssh-ed25519 ...` 로 시작하는 한 줄 전체를 드래그해서 복사해둡니다
+- 화면에 나온 `ssh-rsa ...` 로 시작하는 한 줄 전체를 드래그해서 복사해둡니다
 
 **③ 서버(인스턴스) 만들기** - 메뉴 → 컴퓨트 → 인스턴스 → **[인스턴스 생성]**
 - 이미지: **Canonical Ubuntu 22.04** (Minimal 아닌 것)
