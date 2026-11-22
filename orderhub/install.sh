@@ -13,6 +13,19 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# 0) 서버가 막 켜졌을 때 우분투 자동 업데이트가 끝날 때까지 기다리기 (apt 잠금)
+if command -v apt-get >/dev/null 2>&1; then
+  echo 'DPkg::Lock::Timeout "600";' > /etc/apt/apt.conf.d/99orderhub-lock-timeout
+  for i in $(seq 1 120); do
+    if command -v fuser >/dev/null 2>&1 && fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1; then
+      [ "$i" = 1 ] && say "서버 자동 업데이트가 끝나길 기다리는 중…"
+      sleep 5
+    else
+      break
+    fi
+  done
+fi
+
 # 1) Docker 설치
 if ! command -v docker >/dev/null 2>&1; then
   say "Docker 설치 중… (1~2분)"
@@ -31,13 +44,17 @@ if [ ! -f .env ]; then
 fi
 CURRENT_DOMAIN="$(grep -E '^DOMAIN=' .env | cut -d= -f2- || true)"
 if [ -z "${CURRENT_DOMAIN}" ]; then
-  echo
-  echo "이 서버의 공인 IP: ${PUBLIC_IP:-확인 실패}"
-  echo "도메인이 이 IP를 가리키도록 먼저 설정해두세요. (무료: duckdns.org 에서 이름 만들고 IP 입력)"
-  read -r -p "접속할 도메인을 입력하세요 (예: myshop.duckdns.org): " DOMAIN_INPUT
-  DOMAIN_INPUT="$(echo "${DOMAIN_INPUT}" | sed -E 's#^https?://##; s#/.*$##')"
+  # DOMAIN 환경변수로 주면 묻지 않고 진행 (서버 초기화 스크립트에서 자동 설치할 때)
+  DOMAIN_INPUT="${DOMAIN:-}"
   if [ -z "${DOMAIN_INPUT}" ]; then
-    echo "도메인이 필요합니다. 다시 실행해주세요."
+    echo
+    echo "이 서버의 공인 IP: ${PUBLIC_IP:-확인 실패}"
+    echo "도메인이 이 IP를 가리키도록 먼저 설정해두세요. (무료: duckdns.org 에서 이름 만들고 IP 입력)"
+    read -r -p "접속할 도메인을 입력하세요 (예: myshop.duckdns.org): " DOMAIN_INPUT
+  fi
+  DOMAIN_INPUT="$(echo "${DOMAIN_INPUT}" | tr -d '[:space:]' | sed -E 's#^https?://##; s#/.*$##')"
+  if ! echo "${DOMAIN_INPUT}" | grep -Eq '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$'; then
+    echo "도메인 형식이 올바르지 않습니다: '${DOMAIN_INPUT}' (예: myshop.duckdns.org)"
     exit 1
   fi
   sed -i "s#^DOMAIN=.*#DOMAIN=${DOMAIN_INPUT}#" .env

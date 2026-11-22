@@ -119,6 +119,22 @@ ssh -i ~/.ssh/orderhub ubuntu@공용IP
 ```
 - 처음 한 번 `yes` 를 입력합니다. 이제 이 검은 창에서 아래 **2-2 도메인**을 만든 뒤 **2-3 설치**의 두 줄을 붙여넣으면 됩니다
 
+**검은 창(Cloud Shell·SSH) 없이 자동 설치하는 방법 (Cloud Shell 이 안 열릴 때 추천)**
+
+서버를 만들 때 '초기화 스크립트'를 넣어두면, 서버가 처음 켜질 때 혼자 오더허브 설치까지 끝냅니다.
+1. [duckdns.org](https://www.duckdns.org) 에서 도메인 이름을 먼저 만들어 둡니다 (IP 는 나중에 입력)
+2. 인스턴스 생성 화면에서 이미지·구성은 위 ③과 같이 고르고, SSH 키는 **[키 쌍 자동 생성] → [전용 키 저장]** (비상용으로 보관)
+3. **고급 옵션 표시(Show advanced options) → 관리(Management) → 초기화 스크립트 → cloud-init 스크립트 붙여넣기** 에 아래 내용을 붙여넣습니다. `myshop.duckdns.org` 는 **내 도메인으로 바꾸세요**
+```bash
+#!/bin/bash
+cd /opt
+git clone -b claude/wonderful-lamport-2cedpj https://github.com/yongki6696/rsi-watch.git
+cd rsi-watch/orderhub
+DOMAIN=myshop.duckdns.org bash install.sh > /var/log/orderhub-install.log 2>&1
+```
+4. [생성] 후 위 ④처럼 80·443 포트를 열고, 공용 IP 가 나오면 DuckDNS 에 그 IP 를 입력합니다
+5. 10~15분 뒤 `https://내도메인` 으로 접속하면 끝입니다 (설치 기록은 서버의 `/var/log/orderhub-install.log`)
+
 **⑥ (권장) 무료 서버가 회수되지 않게 하기** - 오라클은 무료 계정의 서버가 오래 한가하면(CPU 사용률이 아주 낮으면) 회수(정지)할 수 있습니다. 오더허브는 가볍게 동작해서 여기에 걸릴 수 있으니, 콘솔에서 계정을 **종량제(Pay As You Go)로 업그레이드**해두는 것을 권장합니다. 업그레이드해도 **Always Free 표시가 있는 것만 쓰면 요금은 0원**입니다. 회수되더라도 삭제가 아니라 정지라서, 콘솔에서 [시작]을 누르면 그대로 다시 돌아갑니다
 
 ### 2-2. 무료 도메인 만들기 (DuckDNS)
