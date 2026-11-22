@@ -93,8 +93,14 @@ if (require.main === module) {
   const app = createApp();
   const server = http.createServer(app.handler);
   server.listen(config.port, config.host, async () => {
-    console.log(`\n  ✅ 오더허브 실행 중: http://localhost:${config.port}`);
+    console.log(`\n  ✅ 오더허브 실행 중: http://localhost:${config.port}   ← 이 PC의 브라우저에서 여세요`);
     if (config.publicUrl) console.log(`  🌐 외부 주소: ${config.publicUrl}`);
+    // 같은 와이파이에 연결된 휴대폰에서 열 수 있는 주소
+    const lan = Object.values(require('node:os').networkInterfaces())
+      .flat()
+      .filter((i) => i && (i.family === 'IPv4' || i.family === 4) && !i.internal)
+      .map((i) => `http://${i.address}:${config.port}`);
+    if (lan.length && config.host === '0.0.0.0') console.log(`  📱 같은 와이파이의 휴대폰에서: ${lan.join('  ')}`);
     console.log(`  📁 데이터 폴더: ${config.dataDir}`);
     if (!app.auth.hasPassword()) console.log('  🔑 처음 접속하면 관리자 비밀번호를 설정합니다.');
     const ip = await detectPublicIp().catch(() => null);
