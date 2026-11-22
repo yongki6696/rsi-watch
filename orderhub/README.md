@@ -52,7 +52,7 @@
 ## 1. 먼저 체험해보기 (내 PC, 5분)
 
 1. [Node.js](https://nodejs.org) **22 LTS 이상** 설치
-2. 이 저장소를 내려받아 `orderhub` 폴더로 이동
+2. [코드 ZIP 내려받기](https://github.com/yongki6696/rsi-watch/archive/refs/heads/claude/wonderful-lamport-2cedpj.zip) → 압축을 풀고 안의 `orderhub` 폴더로 이동
    - 윈도우: `start-windows.bat` 더블클릭
    - 맥/리눅스: 터미널에서 아래 실행
 
@@ -90,7 +90,7 @@ npm start
 ### 2-3. 설치 (서버에 SSH 접속 후)
 
 ```bash
-git clone https://github.com/yongki6696/rsi-watch.git
+git clone -b claude/wonderful-lamport-2cedpj https://github.com/yongki6696/rsi-watch.git
 ```
 
 ```bash
