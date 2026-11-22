@@ -94,6 +94,16 @@ npm start
 - **홈 리전은 꼭 `South Korea Central (Seoul)` 또는 `South Korea North (Chuncheon)`** 으로 고르세요. 나중에 바꿀 수 없고, 무료 서버는 홈 리전에서만 만들 수 있습니다
 - 본인 확인용으로 해외결제 되는 카드 등록이 필요합니다 (확인용 소액 승인 후 취소되며 요금은 나가지 않습니다)
 
+**⭐ 가장 쉬운 방법: Cloud Shell 에 한 줄 붙여넣기 (②~⑤를 자동으로)**
+
+가입 후 [duckdns.org](https://www.duckdns.org) 에서 주소 이름을 하나 만들고(화면 위쪽 **token** 도 복사), 오라클 콘솔 오른쪽 위 **모니터 모양 아이콘 → Cloud Shell** 을 열어 아래 한 줄을 붙여넣으세요.
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/yongki6696/rsi-watch/refs/heads/claude/wonderful-lamport-2cedpj/orderhub/oracle-setup.sh)
+```
+주소 이름과 token 을 물어보면 입력하고 `Y` 를 누르면, 네트워크·포트·무료 서버·오더허브 설치·DuckDNS 연결까지 자동으로 하고, 접속 주소와 마켓에 등록할 서버 IP 를 알려줍니다 (10~20분). 서버 자리가 부족하다고 나오면 잠시 뒤 같은 한 줄을 다시 실행하면 됩니다.
+
+아래 ②~⑤는 직접 하는 방법입니다.
+
 **② 접속용 키 만들기 (Cloud Shell)** - 콘솔 오른쪽 위 **`>_` 아이콘(Cloud Shell)** 을 눌러 검은 창을 열고, 아래 두 줄을 차례로 붙여넣습니다
 ```bash
 ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/orderhub
