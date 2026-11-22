@@ -223,7 +223,7 @@ async function queryDetails(ctx, ids) {
   return out;
 }
 
-async function fetchChangedIds(ctx, fromDate, toDate) {
+async function fetchChangedIds(ctx, fromDate, toDate, { gapMs = 0 } = {}) {
   const ids = new Set();
   let from = new Date(fromDate);
   const end = new Date(toDate);
@@ -249,6 +249,7 @@ async function fetchChangedIds(ctx, fromDate, toDate) {
       moreSequence = data.more?.moreSequence || null;
     } while (moreFrom && pageGuard++ < 100);
     from = new Date(windowEnd.getTime() + 1);
+    if (gapMs && from < end) await sleep(gapMs); // 지난 주문 불러오기처럼 여러 날을 조회할 때 호출 간격
   }
   return [...ids];
 }
@@ -261,6 +262,7 @@ const meta = {
   beta: false,
   inquiries: true, // 고객/상품 문의 수집
   answerable: true, // 오더허브에서 답변 가능
+  backfill: true, // 지난 주문 불러오기 지원
   sellerCenter: 'https://sell.smartstore.naver.com/',
   fields: [
     { key: 'clientId', label: '애플리케이션 ID', placeholder: '예) 7dMvteboKNHwyRremLXXXX', required: true },
@@ -288,12 +290,18 @@ module.exports = {
   async fetch(ctx) {
     const state = { ...(ctx.state || {}) };
     const now = new Date();
-    const initialDays = ctx.initialDays || 7;
-    let from = state.cursor ? new Date(state.cursor) : new Date(now.getTime() - initialDays * 86400000);
-    // 너무 오래 쉬었으면 최대 7일 전까지만
-    const minFrom = new Date(now.getTime() - 7 * 86400000);
-    if (from < minFrom) from = minFrom;
-    const ids = await fetchChangedIds(ctx, from, now);
+    let from;
+    if (ctx.backfillDays) {
+      // 지난 주문 불러오기: 지정한 기간 동안 상태가 바뀐(결제 포함) 모든 상품주문
+      from = new Date(now.getTime() - ctx.backfillDays * 86400000);
+    } else {
+      const initialDays = ctx.initialDays || 7;
+      from = state.cursor ? new Date(state.cursor) : new Date(now.getTime() - initialDays * 86400000);
+      // 너무 오래 쉬었으면 최대 7일 전까지만
+      const minFrom = new Date(now.getTime() - 7 * 86400000);
+      if (from < minFrom) from = minFrom;
+    }
+    const ids = await fetchChangedIds(ctx, from, now, { gapMs: ctx.backfillDays ? ctx.config.backfillGapMs ?? 150 : 0 });
     const details = ids.length ? await queryDetails(ctx, ids) : [];
     // 변경 내역 반영 지연을 고려해 10분 겹쳐서 다음 조회
     state.cursor = new Date(Math.max(from.getTime(), now.getTime() - 10 * 60000)).toISOString();

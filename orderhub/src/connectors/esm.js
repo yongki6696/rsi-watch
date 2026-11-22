@@ -5,7 +5,7 @@
 const crypto = require('node:crypto');
 const { request, parseJsonBig, stringifyBig, BIG } = require('./http');
 const { pick, findArray, findCustomsCode, shape } = require('./fields');
-const { kstDate, toIso, toInt, str, sleep } = require('../util');
+const { kstDate, kstDateWindows, toIso, toInt, str, sleep } = require('../util');
 const { courierCode } = require('../couriers');
 
 const SITES = {
@@ -82,28 +82,45 @@ function makeConnector(type) {
     return json;
   }
 
-  // 주문조회 (5초당 1회 제한 준수)
-  async function requestOrders(ctx, orderStatus, days) {
+  // 주문조회 (5초당 1회 제한 준수). range: 최근 N일(숫자) 또는 { from, to } (yyyy-MM-dd)
+  async function requestOrders(ctx, orderStatus, range) {
     const c = creds(ctx);
     const key = `${site.code}:${c.sellerId}`;
     const gap = ctx.config.esmOrderIntervalMs ?? 5200;
     const wait = (lastOrderCall.get(key) || 0) + gap - Date.now();
     if (wait > 0) await sleep(wait);
     const now = Date.now();
+    const plusDay = (d) => kstDate(new Date(Date.parse(`${d}T12:00:00+09:00`) + 86400000));
+    // 오늘 주문까지 포함되도록 종료일은 하루 뒤로
+    const dateFrom = typeof range === 'object' ? range.from : kstDate(new Date(now - range * 86400000));
+    const dateTo = typeof range === 'object' ? plusDay(range.to) : kstDate(new Date(now + 86400000));
     const all = [];
     let lastJson = null;
     for (let page = 1; page <= 5; page++) {
       if (page > 1) await sleep(gap);
-      lastOrderCall.set(key, Date.now());
-      const json = await api(ctx, 'POST', '/shipping/v1/Order/RequestOrders', {
-        siteType: site.siteType,
-        orderStatus,
-        requestDateType: 2, // 결제완료일 기준
-        requestDateFrom: kstDate(new Date(now - days * 86400000)),
-        requestDateTo: kstDate(new Date(now + 86400000)), // 오늘 주문 포함되도록 내일 날짜까지
-        pageIndex: page,
-        pageSize: 100,
-      });
+      let json;
+      for (let attempt = 0; ; attempt++) {
+        lastOrderCall.set(key, Date.now());
+        try {
+          json = await api(ctx, 'POST', '/shipping/v1/Order/RequestOrders', {
+            siteType: site.siteType,
+            orderStatus,
+            requestDateType: 2, // 결제완료일 기준
+            requestDateFrom: dateFrom,
+            requestDateTo: dateTo,
+            pageIndex: page,
+            pageSize: 100,
+          });
+          break;
+        } catch (e) {
+          // 다른 프로그램(샵모아 등)이 같은 판매자 ID로 방금 조회했으면 잠깐 기다렸다 다시 시도
+          if (attempt < 2 && /5초당 1회/.test(e.message)) {
+            await sleep(gap + 300);
+            continue;
+          }
+          throw e;
+        }
+      }
       lastJson = json;
       const data = json?.Data ?? json?.data ?? json;
       const list = findArray(data, ['RequestOrders', 'requestOrders', 'Orders']);
@@ -177,6 +194,32 @@ function makeConnector(type) {
     };
   }
 
+  // 지난 주문 불러오기: 결제완료~구매결정 전 단계를 7일씩 나눠 조회 (5초당 1회 제한 때문에 몇 분 걸릴 수 있음)
+  async function backfill(ctx) {
+    const state = { ...(ctx.state || {}) };
+    const groups = new Map();
+    const warnings = [];
+    let okStatuses = 0;
+    for (const s of [1, 2, 3, 4, 5]) {
+      try {
+        for (const w of kstDateWindows(ctx.backfillDays, 7)) {
+          const { list } = await requestOrders(ctx, s, w);
+          for (const o of list) {
+            const g = normalize(o, s);
+            // 같은 주문이 여러 단계에 보이면 더 진행된 단계(나중에 조회한 것)로
+            if (g.groupKey) groups.set(g.groupKey, g);
+          }
+        }
+        okStatuses++;
+      } catch (e) {
+        if (e.status === 401 || e.status === 403 || e.network) throw e;
+        warnings.push(`${STATUS[s].label} 조회 실패: ${e.message}`);
+      }
+    }
+    if (!okStatuses) throw new Error(warnings.join(' / '));
+    return { groups: [...groups.values()], state, warnings };
+  }
+
   const meta = {
     type,
     label: site.label,
@@ -184,6 +227,7 @@ function makeConnector(type) {
     color: site.color,
     beta: true,
     inquiries: false,
+    backfill: true,
     sellerCenter: 'https://www.esmplus.com/',
     fields: [
       { key: 'masterId', label: 'ESM+ 마스터 ID', placeholder: 'ESM PLUS 로그인 마스터 ID', required: true },
@@ -212,10 +256,12 @@ function makeConnector(type) {
     },
 
     async fetch(ctx) {
+      if (ctx.backfillDays) return backfill(ctx);
       const state = { ...(ctx.state || {}) };
       const runCount = (state.runCount || 0) + 1;
       state.runCount = runCount;
-      const days = ctx.state?._syncedOnce ? 7 : Math.max(ctx.initialDays || 7, 3);
+      const firstSync = !ctx.state?._syncedOnce;
+      const days = firstSync ? Math.max(ctx.initialDays || 7, 3) : 7;
       const groups = new Map();
       const load = async (s) => {
         const { list } = await requestOrders(ctx, s, s === 3 ? 14 : days);
@@ -226,6 +272,11 @@ function makeConnector(type) {
       };
       await load(1);
       await load(2);
+      // 처음 연결할 때는 배송완료·구매결정 주문도 가져와서 매출에 포함
+      if (firstSync) {
+        await load(4);
+        await load(5);
+      }
       const open = ctx.openGroups ? ctx.openGroups() : [];
       // 30분마다, 또는 목록에서 사라진 미처리 주문이 있으면(ESM PLUS 에서 직접 발송했을 수 있음) 배송중 목록도 확인
       if (runCount % 6 === 1 || open.some((g) => !groups.has(g.group_key))) await load(3);

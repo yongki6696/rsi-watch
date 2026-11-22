@@ -155,10 +155,11 @@ function toGroups(records) {
 }
 
 // 주문정보 + 배송상태 조회를 합쳐서 상품주문 단위 레코드로
-async function collect(ctx, days, diag) {
+// range: 최근 N일(숫자) 또는 { start: Date, end: Date }
+async function collect(ctx, range, diag) {
   const now = new Date();
-  const from = dttm(new Date(now.getTime() - days * 86400000));
-  const to = dttm(now);
+  const from = dttm(typeof range === 'object' ? range.start : new Date(now.getTime() - range * 86400000));
+  const to = dttm(typeof range === 'object' ? range.end : now);
   const body = { srchStrtDt: from, srchEndDt: to, srchStrtDtm: from, srchEndDtm: to };
   const byKey = new Map();
   const errors = [];
@@ -230,6 +231,7 @@ module.exports = {
   color: '#262626',
   beta: true,
   inquiries: false,
+  backfill: true,
   sellerCenter: 'https://store.lotteon.com/',
   fields: [{ key: 'apiKey', label: 'OpenAPI 인증키', placeholder: '판매자센터에서 발급받은 인증키', required: true, secret: true }],
   guide: [
@@ -253,6 +255,17 @@ module.exports = {
 
   async fetch(ctx) {
     const state = { ...(ctx.state || {}) };
+    if (ctx.backfillDays) {
+      // 지난 주문 불러오기: 7일씩 나눠 조회
+      const records = [];
+      const now = Date.now();
+      for (let back = ctx.backfillDays; back > 0; back -= 7) {
+        const start = new Date(now - back * 86400000);
+        const end = new Date(Math.min(now, start.getTime() + 7 * 86400000));
+        records.push(...(await collect(ctx, { start, end })));
+      }
+      return { groups: toGroups(records), state };
+    }
     const days = state._syncedOnce ? 7 : Math.max(ctx.initialDays || 7, 3);
     const records = await collect(ctx, days);
     return { groups: toGroups(records), state };

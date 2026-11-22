@@ -2,7 +2,7 @@
 // 주문 자동 수집 스케줄러 (기본 5분 간격) + 신규주문/취소요청 알림
 const { getConnector } = require('./connectors');
 const { getAppSettings } = require('./settings');
-const { safeJson, nowIso } = require('./util');
+const { safeJson, nowIso, kstDate } = require('./util');
 const { CLAIM } = require('./orders');
 
 class SyncEngine {
@@ -19,6 +19,7 @@ class SyncEngine {
     this.lastRunAt = null;
     this.nextRunAt = null;
     this.lastResult = null;
+    this.backfillState = null; // 지난 주문 불러오기 진행 상황
   }
 
   intervalMs() {
@@ -82,6 +83,7 @@ class SyncEngine {
       intervalMin: getAppSettings(this.db).pollIntervalMin,
       lastResult: this.lastResult,
       inquiriesOpen: this.inquiries ? this.inquiries.counts().open : 0,
+      backfill: this.backfillState,
       stores,
     };
   }
@@ -89,7 +91,8 @@ class SyncEngine {
   runAll(opts = {}) {
     if (this.running) {
       // 같은 범위의 수집이 진행 중이면 그 결과를 기다리고, 범위가 다르면 끝난 뒤 이어서 실행
-      const same = (opts.storeId || null) === (this.runningOpts?.storeId || null);
+      const same =
+        (opts.storeId || null) === (this.runningOpts?.storeId || null) && (opts.backfillDays || 0) === (this.runningOpts?.backfillDays || 0);
       if (same) return this.running;
       return this.running.catch(() => {}).then(() => this.runAll(opts));
     }
@@ -103,13 +106,49 @@ class SyncEngine {
     return this.running;
   }
 
-  async _runAll({ manual = false, storeId = null } = {}) {
+  // 지난 주문 불러오기 (매출 집계용) - 오래 걸릴 수 있어 진행 상황을 backfillState 로 보여준다
+  backfill({ days, storeId = null }) {
+    if (this.backfillState?.running) return this.backfillRun;
+    const state = { running: true, days, storeId, startedAt: nowIso(), done: 0, total: 0, current: null, results: [] };
+    this.backfillState = state;
+    const onStore = ({ index, total, store }) => Object.assign(state, { done: index, total, current: store.name });
+    this.backfillRun = this.runAll({ manual: true, storeId, backfillDays: days, onStore }).then(
+      (summary) => {
+        Object.assign(state, {
+          running: false,
+          finishedAt: nowIso(),
+          current: null,
+          done: summary.stores.length,
+          total: summary.stores.length,
+          results: summary.stores.map((r) => ({
+            storeId: r.storeId,
+            name: r.name,
+            type: r.type,
+            added: r.added || 0,
+            updated: r.updated || 0,
+            error: r.error || null,
+            skipped: r.skipped || null,
+            warnings: r.warnings || null,
+          })),
+        });
+        return state;
+      },
+      (e) => {
+        Object.assign(state, { running: false, finishedAt: nowIso(), current: null, error: e.message });
+        return state;
+      }
+    );
+    return this.backfillRun;
+  }
+
+  async _runAll({ manual = false, storeId = null, backfillDays = 0, onStore } = {}) {
     const stores = this.db.all('SELECT * FROM stores WHERE enabled = 1' + (storeId ? ' AND id = ?' : '') + ' ORDER BY id', ...(storeId ? [storeId] : []));
     const summary = { stores: [], newOrders: 0, claims: 0, canceled: 0, inquiries: 0, errors: 0, at: nowIso() };
     const alerts = { newOrders: [], claims: [], canceled: [], address: [], errors: [], recovered: [], imported: [], inquiries: [] };
 
-    for (const store of stores) {
-      const r = await this.syncStore(store, { manual }, alerts);
+    for (const [index, store] of stores.entries()) {
+      onStore?.({ index, total: stores.length, store });
+      const r = await this.syncStore(store, { manual, backfillDays }, alerts);
       summary.stores.push(r);
       if (r.error) summary.errors++;
       summary.newOrders += r.newOrders || 0;
@@ -117,7 +156,7 @@ class SyncEngine {
       summary.canceled += r.canceled || 0;
       summary.inquiries += r.inquiries || 0;
     }
-    this.lastResult = summary;
+    if (!backfillDays) this.lastResult = summary;
     await this.sendAlerts(alerts);
 
     // 자동 발주확인
@@ -133,22 +172,29 @@ class SyncEngine {
     return summary;
   }
 
-  async syncStore(store, { manual }, alerts) {
+  async syncStore(store, { manual, backfillDays = 0 }, alerts) {
     const ts = nowIso();
-    const result = { storeId: store.id, name: store.name, type: store.type, newOrders: 0, claims: 0, canceled: 0, inquiries: 0, updated: 0 };
+    const result = { storeId: store.id, name: store.name, type: store.type, newOrders: 0, claims: 0, canceled: 0, inquiries: 0, updated: 0, added: 0 };
     let connector;
     try {
       connector = getConnector(store.type);
-      const ctx = this.ctxFor(store, { manual });
+      if (backfillDays && !connector.backfill) {
+        result.skipped = `${connector.label}은(는) 지난 주문 불러오기를 지원하지 않습니다`;
+        return result;
+      }
+      const ctx = this.ctxFor(store, { manual, backfillDays });
       const firstSync = !ctx.state._syncedOnce;
-      const { groups, state } = await connector.fetch(ctx);
+      // 첫 연결·지난 주문 불러오기로 가져온 주문은 알림 없이 저장
+      const quiet = firstSync || !!backfillDays;
+      const { groups, state, warnings } = await connector.fetch(ctx);
       let imported = 0;
       for (const g of groups || []) {
         const ch = this.orders.applyGroup(store, g);
         if (!ch) continue;
         result.updated++;
+        if (ch.isNew) result.added++;
         if (ch.isNew && ch.status === 'NEW') {
-          if (firstSync) imported++;
+          if (quiet) imported++;
           else {
             result.newOrders++;
             alerts.newOrders.push({ store, orderId: ch.orderId });
@@ -166,6 +212,24 @@ class SyncEngine {
         if (ch.addressChangedNow) alerts.address.push({ store, orderId: ch.orderId });
       }
       const newState = { ...(state || {}), _syncedOnce: true };
+      // 매출 집계용: 이 날짜 이후 주문은 모두 수집됨
+      if (!newState.coverageFrom) {
+        const base = firstSync ? Date.now() : Date.parse(store.created_at);
+        newState.coverageFrom = kstDate(new Date(base - (getAppSettings(this.db).initialDays || 7) * 86400000));
+      }
+      if (backfillDays) {
+        const from = kstDate(new Date(Date.now() - backfillDays * 86400000));
+        if (from < newState.coverageFrom) newState.coverageFrom = from;
+        newState.backfilledAt = ts;
+        if (!ctx.state._syncedOnce) delete newState._syncedOnce; // 첫 수집은 평소 수집에서 (기존 문의 알림 방지 등)
+        if (warnings?.length) {
+          result.warnings = warnings;
+          this.db.addEvent({ storeId: store.id, level: 'warn', type: 'sync', message: `지난 주문 불러오기 일부 실패: ${warnings.join(' / ')}`.slice(0, 500) });
+        }
+        this.db.addEvent({ storeId: store.id, type: 'sync', message: `지난 ${backfillDays}일 주문 불러오기: ${result.added}건 추가, ${result.updated - result.added}건 갱신` });
+        this.db.run('UPDATE stores SET state = ? WHERE id = ?', JSON.stringify(newState), store.id);
+        return result;
+      }
       // 고객 문의 수집 (실패해도 주문 수집은 정상 처리)
       if (connector.fetchInquiries && this.inquiries && getAppSettings(this.db).collectInquiries !== false) {
         try {
@@ -202,6 +266,11 @@ class SyncEngine {
       );
     } catch (e) {
       result.error = e.message;
+      if (backfillDays) {
+        // 지난 주문 불러오기 실패는 평소 수집 상태(오류 표시/알림)에 영향을 주지 않음
+        this.db.addEvent({ storeId: store.id, level: 'error', type: 'sync', message: `지난 주문 불러오기 실패: ${e.message}` });
+        return result;
+      }
       const firstError = !store.last_error;
       this.db.run('UPDATE stores SET last_sync_at = ?, last_error = ? WHERE id = ?', ts, e.message, store.id);
       if (firstError || store.last_error !== e.message) {

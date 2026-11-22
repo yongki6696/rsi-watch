@@ -43,7 +43,7 @@ function ids(body) {
 }
 
 function register(router, app) {
-  const { db, auth, orders, inquiries, actions, sync, notifier, secrets, config } = app;
+  const { db, auth, orders, inquiries, sales, actions, sync, notifier, secrets, config } = app;
 
   function storeView(s) {
     let maskedCreds = {};
@@ -206,6 +206,46 @@ function register(router, app) {
   });
   router.post('/api/orders/:id/revert', (req) => actions.revert(req.params.id));
   router.post('/api/orders/:id/cancel-local', (req) => actions.cancelLocal(req.params.id));
+
+  // ---------- 매출 ----------
+  router.get('/api/sales', (req) => sales.report({ from: req.query.from, to: req.query.to }));
+
+  router.get('/api/sales/export.csv', (req, res) => {
+    const storeIds = req.query.stores
+      ? String(req.query.stores)
+          .split(',')
+          .map(Number)
+          .filter((n) => Number.isInteger(n) && n > 0)
+      : null;
+    const { name, body } = sales.csv({
+      from: req.query.from,
+      to: req.query.to,
+      view: req.query.view === 'daily' ? 'daily' : 'stores',
+      storeIds,
+      shipping: req.query.shipping === '1',
+    });
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${name}"`,
+      'Cache-Control': 'no-store',
+    });
+    res.end(body);
+    return undefined;
+  });
+
+  // 지난 주문 불러오기 (오래 걸릴 수 있어 바로 응답하고 진행 상황은 GET 으로 확인)
+  router.get('/api/sales/backfill', () => ({ backfill: sync.backfillState }));
+  router.post('/api/sales/backfill', (req) => {
+    const days = Number(req.body?.days);
+    if (!Number.isInteger(days) || days < 1 || days > 31) throw new HttpError(400, '1~31일 중에서 골라주세요');
+    const storeId = req.body?.storeId ? Number(req.body.storeId) : null;
+    if (storeId && !db.get('SELECT id FROM stores WHERE id = ?', storeId)) throw new HttpError(404, '스토어를 찾을 수 없습니다');
+    if (!sync.backfillState?.running) {
+      db.addEvent({ storeId, type: 'sync', message: `지난 ${days}일 주문 불러오기 시작` });
+      sync.backfill({ days, storeId }).catch(() => {});
+    }
+    return { backfill: sync.backfillState };
+  });
 
   // ---------- 고객 문의 ----------
   router.get('/api/inquiries', (req) => ({

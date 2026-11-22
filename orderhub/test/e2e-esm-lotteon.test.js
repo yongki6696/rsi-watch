@@ -232,6 +232,32 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     assert.equal((await byNo('3000000001')).status, 'CANCELED');
   });
 
+  await t.test('지난 주문 불러오기: G마켓·옥션은 1~5단계를 7일씩, 롯데ON도 7일씩 나눠 조회', async () => {
+    esmAddOrder(mock.state, { orderNo: 3000000009, site: 'A', name: '지난옥션', status: 5 }); // 구매결정완료된 지난 주문
+    const listBefore = mock.state.esm.calls.list.length;
+    const lotteBefore = mock.state.lotteon.calls.orders;
+    await call('POST', '/api/sales/backfill', { days: 31 });
+    let bf;
+    for (let i = 0; i < 400; i++) {
+      bf = (await call('GET', '/api/sales/backfill')).backfill;
+      if (bf && !bf.running) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    assert.ok(bf && !bf.running);
+    for (const r of bf.results) assert.equal(r.error, null, `${r.name}: ${r.error}`);
+    const calls = mock.state.esm.calls.list.slice(listBefore);
+    for (const site of ['G', 'A']) {
+      const mine = calls.filter((c) => c.site === site && c.pageIndex === 1);
+      assert.deepEqual([...new Set(mine.map((c) => c.orderStatus))].sort(), [1, 2, 3, 4, 5]);
+      assert.equal(mine.filter((c) => c.orderStatus === 1).length, 5, '31일을 7일씩 5구간');
+      for (const c of mine) assert.ok(c.requestDateFrom < c.requestDateTo);
+    }
+    assert.equal(mock.state.lotteon.calls.orders - lotteBefore, 5);
+    const o = await byNo('3000000009');
+    assert.equal(o.status, 'DELIVERED');
+    assert.equal(bf.results.find((r) => r.type === 'auction').added, 1);
+  });
+
   await t.test('주문조회 5초 제한: 호출 간격을 지켜서 제한에 걸리지 않음', async () => {
     mock.state.esm.minIntervalMs = 250;
     app.config.esmOrderIntervalMs = 300;
@@ -240,6 +266,12 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     await call('POST', '/api/sync', { storeId: g.id });
     await call('POST', '/api/sync', { storeId: g.id });
     assert.equal(mock.state.esm.rateLimited, 0);
+    assert.equal((await call('GET', '/api/stores')).stores.find((s) => s.id === g.id).lastError, null);
+    // 다른 프로그램(샵모아 등)이 같은 판매자 ID로 방금 조회한 경우 → 잠시 후 다시 시도해서 성공
+    await new Promise((r) => setTimeout(r, 400));
+    mock.state.esm.lastCall.set(`G:${ESM.gmarketId}`, Date.now());
+    await call('POST', '/api/sync', { storeId: g.id });
+    assert.ok(mock.state.esm.rateLimited >= 1, '제한에 한 번 걸려야 함');
     assert.equal((await call('GET', '/api/stores')).stores.find((s) => s.id === g.id).lastError, null);
   });
 });

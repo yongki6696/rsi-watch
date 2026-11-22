@@ -24,22 +24,38 @@ const PRODUCTS = [
 ];
 const MEMOS = ['문 앞에 놓아주세요', '부재 시 경비실에 맡겨주세요', '배송 전 연락 부탁드립니다', '', '', '빠른 배송 부탁드려요'];
 
+let rng = Math.random;
 function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+  return arr[Math.floor(rng() * arr.length)];
+}
+function randomInt(min, max) {
+  return rng === Math.random ? crypto.randomInt(min, max) : min + Math.floor(rng() * (max - min));
+}
+// 같은 날짜·번호면 항상 같은 주문이 나오도록(지난 주문을 여러 번 불러와도 중복/변동 없음)
+function seeded(text) {
+  let a = 0;
+  for (const ch of text) a = (Math.imul(a ^ ch.charCodeAt(0), 2654435761) + 1) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-function makeOrder(seq, minutesAgo = 0) {
+function makeOrder(seq, minutesAgo = 0, fixedNo = null) {
   const now = Date.now() - minutesAgo * 60000;
-  const orderNo = `DEMO${new Date(now).toISOString().slice(2, 10).replace(/-/g, '')}${String(seq).padStart(4, '0')}${crypto.randomInt(10, 99)}`;
+  const orderNo = fixedNo || `DEMO${new Date(now).toISOString().slice(2, 10).replace(/-/g, '')}${String(seq).padStart(4, '0')}${randomInt(10, 99)}`;
   const name = pick(NAMES);
-  const receiver = Math.random() < 0.8 ? name : pick(NAMES);
+  const receiver = rng() < 0.8 ? name : pick(NAMES);
   const [zip, a1, a2] = pick(ADDRS);
-  const itemCount = Math.random() < 0.2 ? 2 : 1;
+  const itemCount = rng() < 0.2 ? 2 : 1;
   const items = [];
   let total = 0;
   for (let i = 0; i < itemCount; i++) {
     const [pname, opts, price] = pick(PRODUCTS);
-    const qty = Math.random() < 0.75 ? 1 : 2;
+    const qty = rng() < 0.75 ? 1 : 2;
     total += price * qty;
     items.push({
       itemKey: `${orderNo}-${i + 1}`,
@@ -49,8 +65,8 @@ function makeOrder(seq, minutesAgo = 0) {
       quantity: qty,
       unitPrice: price,
       amount: price * qty,
-      productCode: `SKU-${crypto.randomInt(1000, 9999)}`,
-      productId: String(crypto.randomInt(100000, 999999)),
+      productCode: `SKU-${randomInt(1000, 9999)}`,
+      productId: String(randomInt(100000, 999999)),
       marketState: 'NEW',
       marketStatus: '결제완료',
       claim: null,
@@ -58,7 +74,7 @@ function makeOrder(seq, minutesAgo = 0) {
       raw: { demo: true },
     });
   }
-  const phone = `010-${crypto.randomInt(1000, 9999)}-${crypto.randomInt(1000, 9999)}`;
+  const phone = `010-${randomInt(1000, 9999)}-${randomInt(1000, 9999)}`;
   const overseas = items.some((i) => i.productName.startsWith('해외직구'));
   return {
     groupKey: orderNo,
@@ -69,16 +85,42 @@ function makeOrder(seq, minutesAgo = 0) {
     ordererName: name,
     ordererPhone: phone,
     receiverName: receiver,
-    receiverPhone: receiver === name ? phone : `010-${crypto.randomInt(1000, 9999)}-${crypto.randomInt(1000, 9999)}`,
+    receiverPhone: receiver === name ? phone : `010-${randomInt(1000, 9999)}-${randomInt(1000, 9999)}`,
     receiverPhone2: '',
     zipcode: zip,
     address1: a1,
     address2: a2,
     deliveryMemo: pick(MEMOS),
-    customsCode: overseas ? `P${crypto.randomInt(100000, 999999)}${crypto.randomInt(100000, 999999)}` : '',
+    customsCode: overseas ? `P${randomInt(100000, 999999)}${randomInt(100000, 999999)}` : '',
     shippingFee: total >= 30000 ? 0 : 3000,
     items,
   };
+}
+
+// 지난 주문(매출 체험용): 하루 1~5건, 대부분 배송완료 + 가끔 취소
+function pastOrders(days) {
+  const out = [];
+  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  for (let back = days; back >= 1; back--) {
+    const date = new Date(Date.parse(`${today}T00:00:00Z`) - back * 86400000).toISOString().slice(0, 10);
+    rng = seeded(date);
+    const count = 1 + Math.floor(rng() * 5);
+    for (let n = 1; n <= count; n++) {
+      rng = seeded(`${date}-${n}`);
+      const paidAt = Date.parse(`${date}T09:00:00+09:00`) + Math.floor(rng() * 12 * 3600000);
+      const minutesAgo = (Date.now() - paidAt) / 60000;
+      const g = makeOrder(n, minutesAgo, `DEMOP${date.replace(/-/g, '')}${n}`);
+      const r = rng();
+      const [state, label] = r < 0.08 ? ['CANCELED', '취소'] : back <= 2 ? ['SHIPPED', '배송중'] : ['DELIVERED', '배송완료'];
+      for (const it of g.items) {
+        it.marketState = state;
+        it.marketStatus = label;
+      }
+      out.push(g);
+    }
+  }
+  rng = Math.random;
+  return out;
 }
 
 module.exports = {
@@ -89,6 +131,7 @@ module.exports = {
   beta: false,
   inquiries: true,
   answerable: true,
+  backfill: true,
   fields: [],
   guide: [
     'API 키 없이 화면과 처리 흐름을 체험할 수 있는 가상 스토어입니다.',
@@ -102,6 +145,7 @@ module.exports = {
 
   async fetch(ctx) {
     const state = { ...(ctx.state || {}) };
+    if (ctx.backfillDays) return { groups: pastOrders(ctx.backfillDays), state };
     const groups = [];
     let seq = state.seq || 0;
     if (!state.initialized) {
@@ -142,7 +186,7 @@ module.exports = {
       };
     };
     if (ctx.firstSync) return [make(0), make(1)];
-    if (ctx.manual && Math.random() < 0.5) return [make(crypto.randomInt(0, 3))];
+    if (ctx.manual && Math.random() < 0.5) return [make(randomInt(0, 3))];
     return [];
   },
 
@@ -157,5 +201,5 @@ module.exports = {
     return { ok: items.map((i) => i.itemKey), failed: [] };
   },
 
-  _internal: { makeOrder },
+  _internal: { makeOrder, pastOrders },
 };

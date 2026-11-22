@@ -127,12 +127,12 @@ svg.ic.sm { width: 16px; height: 16px; }
   backdrop-filter: saturate(1.6) blur(14px); -webkit-backdrop-filter: saturate(1.6) blur(14px);
   border-bottom: 1px solid var(--border);
 }
-.brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 17px; letter-spacing: -0.3px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 17px; letter-spacing: -0.3px; white-space: nowrap; flex: none; }
 .brand-logo { width: 30px; height: 30px; border-radius: 9px; margin: 0; box-shadow: none; }
 .topbar .spacer { flex: 1; }
 .sync-pill {
   display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2);
-  background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 5px 10px; white-space: nowrap; max-width: 52vw; overflow: hidden; text-overflow: ellipsis;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 5px 10px; white-space: nowrap; max-width: 52vw; min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
 .dot.err { background: var(--danger); }
@@ -159,6 +159,8 @@ main.view { max-width: 1100px; margin: 0 auto; padding: 14px 14px calc(var(--nav
 .nav a { display: grid; place-items: center; align-content: center; gap: 3px; color: var(--text-3); font-size: 11px; font-weight: 600; position: relative; }
 .nav a.active { color: var(--primary); }
 .nav a .badge { position: absolute; top: 8px; left: calc(50% + 6px); }
+.nav a.active-m { color: var(--primary); }
+.nav a.desk-only { display: none; }
 .nav-brand { display: none; }
 
 @media (min-width: 900px) {
@@ -170,6 +172,8 @@ main.view { max-width: 1100px; margin: 0 auto; padding: 14px 14px calc(var(--nav
   .nav-brand { display: flex; padding: 4px 10px 18px; }
   .nav a { display: flex; justify-content: flex-start; gap: 12px; padding: 0 14px; font-size: 15px; border-radius: 12px; color: var(--text-2); }
   .nav a.active { background: var(--primary-soft); color: var(--primary); }
+  .nav a.desk-only { display: flex; }
+  .nav a.active-m:not(.active) { color: var(--text-2); }
   .nav a .badge { position: static; margin-left: auto; }
   .topbar, main.view { margin-left: 220px; }
   .topbar .brand { display: none; }
@@ -387,3 +391,67 @@ details.raw pre { max-height: 300px; overflow: auto; font-size: 11.5px; backgrou
 .events .warn { color: var(--warn); }
 .pre { white-space: pre-wrap; word-break: break-word; }
 .kbd { display: inline-block; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface-2); font-size: 12px; }
+
+/* ---------- 매출 ---------- */
+.chip-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-weight: 650; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.chip-btn.on { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.chip-btn.dim { opacity: 0.5; }
+.chip-btn .mk { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 3px; border-radius: 5px; background: var(--c, #888); color: #fff; font-size: 10px; font-weight: 800; }
+.sales-range { padding: 12px; }
+.range-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto minmax(0, 1fr) 38px; gap: 5px; align-items: center; max-width: 560px; }
+.range-row .icon-btn { width: 38px; height: 40px; }
+.range-row .input.date { min-height: 40px; padding: 6px 6px; font-size: 14px; text-align: center; min-width: 0; }
+@media (pointer: coarse) { .range-row .input.date::-webkit-calendar-picker-indicator { display: none; } }
+.range-row .icon-btn:disabled { opacity: 0.35; cursor: default; transform: none; }
+.preset-row, .store-filter { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.preset-row::-webkit-scrollbar, .store-filter::-webkit-scrollbar { display: none; }
+.preset-row { padding: 10px 0 0; }
+.sales-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.btn.sm.icon-only { width: 34px; padding: 0; }
+.page-title .title-opt { margin-left: auto; font-size: 13.5px; font-weight: 600; letter-spacing: 0; color: var(--text-2); }
+.link-btn { border: 0; background: none; padding: 0; margin-left: 8px; color: var(--primary); font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.store-filter { padding: 0 0 10px; }
+.sales-card { overflow: hidden; }
+.sales-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sales-table th { text-align: left; font-size: 12px; font-weight: 700; color: var(--text-3); padding: 9px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.sales-table td { padding: 11px 12px; border-top: 1px solid var(--border); vertical-align: middle; }
+.sales-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+.sales-table td.num small { display: block; font-size: 11.5px; font-weight: 500; color: var(--text-3); }
+.sales-table .ck { width: 38px; padding-left: 8px; padding-right: 0; }
+.sales-table tr.sum td { background: var(--primary-soft); font-weight: 800; border-top: 0; }
+.sales-table tr.sum td small { font-weight: 600; color: var(--text-2); }
+.sales-table tr.off td { color: var(--text-3); }
+.sales-table tr.off .store-badge, .sales-table tr.off .meter { opacity: 0.45; }
+.store-cell { min-width: 0; max-width: 0; width: 100%; }
+.store-link { display: flex; align-items: center; gap: 2px; border: 0; background: none; padding: 0; margin: 0; cursor: pointer; color: inherit; max-width: 100%; text-align: left; font: inherit; }
+.store-link .store-badge { font-size: 13.5px; color: var(--text); }
+.store-link .store-badge .nm { white-space: normal; overflow: visible; }
+.store-link .ic { color: var(--text-3); }
+.meter { height: 6px; border-radius: 999px; background: var(--primary-soft); margin-top: 7px; overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: 999px; background: var(--primary); }
+.sales-table td.amt .meter { width: 100%; max-width: 150px; margin-left: auto; }
+.sales-table tr.day { cursor: pointer; }
+@media (hover: hover) { .sales-table tr.day:hover td { background: var(--surface-2); } }
+.sales-table tr.day.open td { background: var(--surface-2); }
+.sales-table tr.zero td { color: var(--text-3); }
+.sales-table tr.zero .meter { visibility: hidden; }
+.day-btn { display: inline-flex; align-items: center; border: 0; background: none; padding: 0; margin: 0; font: inherit; font-weight: 650; color: inherit; cursor: pointer; white-space: nowrap; }
+.wd.sun { color: var(--danger); }
+.wd.sat { color: var(--primary); }
+.chip.today { height: 20px; padding: 0 6px; margin-left: 6px; font-size: 11px; }
+.sales-table tr.detail td { background: var(--surface-2); border-top: 0; padding: 2px 12px 12px; }
+.day-stores { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.day-stores li { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.day-stores .store-badge { flex: 1; min-width: 0; }
+.day-stores .n { color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
+.day-stores b { min-width: 96px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sales-foot { margin: 10px 4px 0; }
+.link-card { display: flex; align-items: center; gap: 12px; padding: 14px 16px; margin-bottom: 14px; color: var(--text); }
+.link-card .link-ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); flex: none; }
+.link-card .label { flex: 1; min-width: 0; display: grid; }
+.link-card .label small { color: var(--text-3); font-size: 12.5px; }
+.link-card > .ic { color: var(--text-3); }
+@media (max-width: 480px) {
+  .sales-table .ck { width: 32px; padding-left: 6px; }
+  .sales-table td, .sales-table th { padding-left: 10px; padding-right: 10px; }
+}

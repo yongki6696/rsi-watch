@@ -42,6 +42,8 @@ const config = {
   lotteonApiBase: env.LOTTEON_API_BASE || 'https://openapi.lotteon.com',
   // G마켓·옥션 주문조회 호출 간격(ms) - 마켓 정책: 판매자 ID별 5초당 1회
   esmOrderIntervalMs: env.ESM_ORDER_INTERVAL_MS !== undefined ? Number(env.ESM_ORDER_INTERVAL_MS) : 5200,
+  // 지난 주문 불러오기 때 마켓 API 호출 사이 쉬는 시간(ms)
+  backfillGapMs: env.BACKFILL_GAP_MS !== undefined ? Number(env.BACKFILL_GAP_MS) : 150,
   telegramApiBase: env.TELEGRAM_API_BASE || 'https://api.telegram.org',
   disableScheduler: env.DISABLE_SCHEDULER === 'true',
   logLevel: env.LOG_LEVEL || 'info',

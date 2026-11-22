@@ -23,6 +23,7 @@ function listConnectors() {
     beta: !!c.beta,
     inquiries: !!c.inquiries,
     answerable: !!c.answerable,
+    backfill: !!c.backfill,
     sellerCenter: c.sellerCenter || '',
     fields: c.fields,
     guide: c.guide,

@@ -4,7 +4,7 @@
 // 주문 수집: 발주서 목록(ordersheets) ACCEPT(결제완료) / INSTRUCT(상품준비중) …
 const crypto = require('node:crypto');
 const { request, parseJsonBig, stringifyBig, BIG } = require('./http');
-const { kstDate, toIso, toInt, str, chunk, sleep } = require('../util');
+const { kstDate, kstDateWindows, toIso, toInt, str, chunk, sleep } = require('../util');
 const { courierCode } = require('../couriers');
 
 const STATUS_LABEL = {
@@ -247,6 +247,28 @@ function resultForItems(items, r, defaultMessage) {
   };
 }
 
+// 지난 주문 불러오기: 모든 배송 단계를 7일씩 나눠 조회 (매출 집계용)
+async function backfill(ctx) {
+  const state = { ...(ctx.state || {}) };
+  const sheets = new Map();
+  const warnings = [];
+  let okStatuses = 0;
+  for (const st of ['ACCEPT', 'INSTRUCT', 'DEPARTURE', 'DELIVERING', 'FINAL_DELIVERY', 'NONE_TRACKING']) {
+    try {
+      for (const w of kstDateWindows(ctx.backfillDays, 7)) {
+        for (const s of await listSheets(ctx, state, st, w.from, w.to)) sheets.set(str(s.shipmentBoxId), s);
+        await sleep(ctx.config.backfillGapMs ?? 150);
+      }
+      okStatuses++;
+    } catch (e) {
+      if (e.status === 401 || e.status === 403 || e.network) throw e;
+      warnings.push(`${STATUS_LABEL[st] || st} 조회 실패: ${e.message}`);
+    }
+  }
+  if (!okStatuses) throw new Error(warnings.join(' / '));
+  return { groups: [...sheets.values()].map(normalizeSheet), state, warnings };
+}
+
 const meta = {
   type: 'coupang',
   label: '쿠팡',
@@ -255,6 +277,7 @@ const meta = {
   beta: false,
   inquiries: true,
   answerable: false, // 답변은 Wing 에서
+  backfill: true,
   sellerCenter: 'https://wing.coupang.com/',
   fields: [
     { key: 'vendorId', label: '업체코드 (Vendor ID)', placeholder: '예) A00012345', required: true },
@@ -282,6 +305,7 @@ module.exports = {
   },
 
   async fetch(ctx) {
+    if (ctx.backfillDays) return backfill(ctx);
     const state = { ...(ctx.state || {}) };
     const now = new Date();
     const runCount = (state.runCount || 0) + 1;

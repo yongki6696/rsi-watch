@@ -20,7 +20,13 @@ function kst(iso) {
   return d.toISOString().slice(0, 16).replace('T', ' ');
 }
 
-const LABELS = { naver: '스마트스토어', coupang: '쿠팡', elevenst: '11번가', demo: '데모' };
+function marketLabel(type) {
+  try {
+    return require('./connectors').getConnector(type).label;
+  } catch {
+    return type;
+  }
+}
 
 function ordersToCsv(orders) {
   const header = [
@@ -33,7 +39,7 @@ function ordersToCsv(orders) {
     for (const i of o.items || []) {
       lines.push(
         [
-          LABELS[o.store_type] || o.store_type, o.store_name, i.order_no || o.order_no, i.item_key, kst(o.paid_at),
+          marketLabel(o.store_type), o.store_name, i.order_no || o.order_no, i.item_key, kst(o.paid_at),
           STATUS[o.status] || o.status, o.claim ? CLAIM[o.claim] : '', i.product_name, i.option_name, i.quantity, i.amount,
           o.orderer_name, o.orderer_phone, o.receiver_name, o.receiver_phone, o.receiver_phone2, o.zipcode, o.address1, o.address2,
           o.delivery_memo, o.customs_code, o.supplier, o.supplier_order_no, o.cost, courierName(o.courier_key), o.tracking_no, o.memo,
@@ -46,4 +52,4 @@ function ordersToCsv(orders) {
   return '\uFEFF' + lines.join('\r\n') + '\r\n';
 }
 
-module.exports = { ordersToCsv };
+module.exports = { ordersToCsv, cell, marketLabel };

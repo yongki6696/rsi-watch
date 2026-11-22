@@ -32,6 +32,10 @@ const ICONS = {
   cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 002 1.6h9.7a2 2 0 002-1.6L23 6H6"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   chat: '<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M7 16v-5M12 16V8M17 16v-8"/>',
+  chevL: '<path d="M15 18l-6-6 6-6"/>',
+  chevR: '<path d="M9 18l6-6-6-6"/>',
+  history: '<path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
 };
 
 function icon(name, cls = '') {
@@ -202,6 +206,9 @@ const S = {
   view: null,
   sheetOrderId: null,
   pushedSheet: false,
+  sales: null,
+  salesPrefs: null,
+  backfill: null,
 };
 
 const STATUS = { NEW: '신규주문', PURCHASED: '발주완료', INVOICED: '송장입력', SHIPPED: '발송완료', DELIVERED: '배송완료', CANCELED: '취소', RETURNED: '반품' };
@@ -321,9 +328,11 @@ function renderShell() {
     { class: 'nav' },
     h('div', { class: 'nav-brand brand' }, h('span', { class: 'brand-logo' }), '오더허브'),
     h('a', { href: '#/orders/new', 'data-nav': 'orders' }, icon('box'), '주문', h('span', { class: 'badge hidden', id: 'navBadge' })),
+    h('a', { href: '#/sales', 'data-nav': 'sales' }, icon('chart'), '매출'),
     h('a', { href: '#/inquiries', 'data-nav': 'inquiries' }, icon('chat'), '문의', h('span', { class: 'badge hidden', id: 'inqBadge' })),
     h('a', { href: '#/stores', 'data-nav': 'stores' }, icon('store'), '스토어', h('span', { class: 'badge hidden', id: 'storeBadge' }, '!')),
-    h('a', { href: '#/notify', 'data-nav': 'notify' }, icon('bell'), '알림'),
+    // 휴대폰 하단 메뉴는 5칸이라 알림 설정은 [설정] 안에서 들어감 (PC 왼쪽 메뉴에는 표시)
+    h('a', { href: '#/notify', 'data-nav': 'notify', class: 'desk-only' }, icon('bell'), '알림'),
     h('a', { href: '#/settings', 'data-nav': 'settings' }, icon('sliders'), '설정')
   );
   const syncBtn = h('button', { class: 'icon-btn', id: 'syncBtn', title: '지금 수집', 'aria-label': '지금 주문 수집', onclick: () => syncNow() }, icon('refresh'));
@@ -340,7 +349,10 @@ function renderShell() {
 
 function setNav(name) {
   S.view = name;
-  for (const a of $$('.nav a')) a.classList.toggle('active', a.dataset.nav === name);
+  for (const a of $$('.nav a')) {
+    a.classList.toggle('active', a.dataset.nav === name);
+    a.classList.toggle('active-m', name === 'notify' && a.dataset.nav === 'settings'); // 휴대폰: 알림 화면은 설정 아래
+  }
 }
 
 function route() {
@@ -355,6 +367,7 @@ function route() {
   closeSheet(true);
   S.pushedSheet = false;
   if ((m = hash.match(/^#\/orders(?:\/(\w+))?$/))) return renderOrders(m[1] || 'new');
+  if ((m = hash.match(/^#\/sales(?:\/(\w+))?$/))) return renderSales(m[1] === 'daily' || m[1] === 'stores' ? m[1] : null);
   if (hash === '#/inquiries') return renderInquiries();
   if (hash === '#/stores') return renderStores();
   if (hash === '#/notify') return renderNotify();
@@ -419,6 +432,7 @@ async function syncNow(storeId) {
     if (S.view === 'orders') await loadOrders({ silent: true });
     if (S.view === 'stores') await renderStores();
     if (S.view === 'inquiries') await renderInquiries();
+    if (S.view === 'sales') await loadSales();
   } catch (e) {
     toast(e.message, 'err');
   } finally {
@@ -1154,6 +1168,548 @@ function renderOrderDetail(body, o) {
   append(body, h('details', { class: 'raw sec' }, h('summary', null, '마켓 원본 데이터 보기'), h('pre', null, JSON.stringify(o.items.map((i) => i.raw), null, 2))));
 }
 
+// ===================== 매출 =====================
+const WD = ['일', '월', '화', '수', '목', '금', '토'];
+const kstToday = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+const addDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+const spanDays = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1;
+const monthEnd = (d) => new Date(Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)), 0)).toISOString().slice(0, 10);
+const shortDate = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+
+function salesRange(preset) {
+  const t = kstToday();
+  switch (preset) {
+    case 'today':
+      return { from: t, to: t };
+    case 'yesterday':
+      return { from: addDays(t, -1), to: addDays(t, -1) };
+    case 'week':
+      return { from: addDays(t, -6), to: t };
+    case 'lastMonth': {
+      const first = `${t.slice(0, 7)}-01`;
+      const prevEnd = addDays(first, -1);
+      return { from: `${prevEnd.slice(0, 7)}-01`, to: prevEnd };
+    }
+    default:
+      return { from: `${t.slice(0, 7)}-01`, to: t };
+  }
+}
+const SALES_PRESETS = [
+  ['today', '오늘'],
+  ['yesterday', '어제'],
+  ['week', '최근 7일'],
+  ['month', '이번 달'],
+  ['lastMonth', '지난 달'],
+];
+
+// 체크 해제한 스토어·배송비 포함 여부는 이 기기에 기억
+function salesPrefs() {
+  if (!S.salesPrefs) {
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem('oh_sales') || '{}') || {};
+    } catch {}
+    S.salesPrefs = { excluded: new Set(Array.isArray(saved.excluded) ? saved.excluded : []), shipping: !!saved.shipping };
+  }
+  return S.salesPrefs;
+}
+function saveSalesPrefs() {
+  const p = salesPrefs();
+  try {
+    localStorage.setItem('oh_sales', JSON.stringify({ excluded: [...p.excluded], shipping: p.shipping }));
+  } catch {}
+}
+
+function salesView() {
+  if (!S.sales) S.sales = { tab: 'stores', ...salesRange('month'), preset: 'month', data: null, expanded: new Set() };
+  return S.sales;
+}
+
+function renderSales(tab) {
+  setNav('sales');
+  const v = salesView();
+  if (tab) v.tab = tab;
+  const view = $('#view');
+  const tabs = h(
+    'div',
+    { class: 'tabs', role: 'tablist' },
+    [
+      ['stores', '마켓별 매출'],
+      ['daily', '기간별 매출'],
+    ].map(([k, label]) =>
+      h('button', { class: `tab ${k === v.tab ? 'active' : ''}`, role: 'tab', 'aria-selected': k === v.tab ? 'true' : 'false', onclick: () => (location.hash = `#/sales/${k}`) }, label)
+    )
+  );
+  const shipSwitch = switchEl(salesPrefs().shipping, (on) => {
+    salesPrefs().shipping = on;
+    saveSalesPrefs();
+    renderSales();
+  }, '배송비 포함');
+  view.replaceChildren(
+    h('div', { class: 'page-title' }, '매출', h('span', { class: 'sub' }, '결제일 기준'), h('span', { class: 'title-opt' }, shipSwitch)),
+    tabs,
+    salesRangeCard(),
+    h('div', { id: 'salesNotice' }),
+    h('div', { id: 'salesBody' }, h('div', { class: 'card' }, h('div', { class: 'empty' }, '불러오는 중…'))),
+    h(
+      'p',
+      { class: 'muted small sales-foot' },
+      '매출 = 취소·반품을 뺀 상품 결제금액(할인 반영)',
+      salesPrefs().shipping ? ' + 배송비' : ', 배송비 제외',
+      '. 오더허브가 수집한 주문만 집계됩니다.'
+    )
+  );
+  if (v.data && v.data.from === v.from && v.data.to === v.to) paintSales();
+  loadSales();
+  pollBackfill();
+}
+
+function salesRangeCard() {
+  const v = salesView();
+  const today = kstToday();
+  const fromIn = h('input', { class: 'input date', type: 'date', value: v.from, max: today, 'aria-label': '시작일' });
+  const toIn = h('input', { class: 'input date', type: 'date', value: v.to, max: today, 'aria-label': '종료일' });
+  const apply = (from, to, preset = null) => {
+    if (!from || !to) return;
+    if (from > to) [from, to] = [to, from];
+    if (spanDays(from, to) > 366) return toast('한 번에 최대 366일까지 조회할 수 있습니다', 'err');
+    Object.assign(v, { from, to, preset });
+    fromIn.value = from;
+    toIn.value = to;
+    paintPresets();
+    nextBtn.disabled = to >= today;
+    loadSales();
+  };
+  fromIn.addEventListener('change', () => apply(fromIn.value, toIn.value));
+  toIn.addEventListener('change', () => apply(fromIn.value, toIn.value));
+  // ‹ › : 한 달 단위로 보고 있으면 달 이동, 아니면 같은 길이만큼 이동
+  const shift = (dir) => {
+    const wholeMonth = v.from.endsWith('-01') && (v.to === monthEnd(v.from) || (v.to === today && v.from.slice(0, 7) === today.slice(0, 7)));
+    if (wholeMonth) {
+      const from = dir < 0 ? `${addDays(v.from, -1).slice(0, 7)}-01` : addDays(monthEnd(v.from), 1);
+      if (from > today) return;
+      const end = monthEnd(from);
+      return apply(from, end > today ? today : end);
+    }
+    const n = spanDays(v.from, v.to);
+    let from = addDays(v.from, dir * n);
+    let to = addDays(v.to, dir * n);
+    if (to > today) {
+      to = today;
+      from = addDays(today, -(n - 1));
+    }
+    apply(from, to);
+  };
+  const prevBtn = h('button', { class: 'icon-btn', 'aria-label': '이전 기간', onclick: () => shift(-1) }, icon('chevL'));
+  const nextBtn = h('button', { class: 'icon-btn', 'aria-label': '다음 기간', onclick: () => shift(1), disabled: v.to >= today });
+  nextBtn.append(icon('chevR'));
+  const presets = h('div', { class: 'preset-row' });
+  const paintPresets = () =>
+    presets.replaceChildren(
+      ...SALES_PRESETS.map(([k, label]) => {
+        const r = salesRange(k);
+        const on = r.from === v.from && r.to === v.to;
+        return h('button', { class: `chip-btn ${on ? 'on' : ''}`, onclick: () => apply(r.from, r.to, k) }, label);
+      })
+    );
+  paintPresets();
+  return h(
+    'div',
+    { class: 'card panel sales-range' },
+    h('div', { class: 'range-row' }, prevBtn, fromIn, h('span', { class: 'muted' }, '~'), toIn, nextBtn),
+    presets,
+    h(
+      'div',
+      { class: 'sales-actions' },
+      h('button', { class: 'btn sm', onclick: () => downloadSalesCsv() }, icon('download', 'sm'), '엑셀'),
+      h('button', { class: 'btn sm', onclick: () => openBackfill() }, icon('history', 'sm'), '지난 주문 불러오기'),
+      // 위쪽 ⟳ 버튼과 같은 동작: 지금 주문을 수집하고 다시 계산
+      h('button', { class: 'btn sm icon-only', 'aria-label': '새로고침', title: '새로고침 (지금 주문 수집)', onclick: (e) => withBtn(e.currentTarget, () => syncNow()) }, icon('refresh', 'sm'))
+    )
+  );
+}
+
+let salesSeq = 0;
+async function loadSales() {
+  const v = salesView();
+  const seq = ++salesSeq;
+  try {
+    const data = await api('GET', `/api/sales?from=${v.from}&to=${v.to}`);
+    if (seq !== salesSeq || S.view !== 'sales') return;
+    v.data = data;
+    paintSales();
+  } catch (e) {
+    if (seq !== salesSeq) return;
+    const body = $('#salesBody');
+    if (body) body.replaceChildren(h('div', { class: 'card' }, h('div', { class: 'empty' }, e.message)));
+  }
+}
+
+function salesAmount(c) {
+  if (!c) return 0;
+  return c.amount + (salesPrefs().shipping ? c.shipping || 0 : 0);
+}
+
+function meter(value, max) {
+  const pct = max > 0 && value > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
+  return h('div', { class: 'meter', 'aria-hidden': 'true' }, h('i', { style: { width: `${pct}%` } }));
+}
+
+function paintSales() {
+  const v = salesView();
+  const body = $('#salesBody');
+  const d = v.data;
+  if (!body || !d) return;
+  const prefs = salesPrefs();
+  const stores = d.stores.filter((s) => s.enabled || s.orders > 0);
+  if (!stores.length) {
+    body.replaceChildren(
+      h('div', { class: 'card' }, h('div', { class: 'empty' }, h('div', { class: 'big' }, '📊'), h('b', null, '연결된 스토어가 없습니다'), '스토어를 연결하면 주문이 모이면서 매출이 집계됩니다.', h('div', { style: { marginTop: '14px' } }, h('a', { class: 'btn primary', href: '#/stores' }, icon('plus', 'sm'), '스토어 연결하기'))))
+    );
+    $('#salesNotice')?.replaceChildren();
+    return;
+  }
+  const selected = stores.filter((s) => !prefs.excluded.has(s.id));
+  paintSalesNotice(selected);
+  body.replaceChildren(v.tab === 'daily' ? salesDaily(stores, selected) : salesByStore(stores, selected));
+}
+
+function toggleStore(id, on) {
+  const p = salesPrefs();
+  if (on) p.excluded.delete(id);
+  else p.excluded.add(id);
+  saveSalesPrefs();
+  paintSales();
+}
+
+// 마켓별 매출: 판매처마다 주문건수·매출 (체크한 판매처만 합계/기간별에 포함)
+function salesByStore(stores, selected) {
+  const prefs = salesPrefs();
+  const rows = [...stores].sort((a, b) => salesAmount(b) - salesAmount(a) || a.id - b.id);
+  const total = { orders: selected.reduce((n, s) => n + s.orders, 0), amount: selected.reduce((n, s) => n + salesAmount(s), 0) };
+  const max = Math.max(0, ...rows.map(salesAmount));
+  const allOn = selected.length === stores.length;
+  const master = h('input', {
+    type: 'checkbox',
+    checked: allOn,
+    'aria-label': '전체 판매처 선택',
+    onchange: (e) => {
+      if (e.target.checked) prefs.excluded.clear();
+      else stores.forEach((s) => prefs.excluded.add(s.id));
+      saveSalesPrefs();
+      paintSales();
+    },
+  });
+  if (!allOn && selected.length) master.indeterminate = true;
+  return h(
+    'div',
+    { class: 'card sales-card' },
+    h(
+      'table',
+      { class: 'sales-table' },
+      h('thead', null, h('tr', null, h('th', { class: 'ck' }, h('span', { class: 'check' }, master)), h('th', null, '판매처'), h('th', { class: 'num' }, '주문건수'), h('th', { class: 'num' }, '매출'))),
+      h(
+        'tbody',
+        null,
+        h('tr', { class: 'sum' }, h('td', { class: 'ck' }), h('td', null, '합계', selected.length < stores.length ? h('small', null, ` (${selected.length}곳)`) : ''), h('td', { class: 'num' }, `${total.orders.toLocaleString('ko-KR')}`), h('td', { class: 'num' }, won(total.amount))),
+        rows.map((s) => {
+          const on = !prefs.excluded.has(s.id);
+          const amt = salesAmount(s);
+          const share = total.amount > 0 && on ? Math.round((amt / total.amount) * 1000) / 10 : null;
+          return h(
+            'tr',
+            { class: on ? '' : 'off' },
+            h('td', { class: 'ck' }, h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: on, 'aria-label': `${s.name} 포함`, onchange: (e) => toggleStore(s.id, e.target.checked) }))),
+            h(
+              'td',
+              { class: 'store-cell' },
+              h(
+                'button',
+                {
+                  class: 'store-link',
+                  title: '이 판매처의 일자별 매출 보기',
+                  onclick: () => {
+                    stores.forEach((x) => (x.id === s.id ? prefs.excluded.delete(x.id) : prefs.excluded.add(x.id)));
+                    saveSalesPrefs();
+                    location.hash = '#/sales/daily';
+                  },
+                },
+                storeBadge(s.type, s.name),
+                icon('chevR', 'sm')
+              ),
+              meter(amt, max)
+            ),
+            h('td', { class: 'num' }, s.orders.toLocaleString('ko-KR')),
+            h('td', { class: 'num' }, won(amt), share !== null ? h('small', null, `${share}%`) : '')
+          );
+        })
+      )
+    )
+  );
+}
+
+// 기간별 매출: 날짜마다 (선택한 판매처 합계). 날짜를 누르면 판매처별로 펼쳐보기
+function salesDaily(stores, selected) {
+  const v = salesView();
+  const prefs = salesPrefs();
+  const ids = selected.map((s) => s.id);
+  const byId = new Map(stores.map((s) => [s.id, s]));
+  const days = v.data.daily.map((d) => {
+    let orders = 0;
+    let amount = 0;
+    for (const id of ids) {
+      const c = d.stores[id];
+      if (!c) continue;
+      orders += c.orders;
+      amount += salesAmount(c);
+    }
+    return { ...d, orders, amount };
+  });
+  const total = days.reduce((t, d) => ({ orders: t.orders + d.orders, amount: t.amount + d.amount }), { orders: 0, amount: 0 });
+  const max = Math.max(0, ...days.map((d) => d.amount));
+  const allOn = selected.length === stores.length;
+  const filter = h(
+    'div',
+    { class: 'store-filter' },
+    h('button', { class: `chip-btn ${allOn ? 'on' : ''}`, onclick: () => (prefs.excluded.clear(), saveSalesPrefs(), paintSales()) }, '전체'),
+    stores.map((s) => {
+      const on = !prefs.excluded.has(s.id);
+      const c = connector(s.type);
+      return h(
+        'button',
+        { class: `chip-btn ${on && !allOn ? 'on' : ''} ${on ? '' : 'dim'}`, 'aria-pressed': on ? 'true' : 'false', onclick: () => toggleStore(s.id, !on) },
+        h('span', { class: 'mk', style: { '--c': c.color } }, c.short),
+        s.name
+      );
+    })
+  );
+  const rows = [];
+  for (const d of days) {
+    const open = v.expanded.has(d.date);
+    const wdCls = d.weekday === '일' ? 'sun' : d.weekday === '토' ? 'sat' : '';
+    rows.push(
+      h(
+        'tr',
+        { class: `day ${d.orders ? '' : 'zero'} ${open ? 'open' : ''}`, onclick: () => (open ? v.expanded.delete(d.date) : v.expanded.add(d.date), paintSales()) },
+        h(
+          'td',
+          { class: 'date' },
+          h(
+            'button',
+            { class: 'day-btn', 'aria-expanded': open ? 'true' : 'false', 'aria-label': `${d.date} 판매처별 보기` },
+            h('span', { class: 'mono' }, d.date.slice(5).replace('-', '.')),
+            h('span', { class: `wd ${wdCls}` }, ` (${d.weekday})`),
+            d.date === kstToday() ? h('span', { class: 'chip blue today' }, '오늘') : ''
+          )
+        ),
+        h('td', { class: 'num' }, d.orders.toLocaleString('ko-KR')),
+        h('td', { class: 'num amt' }, won(d.amount), meter(d.amount, max))
+      )
+    );
+    if (open) {
+      const parts = ids
+        .map((id) => ({ s: byId.get(id), c: d.stores[id] }))
+        .filter((x) => x.c && (x.c.orders || x.c.amount))
+        .sort((a, b) => salesAmount(b.c) - salesAmount(a.c));
+      rows.push(
+        h(
+          'tr',
+          { class: 'detail' },
+          h(
+            'td',
+            { colspan: '3' },
+            parts.length
+              ? h(
+                  'ul',
+                  { class: 'day-stores' },
+                  parts.map(({ s, c }) => h('li', null, storeBadge(s.type, s.name), h('span', { class: 'n' }, `${c.orders}건`), h('b', null, won(salesAmount(c)))))
+                )
+              : h('div', { class: 'muted small' }, '이 날은 주문이 없습니다')
+          )
+        )
+      );
+    }
+  }
+  const avg = days.length ? Math.round(total.amount / days.length) : 0;
+  return h(
+    'div',
+    null,
+    filter,
+    h(
+      'div',
+      { class: 'card sales-card' },
+      h(
+        'table',
+        { class: 'sales-table daily' },
+        h('thead', null, h('tr', null, h('th', null, '날짜'), h('th', { class: 'num' }, '주문건수'), h('th', { class: 'num' }, '매출'))),
+        h(
+          'tbody',
+          null,
+          h(
+            'tr',
+            { class: 'sum' },
+            h('td', null, '합계', h('small', null, ` (${days.length}일)`)),
+            h('td', { class: 'num' }, total.orders.toLocaleString('ko-KR')),
+            h('td', { class: 'num' }, won(total.amount), days.length > 1 ? h('small', null, `하루 평균 ${won(avg)}`) : '')
+          ),
+          rows
+        )
+      )
+    ),
+    h('p', { class: 'muted small', style: { margin: '8px 4px 0' } }, '날짜를 누르면 판매처별 매출을 볼 수 있어요.')
+  );
+}
+
+// 수집 시작일보다 앞선 기간을 보면 "그 전 주문은 없음" 안내
+function paintSalesNotice(selected) {
+  const box = $('#salesNotice');
+  if (!box) return;
+  const v = salesView();
+  const bf = S.backfill;
+  if (bf && bf.running) {
+    box.replaceChildren(notice('info', h('b', null, '지난 주문을 불러오는 중… '), bf.current ? `${bf.current} (${Math.min(bf.done + 1, bf.total)}/${bf.total})` : '준비 중', h('br'), h('span', { class: 'muted small' }, '끝나면 매출이 자동으로 다시 계산됩니다. 화면을 나가도 계속 진행돼요.')));
+    return;
+  }
+  const late = selected.filter((s) => s.enabled && s.coverageFrom && s.coverageFrom > v.from && s.coverageFrom <= v.to);
+  const outside = selected.filter((s) => s.enabled && s.coverageFrom && s.coverageFrom > v.to);
+  const list = [...late, ...outside];
+  if (!list.length) return box.replaceChildren();
+  const groups = new Map();
+  for (const s of list) {
+    if (!groups.has(s.coverageFrom)) groups.set(s.coverageFrom, []);
+    groups.get(s.coverageFrom).push(s.name);
+  }
+  const parts = [...groups.entries()].sort().map(([date, names]) => `${names.join(', ')} ${shortDate(date)} 이전`);
+  const canBackfill = list.some((s) => connector(s.type).backfill);
+  box.replaceChildren(
+    notice(
+      'warn',
+      h('b', null, '연결하기 전 주문은 빠져 있어요'),
+      h('div', null, parts.join(' · '), canBackfill ? h('button', { class: 'link-btn', onclick: () => openBackfill() }, '지난 주문 불러오기 ›') : '')
+    )
+  );
+}
+
+function downloadSalesCsv() {
+  const v = salesView();
+  const d = v.data;
+  const qs = new URLSearchParams({ from: v.from, to: v.to, view: v.tab === 'daily' ? 'daily' : 'stores' });
+  if (d) {
+    const ids = d.stores.filter((s) => (s.enabled || s.orders > 0) && !salesPrefs().excluded.has(s.id)).map((s) => s.id);
+    qs.set('stores', ids.join(',') || '0');
+  }
+  if (salesPrefs().shipping) qs.set('shipping', '1');
+  const a = h('a', { href: `/api/sales/export.csv?${qs}`, download: '' });
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+// ---------- 지난 주문 불러오기 ----------
+let backfillTimer = null;
+function pollBackfill() {
+  clearTimeout(backfillTimer);
+  backfillTimer = setTimeout(async () => {
+    let bf;
+    try {
+      bf = (await api('GET', '/api/sales/backfill')).backfill;
+    } catch {
+      return;
+    }
+    const was = S.backfill?.running;
+    S.backfill = bf;
+    if (bf?.running) {
+      if (S.view === 'sales' && S.sales?.data) paintSalesNotice(S.sales.data.stores.filter((s) => !salesPrefs().excluded.has(s.id)));
+      paintBackfillProgress(bf);
+      pollBackfill();
+    } else if (was && bf) {
+      paintBackfillProgress(bf);
+      const added = (bf.results || []).reduce((n, r) => n + (r.added || 0), 0);
+      const failed = (bf.results || []).filter((r) => r.error).length;
+      toast(failed ? `지난 주문 불러오기 완료 (실패 ${failed}곳) - 새로 ${added}건` : `지난 주문 불러오기 완료 - 새로 ${added}건`, failed ? 'err' : 'ok');
+      if (S.view === 'sales') loadSales();
+    }
+  }, S.backfill?.running ? 2000 : 50);
+}
+
+function backfillResultList(bf) {
+  return h(
+    'ul',
+    { class: 'report' },
+    (bf.results || []).map((r) =>
+      h(
+        'li',
+        null,
+        r.error ? h('span', { class: 'bad' }, '✕') : r.skipped ? h('span', { class: 'muted' }, '–') : h('span', { class: 'ok' }, '✓'),
+        h('span', null, h('b', null, r.name), ' ', r.error ? `실패: ${r.error}` : r.skipped ? r.skipped : `새로 ${r.added}건, 갱신 ${Math.max(0, r.updated - r.added)}건`, r.warnings?.length ? h('div', { class: 'muted small' }, r.warnings.join(' / ')) : '')
+      )
+    )
+  );
+}
+
+function paintBackfillProgress(bf) {
+  const box = $('#backfillProgress');
+  if (!box) return;
+  if (bf.running) {
+    box.replaceChildren(notice('info', h('b', null, '불러오는 중… '), bf.current ? `${bf.current} (${Math.min(bf.done + 1, bf.total)}/${bf.total})` : '준비 중', h('div', { class: 'muted small' }, '창을 닫아도 서버에서 계속 진행됩니다.')));
+  } else if (bf.error) {
+    box.replaceChildren(notice('err', `불러오지 못했습니다: ${bf.error}`));
+  } else {
+    box.replaceChildren(notice('ok', h('b', null, '완료했습니다'), backfillResultList(bf)));
+  }
+  const btn = $('#backfillStart');
+  if (btn) btn.disabled = !!bf.running;
+}
+
+function openBackfill() {
+  const stores = (S.sales?.data?.stores || []).filter((s) => s.enabled);
+  openSheet('지난 주문 불러오기', (body) => {
+    const days = h('select', { class: 'input' }, [7, 14, 31].map((n) => h('option', { value: n, selected: n === 31 ? 'selected' : null }, `최근 ${n}일`)));
+    const target = h(
+      'select',
+      { class: 'input' },
+      h('option', { value: '' }, '연결된 스토어 전체'),
+      stores.map((s) => {
+        const ok = connector(s.type).backfill;
+        return h('option', { value: s.id, disabled: ok ? null : 'disabled' }, `${s.name}${ok ? '' : ' (미지원)'}`);
+      })
+    );
+    const slow = stores.some((s) => s.type === 'gmarket' || s.type === 'auction');
+    const unsupported = stores.filter((s) => !connector(s.type).backfill);
+    append(
+      body,
+      h(
+        'div',
+        { class: 'sec' },
+        h('p', { class: 'small', style: { margin: '0 0 10px', color: 'var(--text-2)' } }, '오더허브를 연결하기 전 주문을 마켓에서 다시 가져와 매출에 반영합니다. 이미 있는 주문은 중복되지 않고 최신 상태로 갱신되며, 알림은 보내지 않습니다.'),
+        h('div', { class: 'field' }, h('span', null, '기간'), days),
+        h('div', { class: 'field' }, h('span', null, '대상'), target),
+        slow ? notice('info', 'G마켓·옥션은 마켓 정책(5초에 1번 조회) 때문에 몇 분 걸릴 수 있어요.') : '',
+        unsupported.length ? h('p', { class: 'muted small', style: { margin: '0 0 10px' } }, `${unsupported.map((s) => s.name).join(', ')}: 지난 주문 불러오기를 지원하지 않습니다 (연결 이후 주문은 정상 집계).`) : '',
+        h(
+          'button',
+          {
+            class: 'btn primary block',
+            id: 'backfillStart',
+            disabled: S.backfill?.running ? 'disabled' : null,
+            onclick: (e) =>
+              withBtn(e.currentTarget, async () => {
+                const r = await api('POST', '/api/sales/backfill', { days: Number(days.value), storeId: target.value ? Number(target.value) : null });
+                S.backfill = r.backfill;
+                paintBackfillProgress(r.backfill);
+                pollBackfill();
+              }),
+          },
+          '불러오기 시작'
+        ),
+        h('div', { id: 'backfillProgress', style: { marginTop: '12px' } })
+      )
+    );
+    const bf = S.backfill;
+    if (bf && (bf.running || bf.finishedAt)) paintBackfillProgress(bf);
+  });
+}
+
 // ===================== 고객 문의 =====================
 async function renderInquiries(filter) {
   if (filter) S.inqFilter = filter;
@@ -1611,6 +2167,13 @@ async function renderSettings() {
   const eventsBox = h('ul', { class: 'events' }, h('li', null, '불러오는 중…'));
   view.replaceChildren(
     h('div', { class: 'page-title' }, '설정'),
+    h(
+      'a',
+      { class: 'card link-card', href: '#/notify' },
+      h('span', { class: 'link-ic' }, icon('bell')),
+      h('span', { class: 'label' }, h('b', null, '휴대폰 알림 설정'), h('small', null, '웹푸시 · 텔레그램 · ntfy, 알림 받을 항목')),
+      icon('chevR')
+    ),
     h(
       'div',
       { class: 'card panel' },

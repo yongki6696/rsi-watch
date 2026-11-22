@@ -33,6 +33,18 @@ function kstDate(d = new Date()) {
   return `${p.y}-${p.m}-${p.d}`;
 }
 
+// 오늘(KST)부터 days일 전까지를 size일씩 나눈 날짜 구간 (오래된 구간부터) - 지난 주문 불러오기용
+// 예) days 31, size 7 → [{from:'2026-10-22', to:'2026-10-28'}, … , {from:'2026-11-19', to:'2026-11-22'}]
+function kstDateWindows(days, size, now = new Date()) {
+  const today = Date.parse(`${kstDate(now)}T00:00:00Z`);
+  const out = [];
+  for (let start = today - days * 86400000; start <= today; start += size * 86400000) {
+    const end = Math.min(start + (size - 1) * 86400000, today);
+    out.push({ from: new Date(start).toISOString().slice(0, 10), to: new Date(end).toISOString().slice(0, 10) });
+  }
+  return out;
+}
+
 // 202611221403 (11번가 YYYYMMDDhhmm)
 function kstCompact(d = new Date()) {
   const p = kstParts(d);
@@ -140,6 +152,7 @@ module.exports = {
   KST_OFFSET_MS,
   kstIso,
   kstDate,
+  kstDateWindows,
   kstCompact,
   kstParts,
   toIso,

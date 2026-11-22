@@ -51,9 +51,9 @@ function createState() {
 }
 
 // ---------------- 네이버 ----------------
-function naverAddOrder(state, { productOrderId, orderId, packageNumber = null, name = '홍길동', product = '블루투스 이어폰', option = '화이트', qty = 1, amount = 39900, status = 'PAYED', place = 'NOT_YET', claimType = null, claimStatus = null }) {
+function naverAddOrder(state, { productOrderId, orderId, packageNumber = null, name = '홍길동', product = '블루투스 이어폰', option = '화이트', qty = 1, amount = 39900, status = 'PAYED', place = 'NOT_YET', claimType = null, claimStatus = null, at = new Date() }) {
   const detail = {
-    order: { orderId, orderDate: kstIso(), paymentDate: kstIso(), ordererName: name, ordererTel: '010-1111-2222' },
+    order: { orderId, orderDate: kstIso(at), paymentDate: kstIso(at), ordererName: name, ordererTel: '010-1111-2222' },
     productOrder: {
       productOrderId,
       packageNumber,
@@ -74,19 +74,19 @@ function naverAddOrder(state, { productOrderId, orderId, packageNumber = null, n
     delivery: {},
   };
   state.naver.orders.set(productOrderId, detail);
-  naverChange(state, productOrderId);
+  naverChange(state, productOrderId, at);
   return detail;
 }
 
 let changeSeq = 0;
-function naverChange(state, productOrderId) {
+function naverChange(state, productOrderId, at = new Date()) {
   const d = state.naver.orders.get(productOrderId);
   state.naver.changes.push({
     seq: ++changeSeq,
     orderId: d.order.orderId,
     productOrderId,
     lastChangedType: 'PAYED',
-    lastChangedDate: kstIso(),
+    lastChangedDate: kstIso(at),
     productOrderStatus: d.productOrder.productOrderStatus,
   });
 }
@@ -118,6 +118,7 @@ async function handleNaver(state, req, res, url) {
     const to = url.searchParams.get('lastChangedTo') ? new Date(url.searchParams.get('lastChangedTo')) : new Date(from.getTime() + 86400000);
     if (isNaN(from) || isNaN(to)) return send(400, { code: '4000', message: 'bad date' });
     if (to - from > 24 * 3600000) return send(400, { code: '104139', message: '조회 가능한 날짜 범위를 초과' });
+    if (!url.searchParams.get('moreSequence')) (state.naver.calls.windows ||= []).push({ from: from.toISOString(), to: to.toISOString() });
     // 실제 API 처럼: moreSequence 이상인 항목만, 2건씩 끊어서 more 페이지 동작 검증
     const minSeq = Number(url.searchParams.get('moreSequence') || 0);
     const all = state.naver.changes.filter((c) => {
@@ -267,7 +268,7 @@ async function handleCoupang(state, req, res, url) {
     const to = url.searchParams.get('createdAtTo');
     if (!/^\d{4}-\d{2}-\d{2}\+09:00$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}\+09:00$/.test(to || '')) return send(400, { code: 'ERROR', message: 'invalid createdAt format' });
     const status = url.searchParams.get('status');
-    state.coupang.calls.list.push({ version: m[1], status });
+    state.coupang.calls.list.push({ version: m[1], status, from: from.slice(0, 10), to: to.slice(0, 10), page: url.searchParams.get('nextToken') || '' });
     const all = [...state.coupang.sheets.values()].filter((s) => s.status === status);
     const per = Number(url.searchParams.get('maxPerPage') || 50);
     const start = Number(url.searchParams.get('nextToken') || 0);
