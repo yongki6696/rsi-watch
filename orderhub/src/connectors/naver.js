@@ -259,6 +259,9 @@ const meta = {
   short: 'N',
   color: '#03c75a',
   beta: false,
+  inquiries: true, // 고객/상품 문의 수집
+  answerable: true, // 오더허브에서 답변 가능
+  sellerCenter: 'https://sell.smartstore.naver.com/',
   fields: [
     { key: 'clientId', label: '애플리케이션 ID', placeholder: '예) 7dMvteboKNHwyRremLXXXX', required: true },
     { key: 'clientSecret', label: '애플리케이션 시크릿', placeholder: '$2a$04$... 형식', required: true, secret: true },
@@ -285,7 +288,7 @@ module.exports = {
   async fetch(ctx) {
     const state = { ...(ctx.state || {}) };
     const now = new Date();
-    const initialDays = ctx.initialDays || 3;
+    const initialDays = ctx.initialDays || 7;
     let from = state.cursor ? new Date(state.cursor) : new Date(now.getTime() - initialDays * 86400000);
     // 너무 오래 쉬었으면 최대 7일 전까지만
     const minFrom = new Date(now.getTime() - 7 * 86400000);
@@ -316,6 +319,66 @@ module.exports = {
       }
     }
     return { ok, failed };
+  },
+
+  // 고객 문의(주문 관련) + 상품 문의(Q&A) - 최근 7일
+  async fetchInquiries(ctx) {
+    const now = new Date();
+    const from = new Date(now.getTime() - 7 * 86400000);
+    const out = [];
+    for (let page = 1; page <= 5; page++) {
+      const r = await api(ctx, 'GET', '/v1/pay-user/inquiries', {
+        query: { startSearchDate: kstIso(from).slice(0, 10), endSearchDate: kstIso(now).slice(0, 10), page, size: 100 },
+      });
+      for (const q of r?.content || []) {
+        out.push({
+          key: `c-${q.inquiryNo}`,
+          kind: 'customer',
+          category: str(q.category),
+          title: str(q.title),
+          content: str(q.inquiryContent),
+          productName: [str(q.productName), str(q.productOrderOption)].filter(Boolean).join(' / '),
+          orderNo: str(q.orderId),
+          writer: str(q.customerName),
+          askedAt: toIso(q.inquiryRegistrationDateTime),
+          answered: !!q.answered,
+          answer: str(q.answerContent),
+          extra: { inquiryNo: str(q.inquiryNo) },
+        });
+      }
+      if (r?.last !== false || !(r?.content || []).length) break;
+    }
+    for (let page = 1; page <= 5; page++) {
+      const r = await api(ctx, 'GET', '/v1/contents/qnas', { query: { fromDate: from.toISOString(), toDate: now.toISOString(), page, size: 100 } });
+      for (const q of r?.contents || []) {
+        out.push({
+          key: `p-${q.questionId}`,
+          kind: 'product',
+          category: '상품',
+          title: '',
+          content: str(q.question),
+          productName: str(q.productName),
+          orderNo: '',
+          writer: str(q.maskedWriterId),
+          askedAt: toIso(q.createDate),
+          answered: !!q.answered,
+          answer: str(q.answer),
+          extra: { questionId: str(q.questionId) },
+        });
+      }
+      if (r?.last !== false || !(r?.contents || []).length) break;
+    }
+    return out;
+  },
+
+  async answerInquiry(ctx, inquiry, text) {
+    const e = inquiry.extra || {};
+    if (inquiry.kind === 'product' && e.questionId) {
+      await api(ctx, 'PUT', `/v1/contents/qnas/${encodeURIComponent(e.questionId)}`, { body: { commentContent: text } });
+    } else if (e.inquiryNo) {
+      await api(ctx, 'POST', `/v1/pay-merchant/inquiries/${encodeURIComponent(e.inquiryNo)}/answer`, { body: { answerComment: text } });
+    } else throw new Error('문의 번호가 없습니다');
+    return { ok: true };
   },
 
   async dispatch(ctx, order, items, { courierKey, trackingNo }) {

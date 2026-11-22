@@ -108,6 +108,28 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_order ON events(order_id);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 
+CREATE TABLE IF NOT EXISTS inquiries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  store_id INTEGER NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  inquiry_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  category TEXT,
+  title TEXT,
+  content TEXT,
+  product_name TEXT,
+  order_no TEXT,
+  writer TEXT,
+  asked_at TEXT,
+  answered INTEGER NOT NULL DEFAULT 0,
+  answer TEXT,
+  answered_at TEXT,
+  extra TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(store_id, inquiry_key)
+);
+CREATE INDEX IF NOT EXISTS idx_inquiries_open ON inquiries(answered, asked_at);
+
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
   created_at TEXT NOT NULL,

@@ -7,7 +7,8 @@ const DEFAULTS = {
   autoConfirm: false, // 신규주문 수집 즉시 마켓 발주확인
   confirmOnPurchase: true, // [발주완료] 처리 시 마켓 발주확인도 함께
   defaultCourier: 'CJ', // 기본 택배사
-  initialDays: 3, // 스토어 첫 연결 시 불러올 기간(일)
+  initialDays: 7, // 스토어 첫 연결 시 불러올 기간(일) - 처리 대기 주문을 빠짐없이
+  collectInquiries: true, // 고객 문의 수집·알림
 };
 
 function getAppSettings(db) {
@@ -23,6 +24,7 @@ function updateAppSettings(db, input = {}) {
   }
   if ('autoConfirm' in input) s.autoConfirm = !!input.autoConfirm;
   if ('confirmOnPurchase' in input) s.confirmOnPurchase = !!input.confirmOnPurchase;
+  if ('collectInquiries' in input) s.collectInquiries = !!input.collectInquiries;
   if ('defaultCourier' in input) s.defaultCourier = String(input.defaultCourier || 'CJ');
   if ('initialDays' in input) {
     const n = Number(input.initialDays);

@@ -31,6 +31,7 @@ const ICONS = {
   send: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/>',
   cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 002 1.6h9.7a2 2 0 002-1.6L23 6H6"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  chat: '<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>',
 };
 
 function icon(name, cls = '') {
@@ -320,6 +321,7 @@ function renderShell() {
     { class: 'nav' },
     h('div', { class: 'nav-brand brand' }, h('span', { class: 'brand-logo' }), '오더허브'),
     h('a', { href: '#/orders/new', 'data-nav': 'orders' }, icon('box'), '주문', h('span', { class: 'badge hidden', id: 'navBadge' })),
+    h('a', { href: '#/inquiries', 'data-nav': 'inquiries' }, icon('chat'), '문의', h('span', { class: 'badge hidden', id: 'inqBadge' })),
     h('a', { href: '#/stores', 'data-nav': 'stores' }, icon('store'), '스토어', h('span', { class: 'badge hidden', id: 'storeBadge' }, '!')),
     h('a', { href: '#/notify', 'data-nav': 'notify' }, icon('bell'), '알림'),
     h('a', { href: '#/settings', 'data-nav': 'settings' }, icon('sliders'), '설정')
@@ -353,6 +355,7 @@ function route() {
   closeSheet(true);
   S.pushedSheet = false;
   if ((m = hash.match(/^#\/orders(?:\/(\w+))?$/))) return renderOrders(m[1] || 'new');
+  if (hash === '#/inquiries') return renderInquiries();
   if (hash === '#/stores') return renderStores();
   if (hash === '#/notify') return renderNotify();
   if (hash === '#/settings') return renderSettings();
@@ -389,6 +392,11 @@ function paintSync() {
   }
   pill.replaceChildren(h('span', { class: dotCls }), text);
   pill.title = st.nextRunAt ? `다음 수집: ${fmtDT(st.nextRunAt)} (${until(st.nextRunAt)})` : '';
+  const ib = $('#inqBadge');
+  if (ib) {
+    ib.textContent = String(st.inquiriesOpen || 0);
+    ib.classList.toggle('hidden', !st.inquiriesOpen);
+  }
   const sb = $('#storeBadge');
   if (sb) sb.classList.toggle('hidden', !(errs.length || !active.length));
   const btn = $('#syncBtn');
@@ -404,11 +412,13 @@ async function syncNow(storeId) {
     if (r.newOrders) parts.push(`신규주문 ${r.newOrders}건`);
     if (r.claims) parts.push(`클레임 ${r.claims}건`);
     if (r.canceled) parts.push(`취소 ${r.canceled}건`);
+    if (r.inquiries) parts.push(`문의 ${r.inquiries}건`);
     if (r.errors) toast(`수집 오류 ${r.errors}곳 - 스토어 화면에서 확인하세요`, 'err');
     else toast(parts.length ? `수집 완료: ${parts.join(', ')}` : r.stores.length ? '수집 완료: 새 주문 없음' : '연결된 스토어가 없습니다', parts.length ? 'ok' : '');
     await refreshSync();
     if (S.view === 'orders') await loadOrders({ silent: true });
     if (S.view === 'stores') await renderStores();
+    if (S.view === 'inquiries') await renderInquiries();
   } catch (e) {
     toast(e.message, 'err');
   } finally {
@@ -462,7 +472,7 @@ function renderOrders(tab) {
   const search = h('input', {
     class: 'input',
     type: 'search',
-    placeholder: '이름·전화·주문번호',
+    placeholder: '주문 검색 (이름·전화·주문번호)',
     value: S.q,
     oninput: (e) => {
       clearTimeout(searchTimer);
@@ -1122,6 +1132,78 @@ function renderOrderDetail(body, o) {
   append(body, h('details', { class: 'raw sec' }, h('summary', null, '마켓 원본 데이터 보기'), h('pre', null, JSON.stringify(o.items.map((i) => i.raw), null, 2))));
 }
 
+// ===================== 고객 문의 =====================
+async function renderInquiries(filter) {
+  if (filter) S.inqFilter = filter;
+  const f = S.inqFilter || 'open';
+  setNav('inquiries');
+  const view = $('#view');
+  const list = h('div', { class: 'list' }, h('div', { class: 'empty' }, '불러오는 중…'));
+  const tabs = h(
+    'div',
+    { class: 'tabs' },
+    [
+      ['open', '미답변'],
+      ['all', '전체'],
+    ].map(([k, label]) => h('button', { class: `tab ${k === f ? 'active' : ''}`, 'data-k': k, onclick: () => renderInquiries(k) }, label, h('span', { class: 'n' })))
+  );
+  view.replaceChildren(h('div', { class: 'page-title' }, '고객 문의', h('span', { class: 'sub' }, '스마트스토어 · 쿠팡')), tabs, list);
+  try {
+    const r = await api('GET', `/api/inquiries?filter=${f}`);
+    for (const b of tabs.querySelectorAll('.tab')) {
+      const n = b.dataset.k === 'open' ? r.counts.open : r.counts.all;
+      const el = b.querySelector('.n');
+      el.textContent = n ? String(n) : '';
+      el.classList.toggle('hot', b.dataset.k === 'open' && n > 0);
+    }
+    if (S.sync) {
+      S.sync.inquiriesOpen = r.counts.open;
+      paintSync();
+    }
+    if (!r.inquiries.length) {
+      list.replaceChildren(h('div', { class: 'empty', style: { gridColumn: '1 / -1' } }, h('div', { class: 'big' }, '💬'), h('b', null, f === 'open' ? '답변을 기다리는 문의가 없습니다' : '문의가 없습니다'), '새 문의가 들어오면 알림으로 알려드릴게요.'));
+      return;
+    }
+    list.replaceChildren(...r.inquiries.map(inquiryCard));
+  } catch (e) {
+    list.replaceChildren(h('div', { class: 'empty' }, e.message));
+  }
+}
+
+function inquiryCard(q) {
+  const c = connector(q.store_type);
+  const kind = q.kind === 'product' ? '상품문의' : '고객문의';
+  const answerBox = h('div');
+  if (q.answered) {
+    append(answerBox, notice('ok', h('b', null, '답변 완료 '), q.answer ? h('span', { class: 'pre' }, q.answer) : ''));
+  } else if (c.answerable) {
+    const ta = h('textarea', { class: 'input', placeholder: '답변을 입력하세요', style: { minHeight: '84px', fontFamily: 'inherit', fontSize: '14px' } });
+    const send = h('button', {
+      class: 'btn sm primary',
+      onclick: (e) =>
+        withBtn(e.currentTarget, async () => {
+          if (!ta.value.trim()) throw new Error('답변 내용을 입력해주세요');
+          await api('POST', `/api/inquiries/${q.id}/answer`, { text: ta.value.trim() });
+          toast('답변을 등록했습니다', 'ok');
+          renderInquiries();
+        }),
+    }, icon('send', 'sm'), '답변 등록');
+    append(answerBox, ta, h('div', { class: 'btn-row end', style: { marginTop: '8px' } }, send));
+  } else {
+    append(answerBox, h('a', { class: 'btn sm', href: c.sellerCenter || '#', target: '_blank', rel: 'noopener noreferrer' }, icon('ext', 'sm'), `${c.label} 셀러센터에서 답변`));
+  }
+  const meta = [q.product_name ? `상품: ${q.product_name}` : '', q.writer ? `작성자: ${q.writer}` : ''].filter(Boolean).join(' · ');
+  return h(
+    'article',
+    { class: `card order ${q.answered ? '' : 'urgent'}` },
+    h('div', { class: 'order-top' }, storeBadge(q.store_type, q.store_name), h('span', { class: `chip ${q.answered ? '' : 'blue'}` }, kind, q.category && q.category !== '상품' ? ` · ${q.category}` : ''), h('span', { class: 'time' }, `${fmtDT(q.asked_at)} · ${ago(q.asked_at)}`)),
+    q.title ? h('b', null, q.title) : null,
+    h('div', { class: 'pre' }, q.content),
+    h('div', { class: 'muted small' }, meta, q.order_id ? h('a', { href: `#/order/${q.order_id}`, style: { marginLeft: '8px' } }, '주문 보기') : q.order_no ? ` · 주문 ${q.order_no}` : ''),
+    answerBox
+  );
+}
+
 // ===================== 스토어 =====================
 async function renderStores() {
   setNav('stores');
@@ -1454,6 +1536,7 @@ async function renderNotify() {
       [
         ['newOrder', '신규주문', '새 주문이 수집되면 바로 알림'],
         ['claim', '취소·반품·교환 / 배송지 변경', '발주 후 취소되면 공급처 취소가 필요하니 꼭 켜두세요'],
+        ['inquiry', '고객 문의', '스마트스토어·쿠팡에 새 문의가 들어오면 알림'],
         ['error', '수집 오류', 'API 키 만료·IP 변경 등으로 수집이 실패할 때'],
       ].map(([key, label, desc]) =>
         h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, label), h('small', null, desc)), switchEl(cfg.events[key], (v) => save({ events: { [key]: v } }).catch((e) => toast(e.message, 'err'))))
@@ -1497,6 +1580,7 @@ async function renderSettings() {
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '자동 수집 주기'), h('small', null, '이 간격으로 모든 스토어의 새 주문을 확인합니다')), interval),
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '발주완료 시 마켓 발주확인'), h('small', null, '[발주완료]를 누르면 마켓에도 발주확인(상품준비중) 처리')), switchEl(app.confirmOnPurchase, (v) => saveApp({ confirmOnPurchase: v }))),
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '신규주문 자동 발주확인'), h('small', null, '수집 즉시 마켓에 발주확인 → 구매자가 바로 취소할 수 없게 됩니다')), switchEl(app.autoConfirm, (v) => saveApp({ autoConfirm: v }))),
+      h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '고객 문의 수집'), h('small', null, '스마트스토어 고객·상품 문의, 쿠팡 상품 문의(베타)')), switchEl(app.collectInquiries, (v) => saveApp({ collectInquiries: v }))),
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '기본 택배사'), h('small', null, '송장 입력 시 기본으로 선택')), courier),
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '스토어 첫 연결 시 불러올 기간'), h('small', null, '처리 대기 중인 과거 주문을 가져옵니다 (알림 없음)')), days)
     ),

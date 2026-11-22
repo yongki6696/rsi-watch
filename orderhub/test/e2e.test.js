@@ -308,6 +308,52 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     assert.equal((await call('GET', `/api/orders/${o.id}`)).status, 'SHIPPED');
   });
 
+  await t.test('고객 문의 수집 → 알림 → 오더허브에서 답변', async () => {
+    const kst = new Date(Date.now() + 9 * 3600000).toISOString().replace('Z', '+09:00');
+    mock.state.naver.inquiries.push({ inquiryNo: 5001, category: '배송', title: '언제 오나요', inquiryContent: '주말 전에 받을 수 있을까요?', inquiryRegistrationDateTime: kst, answered: false, orderId: '2026112290000021', productName: '블루투스 이어폰', customerName: '일괄이' });
+    mock.state.naver.qnas.push({ questionId: 7001, question: '화이트 재입고 되나요?', answered: false, productId: 1, productName: '블루투스 이어폰', maskedWriterId: 'abc***', createDate: kst });
+    mock.state.coupang.inquiries.push({ inquiryId: 9001, content: '사이즈가 어떻게 되나요?', inquiryAt: '2026-11-22 10:00:00', sellerProductName: '스테인리스 텀블러', commentDtoList: [] });
+    const before = mock.state.telegram.messages.length;
+    const r = await call('POST', '/api/sync', {});
+    assert.equal(r.inquiries, 3);
+    const texts = mock.state.telegram.messages.slice(before).map((m) => m.text).join('\n');
+    assert.match(texts, /💬 고객문의 · 내 스마트스토어[\s\S]*\[배송\] 언제 오나요 — 일괄이/);
+    assert.match(texts, /💬 상품문의 · 내 스마트스토어/);
+    assert.match(texts, /💬 상품문의 · 내 쿠팡/);
+    let list = await call('GET', '/api/inquiries?filter=open');
+    assert.equal(list.counts.open, 3);
+    const naverQ = list.inquiries.find((q) => q.title === '언제 오나요');
+    assert.ok(naverQ.order_id, '주문과 연결');
+    const status = await call('GET', '/api/sync/status');
+    assert.equal(status.inquiriesOpen, 3);
+    // 같은 문의 재수집 시 중복 알림 없음
+    assert.equal((await call('POST', '/api/sync', {})).inquiries, 0);
+
+    await call('POST', `/api/inquiries/${naverQ.id}/answer`, { text: '내일 출고 예정입니다. 감사합니다.' });
+    assert.deepEqual(mock.state.naver.calls.answers.at(-1), { inquiryNo: '5001', answerComment: '내일 출고 예정입니다. 감사합니다.' });
+    const qna = list.inquiries.find((q) => q.content === '화이트 재입고 되나요?');
+    await call('POST', `/api/inquiries/${qna.id}/answer`, { text: '다음 주 입고됩니다.' });
+    assert.deepEqual(mock.state.naver.calls.qnaAnswers.at(-1), { questionId: '7001', commentContent: '다음 주 입고됩니다.' });
+    const cq = list.inquiries.find((q) => q.store_type === 'coupang');
+    await assert.rejects(call('POST', `/api/inquiries/${cq.id}/answer`, { text: '답변' }), /셀러센터에서 답변/);
+    await assert.rejects(call('POST', `/api/inquiries/${naverQ.id}/answer`, { text: '  ' }), /답변 내용/);
+    list = await call('GET', '/api/inquiries?filter=open');
+    assert.equal(list.counts.open, 1);
+    // 다음 수집에서도 답변완료 유지
+    await call('POST', '/api/sync', {});
+    assert.equal((await call('GET', '/api/inquiries?filter=open')).counts.open, 1);
+
+    // 문의 API 권한이 없어도 주문 수집은 정상
+    mock.state.naver.failInquiries = true;
+    naverAddOrder(mock.state, { productOrderId: '2026112200000501', orderId: '2026112290000041', name: '권한없음' });
+    const r2 = await call('POST', '/api/sync', {});
+    assert.equal(r2.errors, 0);
+    assert.ok(await orderByNo('2026112290000041'));
+    const ev = await call('GET', '/api/events?limit=30');
+    assert.ok(ev.events.some((e) => /문의 수집 실패 \(주문 수집은 정상\)/.test(e.message)));
+    mock.state.naver.failInquiries = false;
+  });
+
   await t.test('CSV 내보내기', async () => {
     const res = await call('GET', '/api/orders/export.csv?tab=all', null, { raw: true });
     assert.equal(res.status, 200);

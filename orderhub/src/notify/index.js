@@ -6,7 +6,7 @@ const { sendNtfy } = require('./ntfy');
 const { mask, HttpError } = require('../util');
 
 const DEFAULTS = {
-  events: { newOrder: true, claim: true, error: true },
+  events: { newOrder: true, claim: true, inquiry: true, error: true },
   webpush: { enabled: true },
   telegram: { enabled: false, chatId: '' },
   ntfy: { enabled: false, server: 'https://ntfy.sh', topic: '' },

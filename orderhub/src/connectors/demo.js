@@ -87,6 +87,8 @@ module.exports = {
   short: 'D',
   color: '#7c5cff',
   beta: false,
+  inquiries: true,
+  answerable: true,
   fields: [],
   guide: [
     'API 키 없이 화면과 처리 흐름을 체험할 수 있는 가상 스토어입니다.',
@@ -114,6 +116,38 @@ module.exports = {
 
   async confirm(ctx, order, items) {
     return { ok: items.map((i) => i.itemKey), failed: [] };
+  },
+
+  async fetchInquiries(ctx) {
+    const samples = [
+      ['배송', '배송 문의', '오늘 주문하면 언제 받을 수 있을까요? 주말 전에 받고 싶어요.'],
+      ['상품', '', '화이트 색상 재입고 예정 있나요?'],
+      ['교환', '사이즈 교환', '받아보니 생각보다 작네요. 한 사이즈 큰 걸로 교환 가능할까요?'],
+    ];
+    const make = (i) => {
+      const [category, title, content] = samples[i % samples.length];
+      return {
+        key: `demo-q-${Date.now()}-${i}`,
+        kind: category === '상품' ? 'product' : 'customer',
+        category,
+        title,
+        content,
+        productName: pick(PRODUCTS)[0],
+        orderNo: '',
+        writer: pick(NAMES),
+        askedAt: new Date().toISOString(),
+        answered: false,
+        answer: '',
+        extra: { demo: true },
+      };
+    };
+    if (ctx.firstSync) return [make(0), make(1)];
+    if (ctx.manual && Math.random() < 0.5) return [make(crypto.randomInt(0, 3))];
+    return [];
+  },
+
+  async answerInquiry() {
+    return { ok: true };
   },
 
   async dispatch(ctx, order, items, { trackingNo }) {

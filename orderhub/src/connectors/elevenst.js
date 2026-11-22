@@ -159,6 +159,8 @@ const meta = {
   short: '11',
   color: '#ff0038',
   beta: true,
+  inquiries: false,
+  sellerCenter: 'https://soffice.11st.co.kr/',
   fields: [{ key: 'apiKey', label: 'Open API Key', required: true, secret: true }],
   guide: [
     '11번가 셀러오피스 → [판매자 정보] 또는 Open API 센터(openapi.11st.co.kr)에서 Open API Key를 발급받습니다.',

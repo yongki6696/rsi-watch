@@ -6,8 +6,9 @@ const { safeJson, nowIso } = require('./util');
 const { CLAIM } = require('./orders');
 
 class SyncEngine {
-  constructor({ db, secrets, config, notifier, orders, actions }) {
+  constructor({ db, secrets, config, notifier, orders, actions, inquiries }) {
     this.db = db;
+    this.inquiries = inquiries;
     this.secrets = secrets;
     this.config = config;
     this.notifier = notifier;
@@ -36,6 +37,10 @@ class SyncEngine {
 
   schedule(delay) {
     clearTimeout(this.timer);
+    if (this.config.disableScheduler) {
+      this.nextRunAt = null;
+      return;
+    }
     const ms = delay ?? this.intervalMs();
     this.nextRunAt = new Date(Date.now() + ms).toISOString();
     this.timer = setTimeout(async () => {
@@ -76,6 +81,7 @@ class SyncEngine {
       nextRunAt: this.config.disableScheduler ? null : this.nextRunAt,
       intervalMin: getAppSettings(this.db).pollIntervalMin,
       lastResult: this.lastResult,
+      inquiriesOpen: this.inquiries ? this.inquiries.counts().open : 0,
       stores,
     };
   }
@@ -99,8 +105,8 @@ class SyncEngine {
 
   async _runAll({ manual = false, storeId = null } = {}) {
     const stores = this.db.all('SELECT * FROM stores WHERE enabled = 1' + (storeId ? ' AND id = ?' : '') + ' ORDER BY id', ...(storeId ? [storeId] : []));
-    const summary = { stores: [], newOrders: 0, claims: 0, canceled: 0, errors: 0, at: nowIso() };
-    const alerts = { newOrders: [], claims: [], canceled: [], address: [], errors: [], recovered: [], imported: [] };
+    const summary = { stores: [], newOrders: 0, claims: 0, canceled: 0, inquiries: 0, errors: 0, at: nowIso() };
+    const alerts = { newOrders: [], claims: [], canceled: [], address: [], errors: [], recovered: [], imported: [], inquiries: [] };
 
     for (const store of stores) {
       const r = await this.syncStore(store, { manual }, alerts);
@@ -109,6 +115,7 @@ class SyncEngine {
       summary.newOrders += r.newOrders || 0;
       summary.claims += r.claims || 0;
       summary.canceled += r.canceled || 0;
+      summary.inquiries += r.inquiries || 0;
     }
     this.lastResult = summary;
     await this.sendAlerts(alerts);
@@ -128,7 +135,7 @@ class SyncEngine {
 
   async syncStore(store, { manual }, alerts) {
     const ts = nowIso();
-    const result = { storeId: store.id, name: store.name, type: store.type, newOrders: 0, claims: 0, canceled: 0, updated: 0 };
+    const result = { storeId: store.id, name: store.name, type: store.type, newOrders: 0, claims: 0, canceled: 0, inquiries: 0, updated: 0 };
     let connector;
     try {
       connector = getConnector(store.type);
@@ -159,6 +166,25 @@ class SyncEngine {
         if (ch.addressChangedNow) alerts.address.push({ store, orderId: ch.orderId });
       }
       const newState = { ...(state || {}), _syncedOnce: true };
+      // 고객 문의 수집 (실패해도 주문 수집은 정상 처리)
+      if (connector.fetchInquiries && this.inquiries && getAppSettings(this.db).collectInquiries !== false) {
+        try {
+          const list = await connector.fetchInquiries({ ...ctx, firstSync });
+          for (const q of list || []) {
+            const r = this.inquiries.apply(store, q);
+            if (r?.isNew && !q.answered && !firstSync) {
+              result.inquiries++;
+              alerts.inquiries.push({ store, id: r.id });
+            }
+          }
+          delete newState.inquiryError;
+        } catch (e) {
+          if (newState.inquiryError !== e.message) {
+            this.db.addEvent({ storeId: store.id, level: 'warn', type: 'sync', message: `문의 수집 실패 (주문 수집은 정상): ${e.message}` });
+          }
+          newState.inquiryError = e.message;
+        }
+      }
       if (firstSync) {
         alerts.imported.push({ store, count: imported });
         if (imported) this.db.addEvent({ storeId: store.id, type: 'sync', message: `첫 연결: 최근 주문 ${imported}건을 불러왔습니다` });
@@ -263,6 +289,22 @@ class SyncEngine {
         tag: `addr-${o.id}`,
         priority: 'high',
       });
+    }
+
+    if (alerts.inquiries.length && alerts.inquiries.length <= 3) {
+      for (const a of alerts.inquiries) {
+        const q = this.inquiries.get(a.id);
+        if (!q) continue;
+        await n.send({
+          type: 'inquiry',
+          title: `💬 ${q.kind === 'product' ? '상품문의' : '고객문의'} · ${label(a.store)}`,
+          body: this.inquiries.describe(q),
+          url: '/#/inquiries',
+          tag: `inquiry-${q.id}`,
+        });
+      }
+    } else if (alerts.inquiries.length > 3) {
+      await n.send({ type: 'inquiry', title: `💬 새 문의 ${alerts.inquiries.length}건`, body: '답변을 기다리는 문의가 있습니다.', url: '/#/inquiries', tag: 'inquiries' });
     }
 
     for (const a of alerts.errors) {

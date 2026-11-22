@@ -19,6 +19,9 @@ function listConnectors() {
     short: c.short,
     color: c.color,
     beta: !!c.beta,
+    inquiries: !!c.inquiries,
+    answerable: !!c.answerable,
+    sellerCenter: c.sellerCenter || '',
     fields: c.fields,
     guide: c.guide,
   }));

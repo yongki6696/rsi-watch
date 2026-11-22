@@ -41,8 +41,8 @@ function jsonRawIds(obj) {
 
 function createState() {
   return {
-    naver: { tokens: new Set(), orders: new Map(), changes: [], calls: { confirm: [], dispatch: [], token: 0 } },
-    coupang: { sheets: new Map(), calls: { ack: [], invoices: [], list: [], single: [] }, rejectAuth: false },
+    naver: { tokens: new Set(), orders: new Map(), changes: [], inquiries: [], qnas: [], failInquiries: false, calls: { confirm: [], dispatch: [], token: 0, answers: [], qnaAnswers: [] } },
+    coupang: { sheets: new Map(), inquiries: [], calls: { ack: [], invoices: [], list: [], single: [], inquiries: [] }, rejectAuth: false },
     eleven: { orders: new Map(), cancelReq: [], canceled: [], calls: { pack: [], deliver: [] } },
     telegram: { messages: [] },
     ntfy: { messages: [] },
@@ -167,6 +167,39 @@ async function handleNaver(state, req, res, url) {
     }
     return send(200, { timestamp: kstIso(), traceId: 't', data: { successProductOrderIds: ok, failProductOrderInfos: fail } });
   }
+  if (path === '/v1/pay-user/inquiries' && req.method === 'GET') {
+    if (state.naver.failInquiries) return send(403, { code: 'GW.AUTHZ', message: '문의 API 권한 없음' });
+    const s = url.searchParams;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s.get('startSearchDate') || '') || !/^\d{4}-\d{2}-\d{2}$/.test(s.get('endSearchDate') || '')) return send(400, { code: '4001', message: 'date format' });
+    const size = Number(s.get('size'));
+    if (size < 10 || size > 200) return send(400, { code: '4006', message: 'size' });
+    return send(200, { content: state.naver.inquiries, totalElements: state.naver.inquiries.length, last: true, first: true });
+  }
+  if (path === '/v1/contents/qnas' && req.method === 'GET') {
+    const s = url.searchParams;
+    if (isNaN(new Date(s.get('fromDate'))) || isNaN(new Date(s.get('toDate'))) || Number(s.get('size')) > 100) return send(400, { code: 'BAD_REQUEST', message: 'bad params' });
+    return send(200, { contents: state.naver.qnas, page: 1, size: 100, totalElements: state.naver.qnas.length, totalPages: 1, first: true, last: true });
+  }
+  let am;
+  if ((am = path.match(/^\/v1\/pay-merchant\/inquiries\/(\d+)\/answer$/)) && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req));
+    const q = state.naver.inquiries.find((x) => String(x.inquiryNo) === am[1]);
+    if (!q || !body.answerComment) return send(400, { code: '4001', message: 'bad answer' });
+    q.answered = true;
+    q.answerContent = body.answerComment;
+    state.naver.calls.answers.push({ inquiryNo: am[1], ...body });
+    return send(200, { code: 'SUCCESS', data: { inquiryNo: Number(am[1]), inquiryCommentNo: 1 } });
+  }
+  if ((am = path.match(/^\/v1\/contents\/qnas\/(\d+)$/)) && req.method === 'PUT') {
+    const body = JSON.parse(await readBody(req));
+    const q = state.naver.qnas.find((x) => String(x.questionId) === am[1]);
+    if (!q || !body.commentContent) return send(400, { code: 'BAD_REQUEST', message: 'bad answer' });
+    q.answered = true;
+    q.answer = body.commentContent;
+    state.naver.calls.qnaAnswers.push({ questionId: am[1], ...body });
+    res.writeHead(200);
+    return res.end();
+  }
   return send(404, { code: 'NotFound', message: path });
 }
 
@@ -273,6 +306,12 @@ async function handleCoupang(state, req, res, url) {
       return { shipmentBoxId: `#${boxId}`, succeed: ok, resultCode: ok ? 'OK' : 'FAIL', retryRequired: false, resultMessage: ok ? '' : `상품준비중 상태가 아님/택배사 오류 (${s?.status})` };
     });
     return send(200, { code: 200, message: 'OK', data: { responseCode: list.every((x) => x.succeed) ? 0 : 99, responseMessage: 'done', responseList: list } });
+  }
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v5\/vendors\/([^/]+)\/onlineInquiries$/)) && req.method === 'GET') {
+    const s = url.searchParams;
+    state.coupang.calls.inquiries.push(Object.fromEntries(s.entries()));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s.get('inquiryStartAt') || '') || s.get('vendorId') !== COUPANG.vendorId) return send(400, { code: 'ERROR', message: 'bad inquiry params' });
+    return send(200, { code: 200, message: 'OK', data: { content: state.coupang.inquiries, pagination: { currentPage: 1, totalPages: 1 } } });
   }
   return send(404, { code: 'ERROR', message: `no route ${req.method} ${url.pathname}` });
 }

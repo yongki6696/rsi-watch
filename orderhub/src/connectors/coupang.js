@@ -253,6 +253,9 @@ const meta = {
   short: 'C',
   color: '#e52528',
   beta: false,
+  inquiries: true,
+  answerable: false, // 답변은 Wing 에서
+  sellerCenter: 'https://wing.coupang.com/',
   fields: [
     { key: 'vendorId', label: '업체코드 (Vendor ID)', placeholder: '예) A00012345', required: true },
     { key: 'accessKey', label: 'Access Key', required: true },
@@ -309,6 +312,46 @@ module.exports = {
     }
     state.initialized = true;
     return { groups: [...sheets.values()].map(normalizeSheet), state };
+  },
+
+  // 상품별 고객문의 (베타 - 답변은 Wing 에서)
+  async fetchInquiries(ctx) {
+    const now = new Date();
+    const query = {
+      vendorId: ctx.creds.vendorId,
+      answeredType: 'ALL',
+      inquiryStartAt: kstDate(new Date(now.getTime() - 6 * 86400000)),
+      inquiryEndAt: kstDate(now),
+      pageSize: 50,
+      pageNum: 1,
+    };
+    let r;
+    try {
+      r = await api(ctx, 'GET', `${vendorPath('v5', ctx.creds.vendorId)}/onlineInquiries`, { query });
+    } catch (e) {
+      if (e.status !== 404 && e.status !== 400) throw e;
+      r = await api(ctx, 'GET', `${vendorPath('v4', ctx.creds.vendorId)}/onlineInquiries`, { query });
+    }
+    const list = Array.isArray(r?.data?.content) ? r.data.content : Array.isArray(r?.data) ? r.data : [];
+    return list.map((q) => {
+      const comments = q.commentDtoList || q.comments || q.answers || [];
+      const answered = (Array.isArray(comments) && comments.length > 0) || q.answeredType === 'ANSWERED' || q.answered === true;
+      const last = Array.isArray(comments) && comments.length ? comments[comments.length - 1] : null;
+      return {
+        key: `o-${str(q.inquiryId)}`,
+        kind: 'product',
+        category: '상품',
+        title: '',
+        content: str(q.content),
+        productName: str(q.sellerProductName) || str(q.productName) || str(q.vendorItemName),
+        orderNo: Array.isArray(q.orderIds) && q.orderIds.length ? str(q.orderIds[0]) : '',
+        writer: str(q.buyerEmail) || str(q.customerName),
+        askedAt: toIso(q.inquiryAt || q.createdAt),
+        answered,
+        answer: last ? str(last.content) : '',
+        extra: { inquiryId: str(q.inquiryId) },
+      };
+    });
   },
 
   async refresh(ctx, items) {

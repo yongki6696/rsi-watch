@@ -13,6 +13,7 @@ const { Db } = require('./src/db');
 const { Secrets } = require('./src/secrets');
 const { Auth, COOKIE } = require('./src/auth');
 const { OrderStore } = require('./src/orders');
+const { InquiryStore } = require('./src/inquiries');
 const { Notifier } = require('./src/notify');
 const { SyncEngine } = require('./src/sync');
 const { Actions } = require('./src/actions');
@@ -25,13 +26,14 @@ function createApp(cfg = config) {
   const secrets = new Secrets(cfg);
   const auth = new Auth(db, cfg);
   const orders = new OrderStore(db);
+  const inquiries = new InquiryStore(db);
   const notifier = new Notifier({ db, secrets, config: cfg });
-  const sync = new SyncEngine({ db, secrets, config: cfg, notifier, orders });
+  const sync = new SyncEngine({ db, secrets, config: cfg, notifier, orders, inquiries });
   const actions = new Actions({ db, orders, sync });
   sync.actions = actions;
 
   const router = new Router();
-  const app = { db, secrets, auth, orders, notifier, sync, actions, config: cfg, router };
+  const app = { db, secrets, auth, orders, inquiries, notifier, sync, actions, config: cfg, router };
   register(router, app);
 
   const publicDir = path.join(cfg.root, 'public');

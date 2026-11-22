@@ -43,7 +43,7 @@ function ids(body) {
 }
 
 function register(router, app) {
-  const { db, auth, orders, actions, sync, notifier, secrets, config } = app;
+  const { db, auth, orders, inquiries, actions, sync, notifier, secrets, config } = app;
 
   function storeView(s) {
     let maskedCreds = {};
@@ -196,6 +196,26 @@ function register(router, app) {
     return { ok: true };
   });
   router.post('/api/orders/:id/revert', (req) => actions.revert(req.params.id));
+
+  // ---------- 고객 문의 ----------
+  router.get('/api/inquiries', (req) => ({
+    inquiries: inquiries.list({ filter: req.query.filter === 'all' ? 'all' : 'open', storeId: req.query.store }),
+    counts: inquiries.counts(),
+  }));
+  router.post('/api/inquiries/:id/answer', async (req) => {
+    const q = inquiries.get(req.params.id);
+    if (!q) throw new HttpError(404, '문의를 찾을 수 없습니다');
+    const text = str(req.body?.text);
+    if (!text) throw new HttpError(400, '답변 내용을 입력해주세요');
+    if (text.length > 2000) throw new HttpError(400, '답변은 2000자 이내로 입력해주세요');
+    const store = db.get('SELECT * FROM stores WHERE id = ?', q.store_id);
+    const c = getConnector(store.type);
+    if (!c.answerable || !c.answerInquiry) throw new HttpError(400, `${c.label} 문의는 셀러센터에서 답변해주세요`);
+    await c.answerInquiry(sync.ctxFor(store), q, text);
+    inquiries.markAnswered(q.id, text);
+    db.addEvent({ storeId: store.id, type: 'inquiry', message: `문의 답변 등록: ${inquiries.describe(q).slice(0, 40)}` });
+    return { ok: true };
+  });
 
   // ---------- 스토어 ----------
   router.get('/api/stores', () => ({ stores: db.all('SELECT * FROM stores ORDER BY id').map(storeView) }));
