@@ -45,7 +45,16 @@ if [ -z "${CURRENT_DOMAIN}" ]; then
   CURRENT_DOMAIN="${DOMAIN_INPUT}"
 fi
 
-# 3) 방화벽 80/443 열기 (오라클 클라우드 우분투는 iptables 가 기본으로 막고 있음)
+# 3) 메모리가 작은 무료 서버(1GB)에서 설치 중 멈추지 않도록 스왑 2GB 추가
+TOTAL_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
+if [ "${TOTAL_MB:-0}" -lt 1800 ] && [ -z "$(swapon --show 2>/dev/null)" ]; then
+  say "메모리가 ${TOTAL_MB}MB 라서 스왑 2GB를 추가합니다"
+  fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
+  chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
+# 4) 방화벽 80/443 열기 (오라클 클라우드 우분투는 iptables 가 기본으로 막고 있음)
 say "방화벽에서 80, 443 포트 허용"
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
   ufw allow 80/tcp >/dev/null && ufw allow 443/tcp >/dev/null
@@ -57,7 +66,7 @@ if command -v iptables >/dev/null 2>&1; then
   if command -v netfilter-persistent >/dev/null 2>&1; then netfilter-persistent save >/dev/null 2>&1 || true; fi
 fi
 
-# 4) 실행
+# 5) 실행
 say "오더허브 빌드 및 실행 (처음엔 2~3분 걸립니다)"
 docker compose up -d --build
 
