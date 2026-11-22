@@ -119,7 +119,16 @@ function register(router, app) {
   // ---------- 기본 정보 ----------
   router.get('/api/meta', () => ({
     connectors: listConnectors(),
-    couriers: COURIERS.map((c) => ({ key: c.key, name: c.name, naver: !!c.naver, coupang: !!c.coupang, elevenst: !!c.elevenst })),
+    couriers: COURIERS.map((c) => ({
+      key: c.key,
+      name: c.name,
+      naver: !!c.naver,
+      coupang: !!c.coupang,
+      elevenst: !!c.elevenst,
+      gmarket: !!c.esm,
+      auction: !!c.esm,
+      lotteon: !!c.lotteon,
+    })),
     settings: getAppSettings(db),
     publicUrl: config.publicUrl,
     version: require('../package.json').version,
@@ -196,6 +205,7 @@ function register(router, app) {
     return { ok: true };
   });
   router.post('/api/orders/:id/revert', (req) => actions.revert(req.params.id));
+  router.post('/api/orders/:id/cancel-local', (req) => actions.cancelLocal(req.params.id));
 
   // ---------- 고객 문의 ----------
   router.get('/api/inquiries', (req) => ({

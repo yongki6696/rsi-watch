@@ -4,6 +4,7 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
 const bcrypt = require('bcryptjs');
+const { createEsmLotteonState, handleEsm, handleLotteon } = require('./mock-esm-lotteon');
 
 const NAVER = { clientId: 'naverClient', secret: '$2a$04$abcdefghijklmnopqrstuu' };
 const COUPANG = { vendorId: 'A00012345', accessKey: 'coupangAccess', secretKey: 'coupangSecret' };
@@ -416,10 +417,12 @@ async function handleNtfy(state, req, res) {
 }
 
 function startMock() {
-  const state = createState();
+  const state = { ...createState(), ...createEsmLotteonState() };
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     try {
+      if (url.pathname.startsWith('/shipping/')) return await handleEsm(state, req, res, url);
+      if (url.pathname.startsWith('/v1/openapi/')) return await handleLotteon(state, req, res, url);
       if (url.pathname.startsWith('/external/')) return await handleNaver(state, req, res, url);
       if (url.pathname.startsWith('/v2/providers/')) return await handleCoupang(state, req, res, url);
       if (url.pathname.startsWith('/rest/')) return handleEleven(state, req, res, url);

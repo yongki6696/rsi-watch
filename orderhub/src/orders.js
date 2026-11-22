@@ -1,7 +1,7 @@
 'use strict';
 // 주문 저장/병합 로직 (마켓 데이터 + 내 처리 상태)
 const { nowIso, safeJson, str, won } = require('./util');
-const { COURIERS } = require('./couriers');
+const { COURIERS, marketKey } = require('./couriers');
 
 // 내 처리 상태
 const STATUS = {
@@ -49,7 +49,7 @@ function marketSummary(items) {
 
 function findCourierByMarketCode(market, code, name) {
   if (code) {
-    const c = COURIERS.find((x) => x[market] === code);
+    const c = COURIERS.find((x) => x[marketKey(market)] === String(code));
     if (c) return c.key;
     return `CUSTOM:${code}`;
   }
@@ -101,8 +101,8 @@ class OrderStore {
       // 일부 정보만 있는 데이터(취소 목록 등)는 상태만 갱신
       if (existing) {
         this.db.run(
-          'UPDATE order_items SET market_state = ?, market_status = ?, claim = ?, updated_at = ? WHERE id = ?',
-          it.marketState || 'NEW',
+          'UPDATE order_items SET market_state = COALESCE(?, market_state), market_status = ?, claim = ?, updated_at = ? WHERE id = ?',
+          it.marketState || null,
           str(it.marketStatus),
           it.claim || null,
           ts,

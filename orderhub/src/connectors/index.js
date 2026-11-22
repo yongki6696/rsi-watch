@@ -2,9 +2,11 @@
 const naver = require('./naver');
 const coupang = require('./coupang');
 const elevenst = require('./elevenst');
+const { gmarket, auction } = require('./esm');
+const lotteon = require('./lotteon');
 const demo = require('./demo');
 
-const CONNECTORS = { naver, coupang, elevenst, demo };
+const CONNECTORS = { naver, coupang, elevenst, gmarket, auction, lotteon, demo };
 
 function getConnector(type) {
   const c = CONNECTORS[type];

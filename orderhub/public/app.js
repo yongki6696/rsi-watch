@@ -943,7 +943,29 @@ function renderOrderDetail(body, o) {
   );
 
   // 경고
-  if (o.claim && open) append(body, notice('err', h('b', null, `${CLAIM[o.claim]} 접수됨. `), o.status === 'NEW' ? '발주하지 말고 마켓 셀러센터에서 요청을 처리하세요.' : '이미 발주한 주문입니다. 공급처 주문 취소 가능 여부를 확인하고 셀러센터에서 처리하세요.'));
+  if (o.claim && open)
+    append(
+      body,
+      notice(
+        'err',
+        h('b', null, `${CLAIM[o.claim]} 접수됨. `),
+        o.status === 'NEW' ? '발주하지 말고 마켓 셀러센터에서 요청을 처리하세요. ' : '이미 발주한 주문입니다. 공급처 주문 취소 가능 여부를 확인하고 셀러센터에서 처리하세요. ',
+        h(
+          'button',
+          {
+            class: 'btn xs',
+            onclick: (e) =>
+              withBtn(e.currentTarget, async () => {
+                if (!confirm('마켓에서 취소된 것을 확인했나요?\n오더허브 목록에서 취소로 표시합니다. (마켓에는 아무것도 전송하지 않습니다)')) return;
+                await api('POST', `/api/orders/${o.id}/cancel-local`);
+                toast('취소된 주문으로 표시했습니다');
+                await afterAction();
+              }),
+          },
+          '취소된 주문으로 표시'
+        )
+      )
+    );
   if (o.status === 'CANCELED') append(body, notice('err', h('b', null, '취소된 주문입니다. '), o.purchased_at ? '공급처 발주를 취소했는지 꼭 확인하세요.' : ''));
   if (o.address_changed)
     append(body, 
@@ -1216,7 +1238,7 @@ async function renderStores() {
       'div',
       { class: 'card panel' },
       h('h2', null, icon('key', 'sm'), '마켓 API에 등록할 서버 IP'),
-      h('p', { class: 'desc' }, '스마트스토어·쿠팡·11번가는 등록된 IP에서만 API 호출을 허용합니다. 각 마켓의 API 설정에 아래 IP를 등록하세요.'),
+      h('p', { class: 'desc' }, '스마트스토어·쿠팡·11번가·G마켓·옥션·롯데ON 모두 등록된 IP에서만 API 호출을 허용합니다. 각 마켓의 API 설정에 아래 IP를 등록하세요.'),
       ipBox
     ),
     h('div', { class: 'btn-row', style: { margin: '4px 0 12px' } }, h('button', { class: 'btn primary', onclick: () => openAddStore() }, icon('plus', 'sm'), '스토어 연결'), h('button', { class: 'btn', onclick: () => syncNow() }, icon('refresh', 'sm'), '전체 지금 수집')),
@@ -1268,7 +1290,7 @@ function storeRow(s) {
     h(
       'div',
       { class: 'btn-row' },
-      h('button', { class: 'btn sm', onclick: (e) => withBtn(e.currentTarget, async () => toast((await api('POST', `/api/stores/${s.id}/test`)).message, 'ok')) }, icon('zap', 'sm'), '연결 테스트'),
+      h('button', { class: 'btn sm', onclick: (e) => withBtn(e.currentTarget, async () => showTestResult(await api('POST', `/api/stores/${s.id}/test`))) }, icon('zap', 'sm'), '연결 테스트'),
       h('button', { class: 'btn sm', onclick: (e) => withBtn(e.currentTarget, () => syncNow(s.id)) }, icon('refresh', 'sm'), '지금 수집'),
       c.fields.length ? h('button', { class: 'btn sm', onclick: () => openEditStore(s) }, icon('key', 'sm'), '키 변경') : null,
       h(
@@ -1288,6 +1310,22 @@ function storeRow(s) {
       )
     )
   );
+}
+
+// 베타 연동 진단 정보 (응답 구조) - 개발자에게 전달하기 쉽게 복사 버튼 제공
+function diagnosticBox(text) {
+  return h(
+    'details',
+    { class: 'raw', style: { marginBottom: '10px' } },
+    h('summary', null, '응답 구조 보기 (문제가 있을 때 개발자에게 전달)'),
+    h('pre', null, text),
+    h('button', { class: 'btn xs', onclick: () => copyText(text) }, icon('copy', 'sm'), '복사')
+  );
+}
+
+function showTestResult(r) {
+  if (!r.diagnostic) return toast(r.message, 'ok');
+  openSheet('연결 테스트 결과', (body) => append(body, h('div', { class: 'sec' }, notice('ok', r.message), diagnosticBox(r.diagnostic))));
 }
 
 function credFields(c, values = {}, { editing = false } = {}) {
@@ -1342,7 +1380,7 @@ function openAddStore() {
                 onclick: (e) =>
                   withBtn(e.currentTarget, async () => {
                     const r = await api('POST', '/api/stores/test', { type: c.type, credentials: creds.read() });
-                    result.replaceChildren(notice('ok', r.message));
+                    result.replaceChildren(notice('ok', r.message), r.diagnostic ? diagnosticBox(r.diagnostic) : '');
                   }),
               }, icon('zap', 'sm'), '연결 테스트')
             : null,

@@ -175,8 +175,13 @@ module.exports = {
 
   async test(ctx) {
     const now = new Date();
-    await api(ctx, `/ordservices/complete/${kstCompact(new Date(now.getTime() - 86400000))}/${kstCompact(now)}`);
-    return { ok: true, message: '11번가 연결 성공 (결제완료 주문 조회 권한 확인)' };
+    const xml = await api(ctx, `/ordservices/complete/${kstCompact(new Date(now.getTime() - 86400000))}/${kstCompact(now)}`);
+    const orders = parseList(xml, 'order');
+    return {
+      ok: true,
+      message: `11번가 연결 성공 · 최근 결제완료 주문 ${orders.length}건 확인`,
+      diagnostic: orders.length ? `order 필드: ${Object.keys(orders[0]).join(', ')}` : `응답: ${xml.replace(/\s+/g, ' ').slice(0, 300)}`,
+    };
   },
 
   async fetch(ctx) {

@@ -353,7 +353,7 @@ ol.steps li { margin: 4px 0; }
 .timeline .error { color: var(--danger); }
 .timeline .warn { color: var(--warn); }
 details.raw summary { cursor: pointer; color: var(--text-3); font-size: 13px; }
-details.raw pre { max-height: 300px; overflow: auto; font-size: 11.5px; background: var(--surface-2); padding: 10px; border-radius: 10px; }
+details.raw pre { max-height: 300px; overflow: auto; font-size: 11.5px; background: var(--surface-2); padding: 10px; border-radius: 10px; white-space: pre-wrap; word-break: break-all; }
 
 /* ---------- 스토어 ---------- */
 .ip-card { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

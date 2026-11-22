@@ -38,6 +38,10 @@ const config = {
   naverApiBase: env.NAVER_API_BASE || 'https://api.commerce.naver.com/external',
   coupangApiBase: env.COUPANG_API_BASE || 'https://api-gateway.coupang.com',
   elevenstApiBase: env.ELEVENST_API_BASE || 'https://api.11st.co.kr/rest',
+  esmApiBase: env.ESM_API_BASE || 'https://sa2.esmplus.com',
+  lotteonApiBase: env.LOTTEON_API_BASE || 'https://openapi.lotteon.com',
+  // G마켓·옥션 주문조회 호출 간격(ms) - 마켓 정책: 판매자 ID별 5초당 1회
+  esmOrderIntervalMs: env.ESM_ORDER_INTERVAL_MS !== undefined ? Number(env.ESM_ORDER_INTERVAL_MS) : 5200,
   telegramApiBase: env.TELEGRAM_API_BASE || 'https://api.telegram.org',
   disableScheduler: env.DISABLE_SCHEDULER === 'true',
   logLevel: env.LOG_LEVEL || 'info',

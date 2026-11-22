@@ -134,6 +134,15 @@ class Actions {
     return { ok: true, status: to };
   }
 
+  // 마켓에서 취소된 것을 확인한 주문을 내 목록에서 취소로 표시 (마켓에는 아무것도 보내지 않음)
+  cancelLocal(id) {
+    const o = this.load(id);
+    if (!['NEW', 'PURCHASED', 'INVOICED'].includes(o.status)) throw new HttpError(400, `${STATUS[o.status]} 상태는 취소로 표시할 수 없습니다`);
+    this.db.run(`UPDATE orders SET status = 'CANCELED', claim = NULL, updated_at = ? WHERE id = ?`, nowIso(), o.id);
+    this.event(o, '취소된 주문으로 표시 (내 목록에서만 처리)');
+    return { ok: true, status: 'CANCELED' };
+  }
+
   update(id, input = {}) {
     const o = this.load(id);
     const map = { supplier: 'supplier', supplierOrderNo: 'supplier_order_no', memo: 'memo' };
