@@ -84,7 +84,7 @@ function createApp(cfg = config) {
       const isBug = e instanceof TypeError || e instanceof ReferenceError || e instanceof SyntaxError || e instanceof RangeError || /^ERR_/.test(e.code || '');
       const status = e instanceof HttpError ? e.status : isBug ? 500 : 400;
       if (status >= 500) console.error('[api]', req.method, pathname, e);
-      if (!res.headersSent) sendJson(res, status, { error: e.message || '서버 오류' });
+      if (!res.headersSent) sendJson(res, status, { error: e.message || '서버 오류', ...(e.diagnostic ? { diagnostic: String(e.diagnostic) } : {}) });
     }
   };
 

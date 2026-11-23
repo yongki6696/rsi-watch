@@ -157,7 +157,7 @@ async function api(method, path, body) {
     renderAuth(false);
     throw new Error('로그인이 필요합니다');
   }
-  if (!res.ok) throw new Error((data && data.error) || `오류가 발생했습니다 (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error((data && data.error) || `오류가 발생했습니다 (${res.status})`), { data });
   return data;
 }
 
@@ -1878,7 +1878,7 @@ function storeRow(s) {
     h(
       'div',
       { class: 'btn-row' },
-      h('button', { class: 'btn sm', onclick: (e) => withBtn(e.currentTarget, async () => showTestResult(await api('POST', `/api/stores/${s.id}/test`))) }, icon('zap', 'sm'), '연결 테스트'),
+      h('button', { class: 'btn sm', onclick: async (e) => { const r = await runStoreTest(e.currentTarget, `/api/stores/${s.id}/test`); if (r) showTestResult(r); } }, icon('zap', 'sm'), '연결 테스트'),
       h('button', { class: 'btn sm', onclick: (e) => withBtn(e.currentTarget, () => syncNow(s.id)) }, icon('refresh', 'sm'), '지금 수집'),
       c.fields.length ? h('button', { class: 'btn sm', onclick: () => openEditStore(s) }, icon('key', 'sm'), '키 변경') : null,
       h(
@@ -1914,6 +1914,33 @@ function diagnosticBox(text) {
 function showTestResult(r) {
   if (!r.diagnostic) return toast(r.message, 'ok');
   openSheet('연결 테스트 결과', (body) => append(body, h('div', { class: 'sec' }, notice('ok', r.message), diagnosticBox(r.diagnostic))));
+}
+
+// 연결 테스트 실패: 오류 내용과 진단 정보를 창으로 보여줌 (복사·캡처해서 전달하기 쉽게)
+function testFailureBox(e) {
+  const diag = e.data?.diagnostic;
+  return h(
+    'div',
+    null,
+    notice('err', h('b', null, '연결 실패 '), e.message),
+    diag ? h('pre', { class: 'pre small', style: { background: 'var(--surface-2)', padding: '10px', borderRadius: '10px', margin: '0 0 10px' } }, diag) : '',
+    h('button', { class: 'btn xs', onclick: () => copyText(`${e.message}${diag ? `\n\n${diag}` : ''}`) }, icon('copy', 'sm'), '오류 내용 복사')
+  );
+}
+
+async function runStoreTest(btn, path, body, onFail) {
+  btn.disabled = true;
+  btn.classList.add('loading');
+  try {
+    return await api('POST', path, body);
+  } catch (e) {
+    if (onFail) onFail(e);
+    else openSheet('연결 테스트 결과', (b) => append(b, h('div', { class: 'sec' }, testFailureBox(e))));
+    return null;
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+  }
 }
 
 function credFields(c, values = {}, { editing = false } = {}) {
@@ -1965,11 +1992,10 @@ function openAddStore() {
           c.fields.length
             ? h('button', {
                 class: 'btn',
-                onclick: (e) =>
-                  withBtn(e.currentTarget, async () => {
-                    const r = await api('POST', '/api/stores/test', { type: c.type, credentials: creds.read() });
-                    result.replaceChildren(notice('ok', r.message), r.diagnostic ? diagnosticBox(r.diagnostic) : '');
-                  }),
+                onclick: async (e) => {
+                  const r = await runStoreTest(e.currentTarget, '/api/stores/test', { type: c.type, credentials: creds.read() }, (err) => result.replaceChildren(testFailureBox(err)));
+                  if (r) result.replaceChildren(notice('ok', r.message), r.diagnostic ? diagnosticBox(r.diagnostic) : '');
+                },
               }, icon('zap', 'sm'), '연결 테스트')
             : null,
           h('button', {

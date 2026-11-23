@@ -2,6 +2,9 @@
 // 11번가 - 셀러 Open API (https://openapi.11st.co.kr)
 // 인증: 요청 헤더 openapikey / 응답: XML (EUC-KR)
 // 주문 수집: 결제완료(발주확인할 내역) / 배송준비중(발송처리할 내역) / 취소요청 목록
+const net = require('node:net');
+const tls = require('node:tls');
+const nodeHttp = require('node:http');
 const { request, decodeText } = require('./http');
 const { kstCompact, toIso, toInt, str, sleep } = require('../util');
 const { courierCode } = require('../couriers');
@@ -84,6 +87,57 @@ async function api(ctx, path, attempt = 0) {
     throw new Error(`11번가 API 오류 (${r.code}): ${r.text || '알 수 없는 오류'}`);
   }
   return xml;
+}
+
+// 연결이 끊길 때 어느 단계에서 막히는지 확인 (키는 보내지 않음)
+function probeTcp(host, port) {
+  return new Promise((resolve) => {
+    const s = net.connect({ host, port, timeout: 8000 });
+    s.on('connect', () => (s.destroy(), resolve('연결됨')));
+    s.on('timeout', () => (s.destroy(), resolve('시간 초과')));
+    s.on('error', (e) => resolve(`실패 (${e.code || e.message})`));
+  });
+}
+function probeTls(host, port) {
+  return new Promise((resolve) => {
+    const s = tls.connect({ host, port, servername: host, timeout: 8000 }, () => {
+      const r = `성공 (${s.getProtocol()}, ${s.getCipher()?.name || '?'})`;
+      s.destroy();
+      resolve(r);
+    });
+    s.on('timeout', () => (s.destroy(), resolve('시간 초과')));
+    s.on('error', (e) => resolve(`실패 (${e.code || e.message})`));
+  });
+}
+function probeHttp(host, port, path) {
+  return new Promise((resolve) => {
+    const req = nodeHttp.request({ host, port, path, method: 'GET', timeout: 8000 }, (r) => {
+      r.resume();
+      resolve(`응답 있음 (HTTP ${r.statusCode})`);
+    });
+    req.on('timeout', () => (req.destroy(), resolve('시간 초과')));
+    req.on('error', (e) => resolve(`실패 (${e.code || e.message})`));
+    req.end();
+  });
+}
+async function connectionReport(baseUrl) {
+  const u = new URL(baseUrl);
+  const host = u.hostname;
+  const lines = [`대상: ${host}`];
+  if (u.protocol === 'https:') {
+    const port = Number(u.port) || 443;
+    const tcp = await probeTcp(host, port);
+    lines.push(`① 서버 연결(TCP ${port}): ${tcp}`);
+    const tlsr = tcp === '연결됨' ? await probeTls(host, port) : '건너뜀';
+    lines.push(`② 보안 연결(TLS): ${tlsr}`);
+    lines.push(`③ HTTP 80 (키 없이): ${await probeHttp(host, 80, '/rest/')}`);
+    if (tcp !== '연결됨') lines.push('→ 11번가 서버까지 연결 자체가 안 됩니다. IP 차단 또는 네트워크 문제입니다.');
+    else if (!tlsr.startsWith('성공')) lines.push('→ 보안 연결 단계에서 끊깁니다. 11번가 방화벽이 이 서버 IP를 막고 있을 가능성이 큽니다.');
+    else lines.push('→ 연결은 되지만 API 요청을 보내면 끊깁니다. 11번가가 IP를 확인하고 막은 것입니다 (IP 등록이 아직 반영되지 않음).');
+  } else {
+    lines.push(`서버 연결(TCP ${Number(u.port) || 80}): ${await probeTcp(host, Number(u.port) || 80)}`);
+  }
+  return lines.join('\n');
 }
 
 const pick = (o, ...keys) => {
@@ -189,7 +243,13 @@ module.exports = {
 
   async test(ctx) {
     const now = new Date();
-    const xml = await api(ctx, `/ordservices/complete/${kstCompact(new Date(now.getTime() - 86400000))}/${kstCompact(now)}`);
+    let xml;
+    try {
+      xml = await api(ctx, `/ordservices/complete/${kstCompact(new Date(now.getTime() - 86400000))}/${kstCompact(now)}`);
+    } catch (e) {
+      if (e.network) e.diagnostic = await connectionReport(ctx.config.elevenstApiBase).catch((x) => `진단 실패: ${x.message}`);
+      throw e;
+    }
     const orders = parseList(xml, 'order');
     return {
       ok: true,

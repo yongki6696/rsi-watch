@@ -112,6 +112,12 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     // IP 미등록이면 11번가가 연결을 끊음 → 원인과 해결 방법 안내
     mock.state.eleven.reset = true;
     await assert.rejects(call('POST', '/api/stores/test', { type: 'elevenst', credentials: ELEVEN }), (e) => e.status === 400 && /11번가가 이 서버의 접속을 막았습니다/.test(e.message) && /상용서버 IP/.test(e.message));
+    // 연결 테스트 실패 응답에는 단계별 진단 정보가 함께 옴
+    const diagRes = await call('POST', '/api/stores/test', { type: 'elevenst', credentials: ELEVEN }, { raw: true });
+    const diagBody = await diagRes.json();
+    assert.equal(diagRes.status, 400);
+    assert.match(diagBody.diagnostic, /대상: 127\.0\.0\.1/);
+    assert.match(diagBody.diagnostic, /서버 연결\(TCP \d+\): 연결됨/);
     mock.state.eleven.reset = false;
     const te = await call('POST', '/api/stores/test', { type: 'elevenst', credentials: ELEVEN });
     assert.equal(te.ok, true);

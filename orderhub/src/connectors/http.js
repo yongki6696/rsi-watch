@@ -55,7 +55,7 @@ async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 30
   try {
     res = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(timeoutMs) });
   } catch (e) {
-    const reason = e?.cause?.code || e?.name || e?.message;
+    const reason = e?.cause?.code || e?.cause?.message || e?.name || e?.message;
     const err = new Error(`마켓 서버에 연결하지 못했습니다 (${reason})`);
     err.network = true;
     throw err;
