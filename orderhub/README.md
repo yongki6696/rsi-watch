@@ -281,8 +281,8 @@ G마켓과 옥션은 ESM PLUS의 같은 API를 씁니다. **오더허브에는 G
 - **자동 업데이트**: 새 버전이 GitHub 에 올라오면 **5분 안에 서버가 알아서 받아서 적용**합니다 (데이터는 그대로 유지, 앱 화면도 자동으로 새로 고침).
   빌드에 실패하거나 새 버전이 정상 시작되지 않으면 이전 버전으로 되돌립니다. 기록: 서버의 `/var/log/orderhub-update.log`
   - 새로 설치한 서버는 처음부터 켜져 있습니다.
-  - 예전에 설치한 서버는 오라클 Cloud Shell(휴대폰 Safari에서도 됨)에서 **한 번만** 실행:
-    `ssh -i ~/.ssh/orderhub -o StrictHostKeyChecking=accept-new ubuntu@서버IP "cd /opt/rsi-watch/orderhub && sudo git pull && sudo bash scripts/enable-auto-update.sh"`
+  - 예전에 설치한 서버는 오라클 Cloud Shell(휴대폰 Safari에서도 됨)에서 **한 번만** 아래 4줄을 차례로 입력 (휴대폰은 붙여넣기가 안 될 수 있어 짧게 나눴습니다):
+    `ssh -i ~/.ssh/orderhub ubuntu@서버IP` (처음이면 yes 입력) → `cd /opt/rsi-watch/orderhub` → `sudo git pull` → `sudo bash up.sh`
   - 끄기: `sudo systemctl disable --now orderhub-update.timer` / 직접 업데이트: `git pull && docker compose up -d --build`
 - **백업**: `docker compose cp app:/app/data ./backup-$(date +%Y%m%d)` (주문 DB와 암호화 키가 함께 백업됩니다)
 - **수집 주기·자동 발주확인·기본 택배사**: [설정] 화면
