@@ -357,6 +357,8 @@ function elevenXml(orders) {
 }
 
 function handleEleven(state, req, res, url) {
+  // 등록되지 않은 IP처럼: 응답 없이 연결을 끊음
+  if (state.eleven.reset) return req.socket.destroy();
   const sendXml = (status, buf) => {
     res.writeHead(status, { 'Content-Type': 'text/xml' }); // charset 없음 → XML 선언(euc-kr)으로 판단해야 함
     res.end(buf);

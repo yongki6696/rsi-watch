@@ -52,10 +52,23 @@ const ERROR_CODES = new Set(['-1', '2', '1000', '-1000']);
 async function api(ctx, path, attempt = 0) {
   const key = ctx.creds.apiKey;
   if (!key) throw new Error('11번가 Open API Key를 입력해주세요');
-  const res = await request(ctx.config.elevenstApiBase + path, {
-    method: 'GET',
-    headers: { openapikey: key, Accept: 'application/xml, text/xml' },
-  });
+  let res;
+  try {
+    res = await request(ctx.config.elevenstApiBase + path, {
+      method: 'GET',
+      headers: { openapikey: key, Accept: 'application/xml, text/xml' },
+    });
+  } catch (e) {
+    // 11번가는 등록되지 않은 IP의 접속을 연결 단계에서 끊어버림 (HTTP 오류가 아니라 연결 끊김으로 나타남)
+    if (e.network && /ECONNRESET|UND_ERR_SOCKET|ETIMEDOUT|CONNECT_TIMEOUT|ECONNREFUSED|EPIPE|TimeoutError/i.test(e.message)) {
+      const err = new Error(
+        `11번가가 이 서버의 접속을 막았습니다 (등록되지 않은 IP일 때 나타납니다). 11번가 OPEN API CENTER → API 관리 → 'IP 직접 입력'의 개발서버 IP·개발자 PC·상용서버 IP 세 칸 모두에 [스토어] 화면 맨 위의 서버 IP를 띄어쓰기 없이 세미콜론(;)으로 이어 적고(예: 1.2.3.4;5.6.7.8) [수정하기]를 눌러주세요. 반영까지 시간이 걸릴 수 있습니다. (${e.message})`
+      );
+      err.network = true;
+      throw err;
+    }
+    throw e;
+  }
   const xml = decodeText(res.buffer, res.headers, 'euc-kr');
   if (res.status === 429 && attempt < 3) {
     await sleep(1500 * (attempt + 1));
@@ -163,8 +176,9 @@ const meta = {
   sellerCenter: 'https://soffice.11st.co.kr/',
   fields: [{ key: 'apiKey', label: 'Open API Key', required: true, secret: true }],
   guide: [
-    '11번가 셀러오피스 → [판매자 정보] 또는 Open API 센터(openapi.11st.co.kr)에서 Open API Key를 발급받습니다.',
-    'API 사용 서버 IP 등록 메뉴가 있으면 아래 표시된 이 서버의 IP를 등록합니다.',
+    '11번가 OPEN API CENTER(openapi.11st.co.kr) → API 관리에서 API KEY를 확인합니다. (샵모아 등에서 쓰는 키를 그대로 써도 됩니다)',
+    "같은 화면 'IP 직접 입력'의 개발서버 IP·개발자 PC·상용서버 IP 세 칸 모두에 아래 표시된 이 서버의 IP를 추가하고 [수정하기]를 누릅니다. 이미 다른 IP가 있으면 띄어쓰기 없이 세미콜론(;)으로 이어 적습니다. 예) 1.2.3.4;5.6.7.8",
+    '11번가는 IP가 등록되지 않으면 접속 자체를 끊습니다. 등록 후 반영까지 시간이 걸릴 수 있습니다.',
     '발급받은 Open API Key를 아래에 입력하고 [연결 테스트]를 누릅니다.',
     '11번가 연동은 베타입니다. 처음 며칠은 셀러오피스 화면과 수집 결과를 함께 확인해주세요.',
   ],

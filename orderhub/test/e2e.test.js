@@ -109,6 +109,10 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     assert.equal(tn.ok, true);
     const tc = await call('POST', '/api/stores/test', { type: 'coupang', credentials: COUPANG });
     assert.equal(tc.ok, true);
+    // IP 미등록이면 11번가가 연결을 끊음 → 원인과 해결 방법 안내
+    mock.state.eleven.reset = true;
+    await assert.rejects(call('POST', '/api/stores/test', { type: 'elevenst', credentials: ELEVEN }), (e) => e.status === 400 && /11번가가 이 서버의 접속을 막았습니다/.test(e.message) && /상용서버 IP/.test(e.message));
+    mock.state.eleven.reset = false;
     const te = await call('POST', '/api/stores/test', { type: 'elevenst', credentials: ELEVEN });
     assert.equal(te.ok, true);
 
