@@ -100,6 +100,17 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     const g = await call('POST', '/api/stores/test', { type: 'gmarket', credentials: { masterId: ESM.masterId, sellerId: ESM.gmarketId, secretKey: ESM.secretKey } });
     assert.match(g.message, /G마켓 연결 성공/);
     assert.match(g.diagnostic, /RequestOrders:\[\] \(0건\)/);
+    // 롯데ON 방화벽이 Node 기본 요청을 막는 경우 → 일반 HTTP 요청으로 다시 시도해서 성공
+    lotteon._internal.rawMode.clear();
+    mock.state.lotteon.block = 'node';
+    const viaRaw = await call('POST', '/api/stores/test', { type: 'lotteon', credentials: LOTTEON });
+    assert.equal(viaRaw.ok, true);
+    assert.ok(mock.state.lotteon.uas.some((u) => /OrderHub\//.test(u)));
+    // IP 미등록처럼 모두 막히면 해결 방법과 원인 파악용 정보를 보여줌
+    mock.state.lotteon.block = 'all';
+    await assert.rejects(call('POST', '/api/stores/test', { type: 'lotteon', credentials: LOTTEON }), (e) => /롯데ON 접속 거부\(403\)/.test(e.message) && /키발급/.test(e.message) && /server=nginx/.test(e.message));
+    mock.state.lotteon.block = null;
+    lotteon._internal.rawMode.clear();
     const l = await call('POST', '/api/stores/test', { type: 'lotteon', credentials: LOTTEON });
     assert.match(l.message, /롯데ON 연결 성공/);
     assert.match(l.diagnostic, /orders: .*progress: /);

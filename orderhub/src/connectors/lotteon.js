@@ -3,7 +3,7 @@
 // 인증: Authorization: Bearer {인증키} (판매자센터 > 판매자정보 > OpenAPI 관리, 서버 IP 등록 필요)
 // 주문진행단계(odPrgsStepCd): 11 출고지시, 12 상품준비, 13 발송완료, 14 배송완료, 15 수취완료, 21 취소완료 …
 // 발주확인/발송처리: 배송상태 통보(SellerDeliveryProgressStateInform) - 12 상품준비 / 13 발송완료(+택배사·송장)
-const { request, parseJsonBig } = require('./http');
+const { request, requestRaw, parseJsonBig } = require('./http');
 const { pick, findArray, findCustomsCode, shape } = require('./fields');
 const { kstParts, toIso, toInt, str } = require('../util');
 const { courierCode } = require('../couriers');
@@ -47,6 +47,30 @@ function resultMessage(json) {
   return str(json?.message ?? json?.returnMessage ?? json?.resultMessage ?? json?.rsltMsg ?? json?.msg ?? '');
 }
 
+const UA = `Mozilla/5.0 (compatible; OrderHub/${require('../../package.json').version})`;
+const rawMode = new Set(); // 인증키별: Node 기본 요청이 막히고 일반 HTTP 요청이 통한 경우
+
+// 롯데ON 방화벽이 Node 기본 요청을 막는 경우(403)에 대비해 한 번은 일반 HTTP 요청으로 다시 시도
+async function send(url, opts, key) {
+  const raw = () => requestRaw(url, { ...opts, headers: { ...opts.headers, 'User-Agent': UA } });
+  if (rawMode.has(key)) return raw();
+  const res = await request(url, opts);
+  if (res.status !== 403) return res;
+  const alt = await raw();
+  if (alt.status !== 403) rawMode.add(key);
+  return alt;
+}
+
+// 원인 파악용: 어느 단계(방화벽/게이트웨이/앱)에서 막혔는지 알 수 있는 응답 헤더
+function headerHint(res) {
+  const names = ['server', 'via', 'x-cache', 'x-amzn-errortype', 'x-amz-apigw-id', 'x-amzn-requestid', 'cf-ray', 'x-request-id', 'content-type'];
+  return names
+    .map((n) => [n, res.headers?.get?.(n)])
+    .filter(([, v]) => v)
+    .map(([n, v]) => `${n}=${String(v).slice(0, 40)}`)
+    .join(', ');
+}
+
 async function api(ctx, path, body) {
   const key = str(ctx.creds?.apiKey);
   if (!key) throw new Error('롯데ON OpenAPI 인증키를 입력해주세요');
@@ -57,11 +81,11 @@ async function api(ctx, path, body) {
     'X-Timezone': 'GMT+09:00',
     'Content-Type': 'application/json',
   };
-  let res = await request(ctx.config.lotteonApiBase + path, { method: 'POST', headers, body: JSON.stringify(body || {}) });
+  let res = await send(ctx.config.lotteonApiBase + path, { method: 'POST', headers, body: JSON.stringify(body || {}) }, key);
   if (res.status === 405) {
     // 조회 API 가 GET 방식인 경우
     const qs = new URLSearchParams(Object.entries(body || {}).map(([k, v]) => [k, String(v)])).toString();
-    res = await request(`${ctx.config.lotteonApiBase}${path}${qs ? `?${qs}` : ''}`, { method: 'GET', headers });
+    res = await send(`${ctx.config.lotteonApiBase}${path}${qs ? `?${qs}` : ''}`, { method: 'GET', headers }, key);
   }
   const text = res.buffer.toString('utf8');
   let json = null;
@@ -69,7 +93,12 @@ async function api(ctx, path, body) {
     json = text ? parseJsonBig(text) : null;
   } catch {}
   if (res.status === 401 || res.status === 403) {
-    throw Object.assign(new Error(`롯데ON 인증 실패: 인증키와 OpenAPI 관리에 등록한 서버 IP(예: 1.2.3.4/32)를 확인해주세요. (HTTP ${res.status} ${resultMessage(json) || text.slice(0, 120)})`), { status: res.status });
+    const detail = [`HTTP ${res.status}`, resultMessage(json) || text.trim().slice(0, 120) || '응답 내용 없음', headerHint(res)].filter(Boolean).join(' · ');
+    const msg =
+      res.status === 401
+        ? `롯데ON 인증 실패: 인증키가 올바르지 않습니다. 스토어센터 > 판매자정보 > OpenAPI 관리의 인증키를 [복사]해서 [키 변경]으로 다시 넣어주세요.`
+        : `롯데ON 접속 거부(403): 롯데ON이 이 서버의 호출을 막았습니다. 스토어센터 > 판매자정보 > OpenAPI 관리에서 ① 서버 IP 칸에 [스토어] 화면 맨 위의 서버 IP가 있는지 확인하고 [저장하기] ② [키발급]으로 새 인증키를 받아 오더허브 [키 변경]에 넣어주세요. (기존 키는 샵모아 등 다른 프로그램용으로 그대로 두세요)`;
+    throw Object.assign(new Error(`${msg} (${detail})`), { status: res.status });
   }
   if (!res.ok) throw Object.assign(new Error(`롯데ON API 오류 (HTTP ${res.status}) ${path}: ${resultMessage(json) || text.slice(0, 200)}`), { status: res.status });
   const code = resultCode(json);
@@ -235,9 +264,9 @@ module.exports = {
   sellerCenter: 'https://store.lotteon.com/',
   fields: [{ key: 'apiKey', label: 'OpenAPI 인증키', placeholder: '판매자센터에서 발급받은 인증키', required: true, secret: true }],
   guide: [
-    '롯데ON 파트너(판매자)센터 로그인 → 판매자정보 → OpenAPI 관리 → [키 발급]을 누릅니다.',
-    '허용 IP에 아래 표시된 이 서버의 IP를 CIDR 형식으로 등록합니다. 예) 1.2.3.4/32',
-    '발급된 인증키를 아래에 입력하고 [연결 테스트]를 누릅니다. (인증키 유효기간은 1년입니다)',
+    '롯데ON 스토어센터 로그인 → 판매자정보 → OpenAPI 관리로 이동합니다.',
+    "'서버 IP 등록' 칸에 아래 표시된 이 서버의 IP를 추가하고 [저장하기]를 누릅니다. 이미 다른 IP가 있으면 뒤에 세미콜론(;)을 붙여 이어서 적습니다. 예) 1.2.3.4;5.6.7.8",
+    'IP를 저장한 뒤 [키발급]으로 새 인증키를 받아 아래에 입력하고 [연결 테스트]를 누릅니다. (다른 프로그램이 쓰는 기존 키는 그대로 두세요. 인증키는 3개까지, 유효기간 1년)',
     '베타 연동입니다. 연결 테스트 결과에 표시되는 응답 구조를 알려주시면 더 정확하게 맞출 수 있습니다.',
   ],
 
@@ -283,5 +312,5 @@ module.exports = {
     return inform(ctx, items, '13', { invcNbr: 1, dvCoCd: code, invcNo: String(trackingNo).trim() });
   },
 
-  _internal: { normalizeItem, toGroups, dttm, STEP },
+  _internal: { normalizeItem, toGroups, dttm, STEP, rawMode },
 };

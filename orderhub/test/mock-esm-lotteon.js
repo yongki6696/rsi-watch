@@ -155,6 +155,14 @@ async function handleLotteon(state, req, res, url) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(obj));
   };
+  // 방화벽 흉내: 'node' = Node 기본 요청만 차단, 'all' = IP 미등록처럼 전부 차단 (빈 응답 403)
+  const ua = req.headers['user-agent'] || '';
+  const blocked = state.lotteon.block === 'all' || (state.lotteon.block === 'node' && (ua === 'node' || req.headers['sec-fetch-mode']));
+  (state.lotteon.uas ||= []).push(ua);
+  if (blocked) {
+    res.writeHead(403, { Server: 'nginx' });
+    return res.end();
+  }
   if (req.headers.authorization !== `Bearer ${LOTTEON.apiKey}`) return send(401, { returnCode: '401', message: 'Unauthorized' });
   const raw = await readBody(req);
   const body = raw ? JSON.parse(raw) : {};
