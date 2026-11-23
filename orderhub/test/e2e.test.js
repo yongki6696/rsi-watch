@@ -141,6 +141,10 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     assert.equal(el.items[0].product_name, '무선 마우스');
     assert.equal(el.address2, '101동 202호');
 
+    // 첫 수집으로 가져온 주문은 메뉴 숫자(안 본 신규주문)에 넣지 않음
+    assert.equal((await call('GET', '/api/orders?tab=all')).unseen, 0);
+    assert.equal((await call('GET', '/api/sync/status')).unseen, 0);
+
     // 첫 수집은 개별 신규주문 알림 없이 '연결 완료' 요약만
     const newTexts = tgTexts().slice(before);
     assert.ok(newTexts.some((x) => /연결 완료/.test(x)));
@@ -168,6 +172,25 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     // 같은 주문을 다시 수집해도 중복 알림 없음
     const again = await call('POST', '/api/sync', {});
     assert.equal(again.newOrders, 0);
+
+    // [주문] 메뉴 숫자 = 아직 확인하지 않은 신규주문. 클레임은 포함하지 않음
+    assert.equal((await call('GET', '/api/sync/status')).unseen, 2);
+    const listAll = await call('GET', '/api/orders?tab=all');
+    assert.equal(listAll.unseen, 2);
+    const fresh = listAll.orders.filter((o) => o.status === 'NEW' && !o.seen_at);
+    assert.deepEqual(fresh.map((o) => o.receiver_name).sort(), ['박쿠팡', '신규자'].sort());
+    // 주문 상세를 열면 그 주문만 확인
+    const one = fresh.find((o) => o.receiver_name === '신규자');
+    assert.equal((await call('POST', '/api/orders/seen', { ids: [one.id] })).unseen, 1);
+    // 다른 스토어 목록만 본 경우에는 그 스토어 것만 확인
+    const listNew = await call('GET', `/api/orders?tab=new&store=${one.store_id}`);
+    assert.equal(listNew.unseenHere, 0);
+    assert.equal((await call('POST', '/api/orders/seen', { upTo: listNew.maxId, store: one.store_id })).unseen, 1);
+    // 신규주문 목록을 보면 그때까지 들어온 주문 모두 확인 → 0
+    const listNew2 = await call('GET', '/api/orders?tab=new');
+    assert.equal(listNew2.unseenHere, 1);
+    assert.equal((await call('POST', '/api/orders/seen', { upTo: listNew2.maxId })).unseen, 0);
+    assert.equal((await call('GET', '/api/sync/status')).unseen, 0);
   });
 
   await t.test('쿠팡: 발주완료 → 상품준비중(큰 ID 그대로 전송) → 송장 업로드', async () => {

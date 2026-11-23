@@ -209,6 +209,7 @@ const S = {
   sales: null,
   salesPrefs: null,
   backfill: null,
+  unseen: 0, // 아직 확인하지 않은 신규주문 수
 };
 
 const STATUS = { NEW: '신규주문', PURCHASED: '발주완료', INVOICED: '송장입력', SHIPPED: '발송완료', DELIVERED: '배송완료', CANCELED: '취소', RETURNED: '반품' };
@@ -380,6 +381,10 @@ async function refreshSync() {
   try {
     S.sync = await api('GET', '/api/sync/status');
     paintSync();
+    if (typeof S.sync.unseen === 'number') {
+      S.unseen = S.sync.unseen;
+      paintBadge();
+    }
   } catch {}
 }
 
@@ -450,15 +455,28 @@ function paintCounts() {
       el.classList.toggle('hot', key === 'claim' && n > 0);
     }
   }
-  const pending = (c.new || 0) + (c.claimOpen || 0);
+  paintBadge();
+}
+
+// [주문] 메뉴·앱 아이콘 숫자 = 새로 들어왔는데 아직 확인하지 않은 신규주문 (확인하면 사라짐)
+function paintBadge() {
+  const n = S.unseen || 0;
   const nb = $('#navBadge');
   if (nb) {
-    nb.textContent = String(pending);
-    nb.classList.toggle('hidden', !pending);
+    nb.textContent = String(n);
+    nb.classList.toggle('hidden', !n);
   }
-  document.title = c.new ? `(${c.new}) 오더허브` : '오더허브';
+  document.title = n ? `(${n}) 오더허브` : '오더허브';
   try {
-    if (navigator.setAppBadge) c.new ? navigator.setAppBadge(c.new) : navigator.clearAppBadge();
+    if (navigator.setAppBadge) n ? navigator.setAppBadge(n) : navigator.clearAppBadge();
+  } catch {}
+}
+
+async function markSeen(body) {
+  try {
+    const r = await api('POST', '/api/orders/seen', body);
+    S.unseen = r.unseen;
+    paintBadge();
   } catch {}
 }
 
@@ -531,6 +549,7 @@ async function loadOrders({ silent = false, append: more = false } = {}) {
     if (S.store) qs.set('store', S.store);
     const r = await api('GET', `/api/orders?${qs}`);
     S.counts = r.counts;
+    S.unseen = r.unseen;
     S.total = r.total;
     S.orders = more ? S.orders.concat(r.orders) : r.orders;
     // 사라진 주문은 선택 해제
@@ -538,6 +557,8 @@ async function loadOrders({ silent = false, append: more = false } = {}) {
     for (const id of [...S.selected]) if (!ids.has(id)) S.selected.delete(id);
     paintCounts();
     paintList();
+    // 신규주문 목록을 봤으면 지금까지 들어온 주문은 확인한 것으로 (검색 중일 때는 제외)
+    if (S.tab === 'new' && !S.q && r.unseenHere > 0 && document.visibilityState === 'visible') markSeen({ upTo: r.maxId, store: S.store || null });
   } catch (e) {
     if (!silent) list.replaceChildren(h('div', { class: 'empty' }, h('b', null, '불러오지 못했습니다'), e.message));
   }
@@ -627,7 +648,8 @@ function orderCard(o) {
       paintBulkbar();
     },
   });
-  const top = h('div', { class: 'order-top' }, h('label', { class: 'check' }, cb), storeBadge(o.store_type, o.store_name), statusBadge(o.status), h('span', { class: 'time', title: fmtDT(o.paid_at, true) }, `${fmtDT(o.paid_at || o.created_at)} · ${ago(o.paid_at || o.created_at)}`));
+  const unseen = o.status === 'NEW' && !o.seen_at;
+  const top = h('div', { class: 'order-top' }, h('label', { class: 'check' }, cb), unseen ? h('span', { class: 'new-dot', title: '새로 들어온 주문', 'aria-label': '새 주문' }) : '', storeBadge(o.store_type, o.store_name), statusBadge(o.status), h('span', { class: 'time', title: fmtDT(o.paid_at, true) }, `${fmtDT(o.paid_at || o.created_at)} · ${ago(o.paid_at || o.created_at)}`));
   const body = h(
     'div',
     { class: 'order-body', onclick: () => openOrderNav(o.id), role: 'button', tabindex: '0' },
@@ -940,6 +962,7 @@ async function openOrder(id, { refresh = false } = {}) {
   });
   S.sheetOrderId = o.id;
   if (refresh && scrollTop) body.scrollTop = scrollTop;
+  if (o.status === 'NEW' && !o.seen_at) markSeen({ ids: [o.id] });
 }
 
 function renderOrderDetail(body, o) {

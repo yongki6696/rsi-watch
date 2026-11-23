@@ -149,7 +149,21 @@ function register(router, app) {
       page: req.query.page,
       limit: req.query.limit,
     });
-    return { ...r, counts: orders.counts(req.query.store) };
+    return {
+      ...r,
+      counts: orders.counts(req.query.store),
+      unseen: orders.unseenCount(),
+      unseenHere: orders.unseenCount(req.query.store || null),
+      maxId: orders.maxId(),
+    };
+  });
+
+  // 신규주문 확인 처리 → 메뉴 숫자에서 빠짐
+  router.post('/api/orders/seen', (req) => {
+    const b = req.body || {};
+    if (Array.isArray(b.ids)) orders.markSeen({ ids: b.ids });
+    else orders.markSeen({ upTo: b.upTo, storeId: b.store || null });
+    return { unseen: orders.unseenCount() };
   });
 
   router.get('/api/orders/export.csv', (req, res) => {

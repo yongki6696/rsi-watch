@@ -347,6 +347,30 @@ class OrderStore {
     return { total, page: Number(page) || 1, limit: lim, orders: rows };
   }
 
+  // 아직 확인하지 않은 신규주문 수 (메뉴·앱 아이콘 숫자)
+  unseenCount(storeId = null) {
+    const p = storeId ? [Number(storeId)] : [];
+    return this.db.get(`SELECT COUNT(*) AS n FROM orders WHERE status = 'NEW' AND seen_at IS NULL${storeId ? ' AND store_id = ?' : ''}`, ...p).n;
+  }
+
+  maxId() {
+    return this.db.get('SELECT MAX(id) AS n FROM orders').n || 0;
+  }
+
+  // 확인 처리: 특정 주문들, 또는 목록을 본 시점까지(upTo = 그때의 가장 큰 주문 id) 들어온 주문
+  markSeen({ ids = null, upTo = null, storeId = null } = {}) {
+    const ts = nowIso();
+    if (Array.isArray(ids)) {
+      const list = ids.map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 500);
+      if (list.length) this.db.run(`UPDATE orders SET seen_at = ? WHERE seen_at IS NULL AND id IN (${list.map(() => '?').join(',')})`, ts, ...list);
+      return;
+    }
+    const max = Number(upTo);
+    if (!Number.isInteger(max) || max <= 0) return;
+    if (storeId) this.db.run('UPDATE orders SET seen_at = ? WHERE seen_at IS NULL AND id <= ? AND store_id = ?', ts, max, Number(storeId));
+    else this.db.run('UPDATE orders SET seen_at = ? WHERE seen_at IS NULL AND id <= ?', ts, max);
+  }
+
   counts(storeId) {
     const p = storeId ? [Number(storeId)] : [];
     const w = storeId ? 'WHERE store_id = ?' : '';

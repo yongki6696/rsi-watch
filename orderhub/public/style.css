@@ -285,12 +285,14 @@ ol.steps li { margin: 4px 0; }
 .bulkbar .btn { min-height: 34px; padding: 0 12px; font-size: 13.5px; border-radius: 10px; }
 
 .list { display: grid; gap: 10px; }
+.list > * { min-width: 0; } /* 긴 스토어 이름이 있어도 카드가 화면 밖으로 넘치지 않게 */
 @media (min-width: 900px) { .list { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); } }
 .order { padding: 14px 14px 12px; position: relative; display: flex; flex-direction: column; gap: 8px; }
 .order.selected { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
 .order.urgent { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
 .order-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .order-top .time { font-size: 12px; color: var(--text-3); white-space: nowrap; margin-left: auto; }
+.new-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); flex: none; margin-right: -2px; }
 .check { display: inline-grid; place-items: center; width: 26px; height: 26px; flex: none; cursor: pointer; }
 .check input { width: 19px; height: 19px; accent-color: var(--primary); cursor: pointer; margin: 0; }
 .order-body { cursor: pointer; display: grid; gap: 3px; }

@@ -140,3 +140,29 @@ test('CSV: 수식 주입 방지 + 긴 숫자 보존', () => {
   assert.ok(csv.includes('"=""2022040521691281"""'));
   assert.ok(csv.includes(`"'=HYPERLINK(""x"")"`));
 });
+
+test('DB 업데이트: 예전 DB에 확인(seen_at) 칸 추가 + 기존 주문은 확인한 것으로', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { Db } = require('../src/db');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'orderhub-mig-'));
+  const file = path.join(dir, 'old.db');
+  try {
+    const old = new Db(file);
+    old.db.exec('ALTER TABLE orders DROP COLUMN seen_at'); // 예전 버전 DB 흉내
+    old.run("INSERT INTO stores(type, name, created_at) VALUES('demo', 'd', '2026-11-01T00:00:00Z')");
+    old.run("INSERT INTO orders(store_id, group_key, status, created_at, updated_at) VALUES(1, 'g1', 'NEW', 'x', 'x')");
+    old.close();
+    const db = new Db(file);
+    assert.ok(db.get('SELECT seen_at FROM orders WHERE group_key = ?', 'g1').seen_at, '기존 신규주문은 확인한 것으로');
+    db.run("INSERT INTO orders(store_id, group_key, status, created_at, updated_at) VALUES(1, 'g2', 'NEW', 'x', 'x')");
+    assert.equal(db.get('SELECT seen_at FROM orders WHERE group_key = ?', 'g2').seen_at, null);
+    db.close();
+    const again = new Db(file); // 두 번째 실행에서는 그대로
+    assert.equal(again.get('SELECT seen_at FROM orders WHERE group_key = ?', 'g2').seen_at, null);
+    again.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

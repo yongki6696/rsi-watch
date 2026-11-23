@@ -83,6 +83,7 @@ class SyncEngine {
       intervalMin: getAppSettings(this.db).pollIntervalMin,
       lastResult: this.lastResult,
       inquiriesOpen: this.inquiries ? this.inquiries.counts().open : 0,
+      unseen: this.orders.unseenCount(),
       backfill: this.backfillState,
       stores,
     };
@@ -193,6 +194,8 @@ class SyncEngine {
         if (!ch) continue;
         result.updated++;
         if (ch.isNew) result.added++;
+        // 첫 연결·지난 주문으로 조용히 가져온 주문은 '새 주문' 숫자에 넣지 않음
+        if (ch.isNew && quiet) this.orders.markSeen({ ids: [ch.orderId] });
         if (ch.isNew && ch.status === 'NEW') {
           if (quiet) imported++;
           else {
@@ -287,8 +290,8 @@ class SyncEngine {
     if (!n) return;
     const label = (store) => `${store.name}`;
 
-    // 홈 화면 앱 아이콘 숫자 배지 = 처리 대기 신규주문 수
-    const badgeCount = alerts.newOrders.length ? this.orders.counts().new : undefined;
+    // 홈 화면 앱 아이콘 숫자 배지 = 아직 확인하지 않은 신규주문 수
+    const badgeCount = alerts.newOrders.length ? this.orders.unseenCount() : undefined;
     // 신규주문: 5건까지는 개별 알림, 그 이상은 요약 1건
     if (alerts.newOrders.length && alerts.newOrders.length <= 5) {
       for (const a of alerts.newOrders) {

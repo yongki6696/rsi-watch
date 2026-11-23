@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS orders (
   purchased_at TEXT,
   confirmed_at TEXT,
   address_changed INTEGER NOT NULL DEFAULT 0,
+  seen_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE(store_id, group_key)
@@ -155,6 +156,17 @@ class Db {
     if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  // 예전 버전 DB에 새 칸 추가
+  migrate() {
+    const cols = this.all('PRAGMA table_info(orders)').map((c) => c.name);
+    if (!cols.includes('seen_at')) {
+      // 신규주문을 확인한 시각 (아직 안 본 신규주문만 메뉴 숫자로 표시). 업데이트 전 주문은 모두 확인한 것으로 처리
+      this.db.exec('ALTER TABLE orders ADD COLUMN seen_at TEXT');
+      this.run('UPDATE orders SET seen_at = ?', nowIso());
+    }
   }
 
   get(sql, ...params) {
