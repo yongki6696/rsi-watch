@@ -38,6 +38,14 @@ test('ESM/롯데ON 응답 필드 유연 매칭 + 택배사 코드', () => {
 
   const { group, item } = lotteon._internal.normalizeItem({ odNo: 'L1', odSeq: 2, odPrgsStepCd: '12', spdNm: '랜턴', sitmNm: '블랙', odQty: 1, slPrc: 5000, dvpCustNm: '정', dvpZipNo: '07335', dvpStnmZipAddr: '여의대로 108', dvpStnmDtlAddr: '20층' });
   assert.equal(item.itemKey, 'L1-2');
+  // 출고지시 목록 형식: 상품번호로 라인 구분, 상품명 HTML 문자 정리, 주문일은 주문번호 앞 8자리
+  const li = lotteon._internal.normalizeItem({ odNo: '2026112012345678', spdNo: 'P1', sitmNo: 'S1', spdNm: '&lt;정품&gt; 코트', odQty: 2, slPrc: 5000, actualAmt: 9000, odPrgsStepCd: '11', indvCstmPclrNo: 'P123456789012' });
+  assert.equal(li.item.itemKey, '2026112012345678-P1-S1');
+  assert.equal(li.item.productName, '<정품> 코트');
+  assert.equal(li.item.amount, 9000);
+  assert.equal(li.group.customsCode, 'P123456789012');
+  assert.equal(li.group.orderedAt, '2026-11-19T15:00:00.000Z');
+  assert.equal(lotteon._internal.dayWindows(new Date('2026-11-01T00:00:00Z'), new Date('2026-11-04T00:00:00Z')).length, 3);
   assert.equal(item.marketState, 'CONFIRMED');
   assert.equal(group.receiverName, '정');
   assert.equal(group.address2, '20층');
@@ -96,7 +104,11 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
 
   await t.test('연결 테스트: 잘못된 키는 친절한 오류, 올바른 키는 성공 + 진단정보', async () => {
     await assert.rejects(call('POST', '/api/stores/test', { type: 'gmarket', credentials: { masterId: ESM.masterId, sellerId: ESM.gmarketId, secretKey: 'wrong' } }), (e) => e.status === 400 && /G마켓 인증 실패/.test(e.message));
-    await assert.rejects(call('POST', '/api/stores/test', { type: 'lotteon', credentials: { apiKey: 'wrong' } }), /롯데ON 인증 실패/);
+    await assert.rejects(call('POST', '/api/stores/test', { type: 'lotteon', credentials: { apiKey: 'wrong', trNo: LOTTEON.trNo } }), /롯데ON 인증 실패/);
+    // 거래처번호가 다르면 알려줌
+    await assert.rejects(call('POST', '/api/stores/test', { type: 'lotteon', credentials: { apiKey: LOTTEON.apiKey, trNo: 'LO99999999' } }), (e) => /거래처번호/.test(e.message));
+    // 거래처번호 없이는 저장/테스트 불가
+    await assert.rejects(call('POST', '/api/stores/test', { type: 'lotteon', credentials: { apiKey: LOTTEON.apiKey } }), (e) => e.status === 400 && /거래처번호/.test(e.message));
     const g = await call('POST', '/api/stores/test', { type: 'gmarket', credentials: { masterId: ESM.masterId, sellerId: ESM.gmarketId, secretKey: ESM.secretKey } });
     assert.match(g.message, /G마켓 연결 성공/);
     assert.match(g.diagnostic, /RequestOrders:\[\] \(0건\)/);
@@ -108,12 +120,19 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     assert.ok(mock.state.lotteon.uas.some((u) => /OrderHub\//.test(u)));
     // IP 미등록처럼 모두 막히면 해결 방법과 원인 파악용 정보를 보여줌
     mock.state.lotteon.block = 'all';
-    await assert.rejects(call('POST', '/api/stores/test', { type: 'lotteon', credentials: LOTTEON }), (e) => /롯데ON 접속 거부\(403\)/.test(e.message) && /키발급/.test(e.message) && /server=nginx/.test(e.message));
+    await assert.rejects(call('POST', '/api/stores/test', { type: 'lotteon', credentials: LOTTEON }), (e) => /롯데ON 접속 거부\(403\)/.test(e.message) && /직접입력/.test(e.message) && /server=nginx/.test(e.message));
     mock.state.lotteon.block = null;
     lotteon._internal.rawMode.clear();
+    mock.state.lotteon.calls.orderBodies = [];
     const l = await call('POST', '/api/stores/test', { type: 'lotteon', credentials: LOTTEON });
     assert.match(l.message, /롯데ON 연결 성공/);
     assert.match(l.diagnostic, /orders: .*progress: /);
+    // 일반 판매자 키로 막힌 주문정보 조회(getOrderList)는 쓰지 않고, 하루 이내 기간으로만 조회
+    for (const b of mock.state.lotteon.calls.orderBodies) {
+      assert.equal(b.trGrpCd, 'SR');
+      assert.equal(b.trNo, LOTTEON.trNo);
+      assert.ok(['', 'Y'].includes(b.ifCplYN));
+    }
   });
 
   await t.test('스토어 연결 + 첫 수집 (유연한 필드 매칭으로 주문자 정보 채움)', async () => {
@@ -154,7 +173,7 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     const g = await call('POST', `/api/stores/${stores.find((x) => x.type === 'gmarket').id}/test`, {});
     assert.match(g.diagnostic, /RequestOrders:\[\{OrderNo, PayNo, GroupNo/);
     const l = await call('POST', `/api/stores/${stores.find((x) => x.type === 'lotteon').id}/test`, {});
-    assert.match(l.diagnostic, /orders: .*\[\{odNo, odSeq.*progress: .*odPrgsStepCd/);
+    assert.match(l.diagnostic, /orders: .*deliveryOrderList:\[\{odNo, procSeq, spdNo.*progress: .*odPrgsStepCd/);
   });
 
   await t.test('신규주문 알림', async () => {
@@ -195,6 +214,12 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     await call('POST', '/api/orders/purchase', { ids: [o.id] });
     const c = mock.state.lotteon.calls.inform.at(-1).deliveryProgressStateList[0];
     assert.equal(c.odPrgsStepCd, '12');
+    // 배송상태 통보 필수값: 주문순번(배송상태 조회로 얻음)·상품번호·단품번호·수량
+    assert.equal(c.dvRtrvDvsCd, 'DV');
+    assert.equal(c.odSeq, '1');
+    assert.equal(c.spdNo, 'LO100001');
+    assert.equal(c.sitmNo, 'LO100001_1');
+    assert.equal(c.slQty, '1');
     assert.equal(c.odNo, 'LO2026112200002');
     assert.match(c.dvTrcStatDttm, /^\d{14}$/);
     const r = await call('POST', `/api/orders/${o.id}/invoice`, { courierKey: 'HANJIN', trackingNo: '451234567890', dispatch: true });
@@ -203,9 +228,22 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     assert.equal(d.odPrgsStepCd, '13');
     assert.equal(d.dvCoCd, '0006');
     assert.equal(d.invcNo, '451234567890');
-    assert.equal(d.invcNbr, 1);
+    assert.equal(d.invcNbr, '1');
     await call('POST', '/api/sync', {});
     assert.equal((await byNo('LO2026112200002')).status, 'SHIPPED');
+  });
+
+  await t.test('롯데ON: 샵모아 등이 이미 연동완료한 주문(ifCplYN=Y)도 수집 + 회수지시는 반품요청으로', async () => {
+    lotteonAddItem(mock.state, { odNo: 'LO2026112200003', name: '연동완료', product: '의자', linked: true });
+    await call('POST', '/api/sync', {});
+    const o = await byNo('LO2026112200003');
+    assert.ok(o, '연동완료 주문도 수집');
+    assert.equal(o.status, 'NEW');
+    mock.state.lotteon.items.get('LO2026112200003-1').returnInstructed = true;
+    await call('POST', '/api/sync', {});
+    const o2 = await byNo('LO2026112200003');
+    assert.equal(o2.claim, 'RETURN');
+    assert.equal((await call('GET', '/api/orders?tab=all&q=LO2026112200003')).orders.length, 1, '회수지시 행이 새 주문으로 생기지 않음');
   });
 
   await t.test('롯데ON 취소완료(21) 반영 + 알림', async () => {
@@ -263,7 +301,8 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
       assert.equal(mine.filter((c) => c.orderStatus === 1).length, 5, '31일을 7일씩 5구간');
       for (const c of mine) assert.ok(c.requestDateFrom < c.requestDateTo);
     }
-    assert.equal(mock.state.lotteon.calls.orders - lotteBefore, 5);
+    // 롯데ON 출고지시 조회는 하루씩 (31일 → 32구간) × 신규/연동완료 2번
+    assert.ok(mock.state.lotteon.calls.orders - lotteBefore >= 62, `롯데ON 조회 ${mock.state.lotteon.calls.orders - lotteBefore}번`);
     const o = await byNo('3000000009');
     assert.equal(o.status, 'DELIVERED');
     assert.equal(bf.results.find((r) => r.type === 'auction').added, 1);

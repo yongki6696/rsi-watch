@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 
 const ESM = { masterId: 'master01', secretKey: 'esm-secret', gmarketId: 'gseller', auctionId: 'aseller' };
-const LOTTEON = { apiKey: 'lotteonKey' };
+const LOTTEON = { apiKey: 'lotteonKey', trNo: 'LO10012345' };
 const ESM_COURIERS = new Set([10001, 10003, 10005, 10006, 10007, 10008, 10013]);
 const LOTTEON_COURIERS = new Set(['0001', '0002', '0004', '0005', '0006']);
 
@@ -124,30 +124,43 @@ async function handleEsm(state, req, res, url) {
 }
 
 // ---------- 롯데ON ----------
-function lotteonAddItem(state, { odNo, odSeq = 1, step = '11', name = '정롯데', product = '캠핑 랜턴', option = '블랙', qty = 1, price = 33000 }) {
+// 실제 API 처럼: 출고/회수지시 목록(209)에는 odSeq 가 없고 진행단계는 11 고정, 현재 단계·odSeq 는 배송상태 조회(140)로
+function lotteonAddItem(state, { odNo, odSeq = 1, step = '11', name = '정롯데', product = '캠핑 랜턴', option = '블랙', qty = 1, price = 33000, linked = false, instructAt = new Date() }) {
   state.lotteon.items.set(`${odNo}-${odSeq}`, {
     step,
+    odSeq: String(odSeq),
+    linked, // 다른 프로그램이 연동완료 처리한 주문 (ifCplYN=Y 로만 조회됨)
+    instructAt, // 출고지시 생성 시각
+    returnInstructed: false,
     data: {
       odNo: String(odNo),
-      odSeq,
-      procSeq: 1,
-      spdNo: 'LO123456',
+      procSeq: '1',
+      spdNo: `LO${100000 + Number(odSeq)}`,
+      sitmNo: `LO${100000 + Number(odSeq)}_1`,
       spdNm: product,
       sitmNm: option,
       odQty: qty,
       slPrc: price,
-      odAmt: price * qty,
+      actualAmt: price * qty,
+      dvCst: 0,
       odrNm: name,
-      odrMphnNo: '010-7777-8888',
+      mphnNo: '010-7777-8888',
       dvpCustNm: name,
       dvpMphnNo: '010-7777-8888',
       dvpZipNo: '07335',
       dvpStnmZipAddr: '서울특별시 영등포구 여의대로 108',
       dvpStnmDtlAddr: '파크원 타워1 20층',
       dvMsg: '문 앞에 놓아주세요',
-      odAcptDttm: kstStamp(),
+      odAccpDttm: kstStamp(instructAt),
+      odCmptDttm: kstStamp(instructAt),
+      odTypCd: '10',
+      odPrgsStepCd: '11',
     },
   });
+}
+
+function stampToDate(s) {
+  return new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T${s.slice(8, 10)}:${s.slice(10, 12)}:${s.slice(12, 14)}+09:00`);
 }
 
 async function handleLotteon(state, req, res, url) {
@@ -163,23 +176,68 @@ async function handleLotteon(state, req, res, url) {
     res.writeHead(403, { Server: 'nginx' });
     return res.end();
   }
-  if (req.headers.authorization !== `Bearer ${LOTTEON.apiKey}`) return send(401, { returnCode: '401', message: 'Unauthorized' });
+  if (req.headers.authorization !== `Bearer ${LOTTEON.apiKey}`) return send(401, { returnCode: '401', message: '등록되지 않은 OpenAPI Key 입니다.' });
   const raw = await readBody(req);
   const body = raw ? JSON.parse(raw) : {};
   const stamp = (v) => /^\d{14}$/.test(String(v || ''));
-  if (url.pathname === '/v1/openapi/order/v1/getOrderList' && req.method === 'POST') {
+  const trOk = body.trGrpCd === 'SR' && body.trNo === LOTTEON.trNo;
+  const trFail = () => send(200, { returnCode: '9001', message: '입력하신 API 인증키에서 확인된 거래처번호와 입력하신 거래처번호가 일치하지 않습니다.' });
+  // 기간 조건 검사: 형식 + 1일 초과 불가
+  const range = () => {
+    if (!stamp(body.srchStrtDt) || !stamp(body.srchEndDt)) return { error: send(200, { returnCode: '9000', message: '검색일시 형식 오류' }) };
+    const from = stampToDate(body.srchStrtDt);
+    const to = stampToDate(body.srchEndDt);
+    if (to - from > 86400000) return { error: send(200, { returnCode: '2003', message: '조회기간은 1일을 초과할 수 없습니다.' }) };
+    return { from, to };
+  };
+
+  // 주문정보 조회는 일반 판매자 키로는 접근 거부
+  if (url.pathname === '/v1/openapi/order/v1/getOrderList') {
+    res.writeHead(403);
+    return res.end();
+  }
+  if (url.pathname === '/v1/openapi/delivery/v1/SellerDeliveryOrdersSearch' && req.method === 'POST') {
     state.lotteon.calls.orders++;
-    if (!stamp(body.srchStrtDtm) || !stamp(body.srchEndDtm)) return send(200, { returnCode: '9000', message: '검색일시 형식 오류' });
-    // 주문정보에는 진행단계가 없다고 가정 → 배송상태 조회와 합쳐야 함
-    return send(200, { returnCode: '0000', message: '정상', data: [...state.lotteon.items.values()].map((i) => ({ ...i.data })) });
+    (state.lotteon.calls.orderBodies ||= []).push(body);
+    if (!trOk) return trFail();
+    const r = range();
+    if (r.error) return r.error;
+    const linkedOnly = body.ifCplYN === 'Y';
+    const list = [];
+    const sec = (d) => Math.floor(d.getTime() / 1000) * 1000; // 실제처럼 초 단위로 비교
+    for (const it of state.lotteon.items.values()) {
+      if (sec(it.instructAt) < r.from.getTime() || sec(it.instructAt) > r.to.getTime()) continue;
+      if (linkedOnly !== !!it.linked) continue;
+      list.push({ ...it.data });
+      if (it.returnInstructed) list.push({ ...it.data, odTypCd: '40', odPrgsStepCd: '23', procSeq: '2' });
+    }
+    return send(200, { returnCode: '0000', message: '정상', data: { deliveryOrderList: list } });
   }
   if (url.pathname === '/v1/openapi/delivery/v1/SellerDeliveryProgressStateSearch' && req.method === 'POST') {
     state.lotteon.calls.progress++;
-    if (!stamp(body.srchStrtDt) || !stamp(body.srchEndDt)) return send(200, { returnCode: '9000', message: '검색일시 형식 오류' });
+    if (!trOk) return trFail();
+    let items = [...state.lotteon.items.values()];
+    if (body.odNo) items = items.filter((i) => i.data.odNo === String(body.odNo));
+    else {
+      const r = range();
+      if (r.error) return r.error;
+      const sec = (d) => Math.floor(d.getTime() / 1000) * 1000;
+      items = items.filter((i) => sec(i.instructAt) >= r.from.getTime() && sec(i.instructAt) <= r.to.getTime());
+    }
     return send(200, {
       returnCode: '0000',
       message: '정상',
-      data: [...state.lotteon.items.values()].map((i) => ({ odNo: i.data.odNo, odSeq: i.data.odSeq, procSeq: 1, odPrgsStepCd: i.step })),
+      data: items.map((i) => ({
+        odNo: i.data.odNo,
+        odSeq: i.odSeq,
+        procSeq: '1',
+        spdNo: i.data.spdNo,
+        sitmNo: i.data.sitmNo,
+        odPrgsStepCd: i.step,
+        dvTrcStatDttm: kstStamp(),
+        dvCoCd: i.data.dvCoCd || '',
+        invcNo: i.data.invcNo || '',
+      })),
     });
   }
   if (url.pathname === '/v1/openapi/delivery/v1/SellerDeliveryProgressStateInform' && req.method === 'POST') {
@@ -188,9 +246,10 @@ async function handleLotteon(state, req, res, url) {
     if (!Array.isArray(list) || !list.length) return send(200, { returnCode: '9000', message: 'deliveryProgressStateList 필수' });
     const results = list.map((x) => {
       const it = state.lotteon.items.get(`${x.odNo}-${x.odSeq}`);
-      const fail = (msg) => ({ odNo: x.odNo, odSeq: x.odSeq, resultCode: '9999', resultMessage: msg });
+      const fail = (msg) => ({ odNo: x.odNo, odSeq: x.odSeq, spdNo: x.spdNo, resultCode: '9999', resultMessage: msg });
       if (!it) return fail('주문 없음');
-      if (!stamp(x.dvTrcStatDttm) || !x.procSeq) return fail('필수값 누락');
+      if (x.dvRtrvDvsCd !== 'DV' || !stamp(x.dvTrcStatDttm) || !x.procSeq) return fail('필수값 누락');
+      if (x.spdNo !== it.data.spdNo || x.sitmNo !== it.data.sitmNo || !Number(x.slQty)) return fail('상품정보(spdNo/sitmNo/slQty) 불일치');
       if (x.odPrgsStepCd === '12') {
         if (it.step !== '11') return fail('출고지시 상태가 아님');
         it.step = '12';
@@ -201,7 +260,7 @@ async function handleLotteon(state, req, res, url) {
         it.data.invcNo = x.invcNo;
         it.data.dvCoCd = x.dvCoCd;
       } else return fail('지원하지 않는 단계');
-      return { odNo: x.odNo, odSeq: x.odSeq, resultCode: '0000', resultMessage: '성공' };
+      return { odNo: x.odNo, odSeq: x.odSeq, spdNo: x.spdNo, resultCode: '0000', resultMessage: '성공' };
     });
     return send(200, { returnCode: '0000', message: '정상', data: results });
   }
