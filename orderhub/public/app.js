@@ -385,7 +385,16 @@ async function refreshSync() {
       S.unseen = S.sync.unseen;
       paintBadge();
     }
+    reloadIfUpdated();
   } catch {}
+}
+
+// 서버가 새 버전으로 업데이트되면 화면도 새로 불러오기 (입력 중이거나 주문 상세를 보는 중이면 다음 기회에)
+function reloadIfUpdated() {
+  const v = S.sync?.version;
+  if (!v || !S.meta?.version || v === S.meta.version) return;
+  if (isTyping() || S.sheetOrderId || $('#sheet-root')?.firstChild || document.visibilityState !== 'visible') return;
+  location.reload();
 }
 
 function paintSync() {

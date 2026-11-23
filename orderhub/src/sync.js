@@ -4,6 +4,7 @@ const { getConnector } = require('./connectors');
 const { getAppSettings } = require('./settings');
 const { safeJson, nowIso, kstDate } = require('./util');
 const { CLAIM } = require('./orders');
+const APP_VERSION = require('../package.json').version;
 
 class SyncEngine {
   constructor({ db, secrets, config, notifier, orders, actions, inquiries }) {
@@ -85,6 +86,7 @@ class SyncEngine {
       inquiriesOpen: this.inquiries ? this.inquiries.counts().open : 0,
       unseen: this.orders.unseenCount(),
       backfill: this.backfillState,
+      version: APP_VERSION,
       stores,
     };
   }

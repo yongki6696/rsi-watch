@@ -216,6 +216,7 @@ test('지난 주문 불러오기: 데모 스토어 (중복 없이, 알림 없이
   assert.equal(r.total.amount, expected);
   assert.ok(r.daily.filter((d) => d.orders > 0).length >= 3);
   const sync = await call('GET', '/api/sync/status');
+  assert.equal(sync.version, require('../package.json').version, '화면이 새 버전을 알아챌 수 있게 버전 포함');
   assert.equal(sync.backfill.running, false);
   assert.equal(sync.stores[0].last_error, null);
 });

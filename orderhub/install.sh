@@ -90,6 +90,14 @@ docker compose up -d --build
 sleep 5
 docker compose ps
 
+# 6) 자동 업데이트: GitHub 에 새 버전이 올라오면 5분 안에 자동 적용 (끄려면 AUTO_UPDATE=0 으로 설치)
+AUTO_MSG="꺼짐 (켜기: sudo bash scripts/enable-auto-update.sh)"
+if [ "${AUTO_UPDATE:-1}" != "0" ] && command -v systemctl >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+  if ORDERHUB_NO_REBUILD=1 bash scripts/enable-auto-update.sh >/dev/null 2>&1; then
+    AUTO_MSG="켜짐 (새 버전이 올라오면 5분 안에 자동 적용)"
+  fi
+fi
+
 cat <<EOF
 
 ✅ 설치 완료!
@@ -102,6 +110,7 @@ cat <<EOF
   · AWS 라이트세일이라면 인스턴스 > 네트워킹 > IPv4 방화벽에 HTTPS(443) 규칙이 있어야 합니다.
   · 오라클 클라우드라면 콘솔 > 네트워킹 > VCN > 보안 목록에서 80, 443 포트(수신)도 열어야 합니다.
 
+  자동 업데이트: ${AUTO_MSG}
   로그 보기   : cd $(pwd) && docker compose logs -f app
-  업데이트    : git pull && docker compose up -d --build
+  수동 업데이트: git pull && docker compose up -d --build
 EOF
