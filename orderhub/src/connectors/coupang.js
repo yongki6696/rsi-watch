@@ -423,7 +423,8 @@ module.exports = {
         orderId: BIG(i.extra.orderId),
         vendorItemId: BIG(i.extra.vendorItemId),
         deliveryCompanyCode: code,
-        invoiceNumber: String(trackingNo).trim(),
+        // 업체직송(DIRECT)은 송장번호가 없으면 주문번호로 대신 등록
+        invoiceNumber: String(trackingNo || '').trim() || (code === 'DIRECT' ? String(i.extra.orderId) : ''),
         splitShipping: false,
         preSplitShipped: false,
         estimatedShippingDate: '',

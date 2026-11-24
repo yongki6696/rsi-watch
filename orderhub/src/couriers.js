@@ -24,7 +24,22 @@ const COURIERS = [
   { key: 'DHL', name: 'DHL', naver: 'DHL', coupang: 'DHL', elevenst: null, esm: null, lotteon: '0008' },
   { key: 'FEDEX', name: 'FedEx', naver: 'FEDEX', coupang: 'FEDEX', elevenst: null, esm: null, lotteon: null },
   { key: 'UPS', name: 'UPS', naver: 'UPS', coupang: 'UPS', elevenst: null, esm: null, lotteon: null },
+  // 택배 없이 직접 보내는 경우 (송장번호 없음): 스마트스토어 '직접전달', 쿠팡 '업체직송'
+  {
+    key: 'DIRECT',
+    name: '직접발송',
+    naver: 'DIRECT_DELIVERY',
+    coupang: 'DIRECT',
+    elevenst: null,
+    esm: null,
+    lotteon: null,
+    noTracking: true,
+    labels: { naver: '직접전달 (송장번호 없이)', coupang: '업체직송 (송장번호 없이)', demo: '직접발송 (송장번호 없이)' },
+  },
 ];
+
+// 송장번호 없이 보내는 방식인지
+const isDirect = (key) => key === 'DIRECT';
 
 const BY_KEY = Object.fromEntries(COURIERS.map((c) => [c.key, c]));
 
@@ -69,6 +84,7 @@ function findCourier(text) {
     cu: 'CUPARCEL', cu편의점: 'CUPARCEL', cu편의점택배: 'CUPARCEL',
     등기: 'REGISTPOST', 우편등기: 'REGISTPOST',
     ems: 'EMS', dhl: 'DHL', fedex: 'FEDEX', ups: 'UPS',
+    업체직송: 'DIRECT', 직접발송: 'DIRECT', 직접배송: 'DIRECT', 직접전달: 'DIRECT', 직배송: 'DIRECT', direct: 'DIRECT',
   };
   if (aliases[t]) return aliases[t];
   const exact = COURIERS.find((c) => c.name.replace(/\s/g, '').toLowerCase() === t || c.key.toLowerCase() === t);
@@ -79,9 +95,9 @@ function findCourier(text) {
 
 // 배송조회 링크 (네이버 검색의 택배 조회 기능 사용)
 function trackingUrl(key, trackingNo) {
-  if (!trackingNo) return '';
+  if (!trackingNo || isDirect(key)) return '';
   const q = `${courierName(key)} ${trackingNo}`;
   return `https://search.naver.com/search.naver?query=${encodeURIComponent(q)}`;
 }
 
-module.exports = { COURIERS, courierName, courierCode, findCourier, trackingUrl, marketKey };
+module.exports = { COURIERS, courierName, courierCode, findCourier, trackingUrl, marketKey, isDirect };

@@ -393,15 +393,21 @@ module.exports = {
     const code = courierCode(courierKey, 'naver');
     if (!code) throw new Error('이 택배사는 스마트스토어 코드가 없습니다. 택배사를 다시 선택하거나 직접 코드를 입력해주세요.');
     const dispatchDate = kstIso(new Date());
+    // 직접전달(직접발송): 택배사·송장번호 없이 배송방법만
+    const direct = code === 'DIRECT_DELIVERY';
     const list = items
       .filter((i) => i.extra?.productOrderId)
-      .map((i) => ({
-        productOrderId: i.extra.productOrderId,
-        deliveryMethod: 'DELIVERY',
-        deliveryCompanyCode: code,
-        trackingNumber: String(trackingNo).trim(),
-        dispatchDate,
-      }));
+      .map((i) =>
+        direct
+          ? { productOrderId: i.extra.productOrderId, deliveryMethod: 'DIRECT_DELIVERY', dispatchDate }
+          : {
+              productOrderId: i.extra.productOrderId,
+              deliveryMethod: 'DELIVERY',
+              deliveryCompanyCode: code,
+              trackingNumber: String(trackingNo).trim(),
+              dispatchDate,
+            }
+      );
     const ok = [];
     const failed = [];
     for (const part of chunk(list, 30)) {

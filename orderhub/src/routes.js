@@ -122,6 +122,8 @@ function register(router, app) {
     couriers: COURIERS.map((c) => ({
       key: c.key,
       name: c.name,
+      labels: c.labels || null,
+      noTracking: !!c.noTracking,
       naver: !!c.naver,
       coupang: !!c.coupang,
       elevenst: !!c.elevenst,

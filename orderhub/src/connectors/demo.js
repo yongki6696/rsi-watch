@@ -194,8 +194,8 @@ module.exports = {
     return { ok: true };
   },
 
-  async dispatch(ctx, order, items, { trackingNo }) {
-    if (!/^\d{8,14}$/.test(String(trackingNo).replace(/-/g, ''))) {
+  async dispatch(ctx, order, items, { courierKey, trackingNo }) {
+    if (courierKey !== 'DIRECT' && !/^\d{8,14}$/.test(String(trackingNo).replace(/-/g, ''))) {
       return { ok: [], failed: items.map((i) => ({ itemKey: i.itemKey, message: '데모: 송장번호는 숫자 8~14자리로 입력해주세요' })) };
     }
     return { ok: items.map((i) => i.itemKey), failed: [] };

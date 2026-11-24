@@ -302,6 +302,22 @@ ol.steps li { margin: 4px 0; }
 .order-prod { font-size: 14px; color: var(--text); font-weight: 550; }
 .order-prod .opt { color: var(--text-2); font-weight: 450; }
 .order-addr { font-size: 13px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 상품: 옵션·수량을 크게 강조 (발주 실수 방지), 상품코드(도매처 코드) */
+.order-items { display: grid; gap: 7px; margin: 2px 0; }
+.oi-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.oi.gone .oi-name { color: var(--text-3); text-decoration: line-through; }
+.oi.gone .oi-tags { opacity: 0.5; }
+.oi-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.tag-opt { display: inline-flex; align-items: center; min-height: 26px; padding: 2px 9px; border-radius: 8px; background: var(--primary-soft); color: var(--primary); font-weight: 800; font-size: 14.5px; line-height: 1.3; }
+.tag-qty { display: inline-flex; align-items: center; min-height: 26px; padding: 2px 9px; border-radius: 8px; background: var(--gray-soft); color: var(--text); font-weight: 800; font-size: 14.5px; white-space: nowrap; }
+.tag-qty.multi { background: var(--warn-soft); color: var(--warn); }
+.tag-code { display: inline-flex; align-items: center; min-height: 24px; padding: 1px 7px; border-radius: 7px; border: 1px dashed var(--border-strong); color: var(--text-2); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.oi-tags.big { margin: 6px 0 2px; }
+.oi-tags.big .tag-opt, .oi-tags.big .tag-qty { font-size: 16px; min-height: 30px; padding: 3px 11px; }
+.code-copy { display: inline-flex; align-items: center; gap: 2px; }
+.supplier-line { font-size: 13px; color: var(--text-2); margin-left: auto; text-align: right; }
+.input.optional::placeholder { color: var(--ok); }
+
 .flags { display: flex; gap: 6px; flex-wrap: wrap; }
 .flags:empty { display: none; }
 .order-foot { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }

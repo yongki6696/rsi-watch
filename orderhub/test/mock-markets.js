@@ -11,7 +11,7 @@ const COUPANG = { vendorId: 'A00012345', accessKey: 'coupangAccess', secretKey: 
 const ELEVEN = { apiKey: 'elevenKey' };
 
 const NAVER_COURIERS = new Set(['CJGLS', 'HYUNDAI', 'HANJIN', 'KGB', 'EPOST', 'KDEXP']);
-const COUPANG_COURIERS = new Set(['CJGLS', 'HYUNDAI', 'HANJIN', 'KGB', 'EPOST', 'KDEXP']);
+const COUPANG_COURIERS = new Set(['CJGLS', 'HYUNDAI', 'HANJIN', 'KGB', 'EPOST', 'KDEXP', 'DIRECT']);
 const ELEVEN_COURIERS = new Set(['00034', '00012', '00011', '00007', '00002']);
 
 // 11번가 응답용 EUC-KR 바이트 (Python 으로 미리 인코딩)
@@ -157,7 +157,15 @@ async function handleNaver(state, req, res, url) {
     for (const x of body.dispatchProductOrders || []) {
       const d = state.naver.orders.get(x.productOrderId);
       if (!d) fail.push({ productOrderId: x.productOrderId, code: '100001', message: '상품 주문을 찾을 수 없음' });
-      else if (x.deliveryMethod !== 'DELIVERY' || !NAVER_COURIERS.has(x.deliveryCompanyCode)) fail.push({ productOrderId: x.productOrderId, code: '104119', message: '택배사 코드 확인' });
+      else if (x.deliveryMethod === 'DIRECT_DELIVERY') {
+        // 직접전달: 택배사·송장 없이
+        if (x.deliveryCompanyCode || x.trackingNumber) fail.push({ productOrderId: x.productOrderId, code: '4000', message: '직접전달에는 택배사/송장을 넣지 않음' });
+        else {
+          d.productOrder.productOrderStatus = 'DELIVERING';
+          d.delivery = { deliveryMethod: 'DIRECT_DELIVERY' };
+          ok.push(x.productOrderId);
+        }
+      } else if (x.deliveryMethod !== 'DELIVERY' || !NAVER_COURIERS.has(x.deliveryCompanyCode)) fail.push({ productOrderId: x.productOrderId, code: '104119', message: '택배사 코드 확인' });
       else if (!/^\d{8,}$/.test(x.trackingNumber) || x.trackingNumber.startsWith('000')) fail.push({ productOrderId: x.productOrderId, code: '104122', message: '배송 송장 오류(비유효 송장)' });
       else if (!/\+09:00$/.test(x.dispatchDate)) fail.push({ productOrderId: x.productOrderId, code: '4000', message: 'dispatchDate' });
       else {

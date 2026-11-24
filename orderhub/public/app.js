@@ -236,11 +236,25 @@ function statusBadge(status) {
   return h('span', { class: `st st-${status}` }, STATUS[status] || status);
 }
 
-function courierOptions(storeType, selected) {
-  const list = (S.meta?.couriers || []).filter((c) => storeType === 'demo' || c[storeType] !== false);
-  const opts = list.map((c) => h('option', { value: c.key, selected: c.key === selected ? 'selected' : null }, c.name));
+function courierOptions(storeType, selected, { direct = true } = {}) {
+  const list = (S.meta?.couriers || []).filter((c) => (storeType === 'demo' || c[storeType] !== false) && (direct || !c.noTracking));
+  const opts = list.map((c) => h('option', { value: c.key, selected: c.key === selected ? 'selected' : null }, c.labels?.[storeType] || c.name));
   if (selected && selected.startsWith('CUSTOM:')) opts.push(h('option', { value: selected, selected: 'selected' }, `직접입력(${selected.slice(7)})`));
   return opts;
+}
+
+const isNoTracking = (key) => !!(S.meta?.couriers || []).find((c) => c.key === key)?.noTracking;
+
+// 직접발송(송장번호 없이)을 고르면 송장번호 칸을 '비워도 됨'으로
+function bindDirect(sel, inp) {
+  const base = inp.placeholder;
+  const sync = () => {
+    const direct = isNoTracking(sel.value);
+    inp.placeholder = direct ? '송장번호 없이 발송 (비워도 됨)' : base;
+    inp.classList.toggle('optional', direct);
+  };
+  sel.addEventListener('change', sync);
+  sync();
 }
 
 // ===================== 부팅 / 인증 =====================
@@ -628,6 +642,32 @@ function orderFlags(o) {
   return f;
 }
 
+// 상품 목록 (주문 카드용): 옵션·수량은 크게 강조, 상품코드(도매처 코드)도 표시
+function itemLines(o) {
+  const items = o.items || [];
+  const shown = items.slice(0, 4);
+  return h(
+    'div',
+    { class: 'order-items' },
+    shown.map((it) => {
+      const gone = ['CANCELED', 'RETURNED'].includes(it.market_state);
+      return h(
+        'div',
+        { class: `oi ${gone ? 'gone' : ''}` },
+        h('div', { class: 'oi-name' }, it.product_name || '(상품명 없음)', gone ? h('span', { class: 'chip red', style: { marginLeft: '6px' } }, it.market_status || '취소') : ''),
+        h(
+          'div',
+          { class: 'oi-tags' },
+          it.option_name ? h('span', { class: 'tag-opt' }, it.option_name) : null,
+          h('span', { class: `tag-qty ${Number(it.quantity) > 1 ? 'multi' : ''}` }, `${it.quantity ?? 1}개`),
+          it.product_code ? h('span', { class: 'tag-code', title: '상품코드' }, it.product_code) : null
+        )
+      );
+    }),
+    items.length > shown.length ? h('div', { class: 'muted small' }, `외 ${items.length - shown.length}개 상품 (상세에서 확인)`) : null
+  );
+}
+
 function itemSummary(o) {
   const items = o.items || [];
   const first = items[0];
@@ -663,7 +703,7 @@ function orderCard(o) {
     'div',
     { class: 'order-body', onclick: () => openOrderNav(o.id), role: 'button', tabindex: '0' },
     h('div', { class: 'order-who' }, h('b', null, o.receiver_name || o.orderer_name || '(이름 없음)'), h('span', null, o.receiver_phone || '')),
-    itemSummary(o),
+    itemLines(o),
     h('div', { class: 'order-addr' }, [o.address1, o.address2].filter(Boolean).join(' ')),
     h('div', { class: 'flags' }, orderFlags(o))
   );
@@ -679,12 +719,13 @@ function orderCard(o) {
   } else if (o.status === 'PURCHASED' || o.status === 'INVOICED') {
     const sel = h('select', { class: 'input', 'aria-label': '택배사' }, courierOptions(o.store_type, o.courier_key || S.meta.settings.defaultCourier));
     const inp = h('input', { class: 'input mono', inputmode: 'numeric', placeholder: '송장번호', value: o.tracking_no || '', 'aria-label': '송장번호' });
+    bindDirect(sel, inp);
     const sendBtn = h('button', { class: 'btn primary', onclick: (e) => withBtn(e.currentTarget, () => doInvoice(o.id, sel.value, inp.value, true)) }, icon('send', 'sm'), '발송');
     inp.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendBtn.click();
     });
     const extra = o.dispatch_error ? h('div', { class: 'err-line' }, `발송 실패: ${o.dispatch_error}`) : null;
-    append(card, top, body, h('div', { class: 'quick-inv' }, sel, inp, sendBtn), extra, h('div', { class: 'order-foot' }, h('span', { class: 'amount' }, won(o.total_amount)), o.supplier ? h('span', { class: 'muted small' }, `공급처 ${o.supplier}`) : ''));
+    append(card, top, body, h('div', { class: 'quick-inv' }, sel, inp, sendBtn), extra, h('div', { class: 'order-foot' }, h('span', { class: 'amount' }, won(o.total_amount)), o.supplier || o.supplier_order_no ? h('span', { class: 'supplier-line' }, '공급처 ', h('b', null, o.supplier || '-'), o.supplier_order_no ? ` · ${o.supplier_order_no}` : '') : ''));
   } else if (o.status === 'SHIPPED' || o.status === 'DELIVERED') {
     append(foot, h('span', { class: 'inv-line' }, icon('truck', 'sm'), h('b', null, courierNameOf(o.courier_key)), h('span', { class: 'mono' }, o.tracking_no || '')));
     append(card, top, body, foot);
@@ -782,7 +823,7 @@ async function doDispatch(ids) {
 }
 
 async function doInvoice(id, courierKey, trackingNo, dispatch) {
-  if (!String(trackingNo).trim()) throw new Error('송장번호를 입력해주세요');
+  if (!isNoTracking(courierKey) && !String(trackingNo).trim()) throw new Error('송장번호를 입력해주세요');
   const r = await api('POST', `/api/orders/${id}/invoice`, { courierKey, trackingNo, dispatch });
   toast(r.message, r.ok ? 'ok' : 'err');
   await afterAction();
@@ -840,7 +881,7 @@ function parseInvoiceText(text, defaultCourier) {
 
 function openBulkInvoice() {
   openSheet('송장 일괄등록', (body) => {
-    const courierSel = h('select', { class: 'input' }, courierOptions('demo', S.meta.settings.defaultCourier));
+    const courierSel = h('select', { class: 'input' }, courierOptions('demo', S.meta.settings.defaultCourier, { direct: false }));
     const ta = h('textarea', { class: 'input', placeholder: '주문번호[탭]택배사[탭]송장번호\n2026112212345678\tCJ대한통운\t123456789012\n\n또는 2열: 주문번호[탭]송장번호 (위에서 고른 기본 택배사 사용)' });
     const file = h('input', {
       type: 'file',
@@ -1053,13 +1094,17 @@ function renderOrderDetail(body, o) {
           'div',
           { class: 'item-row' },
           h('div', { class: 'nm' }, i.product_name, ' ', h('button', { class: 'btn xs ghost', onclick: () => copyText(i.product_name) }, icon('copy', 'sm'))),
-          i.option_name ? h('div', { class: 'meta' }, `옵션: ${i.option_name}`) : null,
+          h(
+            'div',
+            { class: 'oi-tags big' },
+            i.option_name ? h('span', { class: 'tag-opt' }, i.option_name) : null,
+            h('span', { class: `tag-qty ${Number(i.quantity) > 1 ? 'multi' : ''}` }, `수량 ${i.quantity}개`)
+          ),
           h(
             'div',
             { class: 'meta' },
-            h('span', null, `수량 ${i.quantity}개`),
             i.amount !== null ? h('span', null, won(i.amount)) : null,
-            i.product_code ? h('span', null, `코드 ${i.product_code}`) : null,
+            i.product_code ? h('span', { class: 'code-copy' }, '코드 ', h('b', { class: 'mono' }, i.product_code), h('button', { class: 'btn xs ghost', 'aria-label': '상품코드 복사', onclick: () => copyText(i.product_code) }, icon('copy', 'sm'))) : null,
             h('span', { class: ['CANCELED', 'RETURNED'].includes(i.market_state) ? 'chip red' : i.claim ? 'chip red' : 'chip' }, i.market_status || i.market_state)
           ),
           h('div', { class: 'meta muted' }, `상품주문번호 ${i.item_key}`)
@@ -1138,6 +1183,7 @@ function renderOrderDetail(body, o) {
       } else sel.value = o.courier_key || S.meta.settings.defaultCourier;
     });
     const inp = h('input', { class: 'input mono', inputmode: 'numeric', autocomplete: 'off', placeholder: '송장번호 입력', value: o.tracking_no || '' });
+    bindDirect(sel, inp);
     append(body, 
       h(
         'div',
@@ -1154,14 +1200,14 @@ function renderOrderDetail(body, o) {
         h('p', { class: 'muted small', style: { margin: '10px 0 0' } }, '발송처리를 누르면 마켓에 송장이 등록되고 구매자에게 배송 안내가 나갑니다. 발주확인이 안 된 주문은 자동으로 발주확인 후 전송합니다.')
       )
     );
-  } else if (o.tracking_no) {
+  } else if (o.tracking_no || o.courier_key === 'DIRECT') {
     append(body, 
       h(
         'div',
         { class: 'sec' },
         h('div', { class: 'sec-h' }, icon('truck', 'sm'), '배송 정보'),
         kv('택배사', courierNameOf(o.courier_key), { copy: false }),
-        kv('송장번호', o.tracking_no, { strong: true }),
+        kv('송장번호', o.tracking_no || '송장번호 없음 (직접발송)', { strong: !!o.tracking_no, copy: !!o.tracking_no }),
         o.dispatched_at ? kv('발송처리', fmtDT(o.dispatched_at, true), { copy: false }) : null,
         o.trackingUrl ? h('a', { class: 'btn block', href: o.trackingUrl, target: '_blank', rel: 'noopener noreferrer', style: { marginTop: '10px' } }, icon('ext', 'sm'), '배송조회') : null
       )
@@ -2218,7 +2264,7 @@ async function renderSettings() {
     }
   };
   const interval = h('select', { class: 'input', style: { width: 'auto' }, onchange: (e) => saveApp({ pollIntervalMin: Number(e.target.value) }) }, [1, 3, 5, 10, 15, 30, 60].map((n) => h('option', { value: n, selected: n === app.pollIntervalMin ? 'selected' : null }, `${n}분`)));
-  const courier = h('select', { class: 'input', style: { width: 'auto' }, onchange: (e) => saveApp({ defaultCourier: e.target.value }) }, courierOptions('demo', app.defaultCourier));
+  const courier = h('select', { class: 'input', style: { width: 'auto' }, onchange: (e) => saveApp({ defaultCourier: e.target.value }) }, courierOptions('demo', app.defaultCourier, { direct: false }));
   const days = h('select', { class: 'input', style: { width: 'auto' }, onchange: (e) => saveApp({ initialDays: Number(e.target.value) }) }, [1, 2, 3, 5, 7].map((n) => h('option', { value: n, selected: n === app.initialDays ? 'selected' : null }, `${n}일`)));
   const cur = h('input', { class: 'input', type: 'password', autocomplete: 'current-password', placeholder: '현재 비밀번호' });
   const nxt = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: '새 비밀번호 (8자 이상)' });

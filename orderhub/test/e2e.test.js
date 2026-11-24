@@ -398,6 +398,41 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     assert.ok(text.includes(`"=""${BIG_ORDER}"""`));
   });
 
+  await t.test('직접발송: 스마트스토어 직접전달 · 쿠팡 업체직송 (송장번호 없이)', async () => {
+    naverAddOrder(mock.state, { productOrderId: '2026112400000901', orderId: '2026112490000901', name: '직접받음' });
+    coupangAddSheet(mock.state, { shipmentBoxId: '700000000901', orderId: '9200000901', vendorItemId: '901', name: '업체직송' });
+    await call('POST', '/api/sync', {});
+    // 스마트스토어: 직접전달 = 배송방법만, 택배사·송장 없음
+    const nv = await orderByNo('2026112490000901');
+    const r1 = await call('POST', `/api/orders/${nv.id}/invoice`, { courierKey: 'DIRECT', trackingNo: '', dispatch: true });
+    assert.equal(r1.ok, true, r1.message);
+    const d = mock.state.naver.calls.dispatch.at(-1).dispatchProductOrders[0];
+    assert.equal(d.deliveryMethod, 'DIRECT_DELIVERY');
+    assert.equal(d.deliveryCompanyCode, undefined);
+    assert.equal(d.trackingNumber, undefined);
+    assert.equal((await orderByNo('2026112490000901')).status, 'SHIPPED');
+    const detail = await call('GET', `/api/orders/${nv.id}`);
+    assert.equal(detail.trackingUrl, '', '직접발송은 배송조회 링크 없음');
+    // 쿠팡: 업체직송(DIRECT), 송장번호를 비우면 주문번호로 등록 (발주확인은 자동으로 먼저)
+    const cp = await orderByNo('9200000901');
+    const r2 = await call('POST', `/api/orders/${cp.id}/invoice`, { courierKey: 'DIRECT', trackingNo: '', dispatch: true });
+    assert.equal(r2.ok, true, r2.message);
+    assert.match(mock.state.coupang.calls.invoices.at(-1), /"deliveryCompanyCode":"DIRECT","invoiceNumber":"9200000901"/);
+    assert.equal((await orderByNo('9200000901')).status, 'SHIPPED');
+    // 11번가는 직접발송을 지원하지 않음 → 안내
+    const el = (await call('GET', '/api/orders?tab=all&q=202611220001')).orders[0];
+    if (el && ['NEW', 'PURCHASED', 'INVOICED'].includes(el.status)) {
+      await assert.rejects(call('POST', `/api/orders/${el.id}/invoice`, { courierKey: 'DIRECT', trackingNo: '' }), (e) => e.status === 400 && /직접발송/.test(e.message));
+    }
+    // 택배사는 고르고 송장번호를 비우면 여전히 오류
+    const meta = await call('GET', '/api/meta');
+    const direct = meta.couriers.find((c) => c.key === 'DIRECT');
+    assert.equal(direct.noTracking, true);
+    assert.equal(direct.labels.coupang, '업체직송 (송장번호 없이)');
+    assert.equal(direct.naver, true);
+    assert.equal(direct.elevenst, false);
+  });
+
   await t.test('수집 오류 알림은 한 번만, 복구되면 정상화 알림', async () => {
     mock.state.coupang.rejectAuth = true;
     const before = mock.state.telegram.messages.length;

@@ -166,3 +166,13 @@ test('DB 업데이트: 예전 DB에 확인(seen_at) 칸 추가 + 기존 주문�
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('택배사 이름 → 직접발송', () => {
+  const { findCourier, courierCode, isDirect } = require('../src/couriers');
+  for (const n of ['업체직송', '직접발송', '직접 전달', '직접배송']) assert.equal(findCourier(n), 'DIRECT', n);
+  assert.equal(courierCode('DIRECT', 'naver'), 'DIRECT_DELIVERY');
+  assert.equal(courierCode('DIRECT', 'coupang'), 'DIRECT');
+  assert.equal(courierCode('DIRECT', 'elevenst'), null);
+  assert.equal(isDirect('DIRECT'), true);
+  assert.equal(findCourier('CJ대한통운'), 'CJ');
+});

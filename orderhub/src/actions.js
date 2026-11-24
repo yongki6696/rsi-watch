@@ -2,7 +2,7 @@
 // 주문 처리: 마켓 발주확인 / 발주완료 / 송장 저장 / 발송처리
 const { getConnector } = require('./connectors');
 const { getAppSettings } = require('./settings');
-const { courierName, courierCode, findCourier } = require('./couriers');
+const { courierName, courierCode, findCourier, isDirect } = require('./couriers');
 const { nowIso, str, toInt, HttpError } = require('./util');
 const { STATUS } = require('./orders');
 
@@ -161,6 +161,12 @@ class Actions {
   validateInvoice(storeType, courierKey, trackingNo) {
     const t = str(trackingNo).replace(/\s/g, '');
     if (!courierKey) throw new HttpError(400, '택배사를 선택해주세요');
+    // 직접발송(스마트스토어 직접전달 · 쿠팡 업체직송): 송장번호 없어도 됨
+    if (isDirect(courierKey)) {
+      if (!courierCode(courierKey, storeType)) throw new HttpError(400, '이 마켓은 직접발송(송장번호 없이 발송)을 지원하지 않습니다. 택배사를 선택해주세요');
+      if (t && !/^[A-Za-z0-9-]{1,30}$/.test(t)) throw new HttpError(400, '송장번호 칸은 비우거나 영문/숫자로 입력해주세요');
+      return t.replace(/-/g, '');
+    }
     if (!t) throw new HttpError(400, '송장번호를 입력해주세요');
     if (!/^[A-Za-z0-9-]{6,30}$/.test(t)) throw new HttpError(400, '송장번호 형식을 확인해주세요 (영문/숫자 6~30자)');
     if (!courierCode(courierKey, storeType)) {
@@ -181,12 +187,12 @@ class Actions {
       nowIso(),
       o.id
     );
-    this.event(o, `송장 저장: ${courierName(courierKey)} ${t}`);
+    this.event(o, `송장 저장: ${courierName(courierKey)} ${t}`.trim());
     return this.load(id);
   }
 
   async dispatchOne(order) {
-    if (!order.courier_key || !order.tracking_no) throw new HttpError(400, '택배사와 송장번호를 먼저 입력해주세요');
+    if (!order.courier_key || (!order.tracking_no && !isDirect(order.courier_key))) throw new HttpError(400, '택배사와 송장번호를 먼저 입력해주세요');
     if (!['NEW', 'PURCHASED', 'INVOICED'].includes(order.status)) throw new HttpError(400, `${STATUS[order.status]} 상태라 발송처리할 수 없습니다`);
     const store = this.storeOf(order);
     const connector = getConnector(store.type);
