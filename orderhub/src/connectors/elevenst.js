@@ -5,7 +5,7 @@
 const net = require('node:net');
 const tls = require('node:tls');
 const nodeHttp = require('node:http');
-const { request, decodeText } = require('./http');
+const { request, decodeText, openTunnel, parseProxy } = require('./http');
 const { kstCompact, toIso, toInt, str, sleep } = require('../util');
 const { courierCode } = require('../couriers');
 
@@ -55,17 +55,23 @@ const ERROR_CODES = new Set(['-1', '2', '1000', '-1000']);
 async function api(ctx, path, attempt = 0) {
   const key = ctx.creds.apiKey;
   if (!key) throw new Error('11번가 Open API Key를 입력해주세요');
+  const proxy = str(ctx.creds.proxy) || undefined;
   let res;
   try {
     res = await request(ctx.config.elevenstApiBase + path, {
       method: 'GET',
       headers: { openapikey: key, Accept: 'application/xml, text/xml' },
+      proxy,
     });
   } catch (e) {
-    // 11번가는 등록되지 않은 IP의 접속을 연결 단계에서 끊어버림 (HTTP 오류가 아니라 연결 끊김으로 나타남)
+    if (e.proxy) throw e; // 중계 서버 자체 문제는 그 안내 그대로
+    // 11번가는 등록되지 않은 IP(또는 해외 IP)의 접속을 연결 단계에서 끊어버림 (HTTP 오류가 아니라 연결 끊김으로 나타남)
     if (e.network && /ECONNRESET|UND_ERR_SOCKET|ETIMEDOUT|CONNECT_TIMEOUT|ECONNREFUSED|EPIPE|TimeoutError/i.test(e.message)) {
+      const relay = proxy ? parseProxy(proxy).host : null;
       const err = new Error(
-        `11번가가 이 서버의 접속을 막았습니다 (등록되지 않은 IP일 때 나타납니다). 11번가 OPEN API CENTER → API 관리 → 'IP 직접 입력'의 개발서버 IP·개발자 PC·상용서버 IP 세 칸 모두에 [스토어] 화면 맨 위의 서버 IP를 띄어쓰기 없이 세미콜론(;)으로 이어 적고(예: 1.2.3.4;5.6.7.8) [수정하기]를 눌러주세요. 반영까지 시간이 걸릴 수 있습니다. (${e.message})`
+        relay
+          ? `11번가가 국내 중계 서버(${relay})의 접속을 막았습니다. 11번가 OPEN API CENTER → API 관리 → 'IP 직접 입력'의 개발서버 IP·개발자 PC·상용서버 IP 세 칸 모두에 중계 서버 IP ${relay} 를 세미콜론(;)으로 이어 적고 [수정하기]를 눌러주세요. 반영까지 시간이 걸릴 수 있습니다. (${e.message})`
+          : `11번가가 이 서버의 접속을 막았습니다. 11번가 OPEN API CENTER → API 관리 → 'IP 직접 입력'의 세 칸(개발서버 IP·개발자 PC·상용서버 IP)에 [스토어] 화면 맨 위의 서버 IP를 띄어쓰기 없이 세미콜론(;)으로 이어 적고 [수정하기]를 눌러주세요. 오더허브 서버가 해외(예: 오라클 일본)에 있으면 11번가가 해외 IP를 막기 때문에 '국내 중계 서버'가 필요합니다 (안내서 참고). (${e.message})`
       );
       err.network = true;
       throw err;
@@ -120,9 +126,43 @@ function probeHttp(host, port, path) {
     req.end();
   });
 }
-async function connectionReport(baseUrl) {
+async function connectionReport(baseUrl, proxy) {
   const u = new URL(baseUrl);
   const host = u.hostname;
+  const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
+  if (proxy) {
+    const p = parseProxy(proxy);
+    const lines = [`대상: ${host} (국내 중계 서버 ${p.label} 경유)`];
+    const relayTcp = await probeTcp(p.host, p.port);
+    lines.push(`① 중계 서버 연결(TCP ${p.port}): ${relayTcp}`);
+    if (relayTcp !== '연결됨') {
+      lines.push('→ 중계 서버에 연결이 안 됩니다. 중계 서버 IP와 방화벽(포트), 서버가 켜져 있는지 확인해주세요.');
+      return lines.join('\n');
+    }
+    let socket;
+    try {
+      socket = await openTunnel(p, host, port, 10000);
+      lines.push('② 중계 서버 → 11번가 연결: 성공');
+    } catch (e) {
+      lines.push(`② 중계 서버 → 11번가 연결: 실패 (${e.proxyStatus ? `HTTP ${e.proxyStatus}` : e.code || e.message})`);
+      lines.push(e.proxyStatus === 403 ? '→ 중계 서버가 이 오더허브 서버를 허용하지 않았습니다. 중계 서버 설치 때 넣은 오더허브 IP를 확인해주세요.' : '→ 중계 서버에서 11번가로 연결하지 못했습니다.');
+      return lines.join('\n');
+    }
+    if (u.protocol === 'https:') {
+      const tlsr = await new Promise((resolve) => {
+        const s = tls.connect({ socket, servername: host, timeout: 8000 }, () => {
+          const r = `성공 (${s.getProtocol()})`;
+          s.destroy();
+          resolve(r);
+        });
+        s.on('timeout', () => (s.destroy(), resolve('시간 초과')));
+        s.on('error', (e) => resolve(`실패 (${e.code || e.message})`));
+      });
+      lines.push(`③ 보안 연결(TLS): ${tlsr}`);
+      lines.push(tlsr.startsWith('성공') ? '→ 연결은 되는데 API 요청이 거부됩니다. 11번가 IP 칸에 중계 서버 IP가 등록·반영됐는지 확인해주세요.' : '→ 11번가가 중계 서버 IP를 막고 있습니다. 11번가 IP 칸에 중계 서버 IP를 등록하고 반영될 때까지 기다려주세요.');
+    } else socket.destroy();
+    return lines.join('\n');
+  }
   const lines = [`대상: ${host}`];
   if (u.protocol === 'https:') {
     const port = Number(u.port) || 443;
@@ -228,11 +268,15 @@ const meta = {
   beta: true,
   inquiries: false,
   sellerCenter: 'https://soffice.11st.co.kr/',
-  fields: [{ key: 'apiKey', label: 'Open API Key', required: true, secret: true }],
+  fields: [
+    { key: 'apiKey', label: 'Open API Key', required: true, secret: true },
+    { key: 'proxy', label: '국내 중계 서버 (오더허브 서버가 해외에 있을 때만)', placeholder: '중계 서버 IP (예: 3.35.123.45) - 국내 서버면 비워두세요' },
+  ],
   guide: [
     '11번가 OPEN API CENTER(openapi.11st.co.kr) → API 관리에서 API KEY를 확인합니다. (샵모아 등에서 쓰는 키를 그대로 써도 됩니다)',
     "같은 화면 'IP 직접 입력'의 개발서버 IP·개발자 PC·상용서버 IP 세 칸 모두에 아래 표시된 이 서버의 IP를 추가하고 [수정하기]를 누릅니다. 이미 다른 IP가 있으면 띄어쓰기 없이 세미콜론(;)으로 이어 적습니다. 예) 1.2.3.4;5.6.7.8",
     '11번가는 IP가 등록되지 않으면 접속 자체를 끊습니다. 등록 후 반영까지 시간이 걸릴 수 있습니다.',
+    '11번가는 해외 IP를 막습니다. 오더허브 서버가 해외(예: 오라클 일본)에 있으면 국내 중계 서버를 만들어 아래 \'국내 중계 서버\' 칸에 그 IP를 넣고, 11번가 IP 칸에도 중계 서버 IP를 등록하세요. (안내서의 \'11번가 국내 중계 서버\' 참고)',
     '발급받은 Open API Key를 아래에 입력하고 [연결 테스트]를 누릅니다.',
     '11번가 연동은 베타입니다. 처음 며칠은 셀러오피스 화면과 수집 결과를 함께 확인해주세요.',
   ],
@@ -247,7 +291,7 @@ module.exports = {
     try {
       xml = await api(ctx, `/ordservices/complete/${kstCompact(new Date(now.getTime() - 86400000))}/${kstCompact(now)}`);
     } catch (e) {
-      if (e.network) e.diagnostic = await connectionReport(ctx.config.elevenstApiBase).catch((x) => `진단 실패: ${x.message}`);
+      if (e.network) e.diagnostic = await connectionReport(ctx.config.elevenstApiBase, str(ctx.creds.proxy) || null).catch((x) => `진단 실패: ${x.message}`);
       throw e;
     }
     const orders = parseList(xml, 'order');

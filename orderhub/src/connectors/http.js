@@ -2,6 +2,7 @@
 // 커넥터 공용 HTTP 도우미
 const nodeHttps = require('node:https');
 const nodeHttp = require('node:http');
+const nodeTls = require('node:tls');
 
 // 16자리 이상 정수는 JS Number 로 정확히 표현되지 않으므로(쿠팡 shipmentBoxId 등)
 // 문자열 바깥의 큰 정수를 따옴표로 감싸서 문자열로 파싱한다.
@@ -50,7 +51,92 @@ function stringifyBig(obj) {
   return JSON.stringify(obj).replace(/"\\u0000BIG:(\d+)"/g, '$1');
 }
 
-async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 30000 } = {}) {
+// 중계 서버(HTTP CONNECT 프록시) 주소: '1.2.3.4', '1.2.3.4:8888', 'http://user:pass@host:port' 모두 허용
+function parseProxy(proxy) {
+  const v = String(proxy || '').trim();
+  if (!v) return null;
+  const u = new URL(/^https?:\/\//i.test(v) ? v : `http://${v}`);
+  return {
+    host: u.hostname,
+    port: Number(u.port) || 80,
+    auth: u.username ? `Basic ${Buffer.from(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`).toString('base64')}` : null,
+    label: `${u.hostname}${u.port ? `:${u.port}` : ''}`,
+  };
+}
+
+function proxyError(message, extra = {}) {
+  return Object.assign(new Error(message), { network: true, proxy: true }, extra);
+}
+
+// 중계 서버에 CONNECT 로 터널을 열어 소켓을 돌려줌
+function openTunnel(proxy, host, port, timeoutMs = 15000) {
+  const p = typeof proxy === 'string' ? parseProxy(proxy) : proxy;
+  return new Promise((resolve, reject) => {
+    const headers = { Host: `${host}:${port}` };
+    if (p.auth) headers['Proxy-Authorization'] = p.auth;
+    const req = nodeHttp.request({ host: p.host, port: p.port, method: 'CONNECT', path: `${host}:${port}`, headers, timeout: timeoutMs });
+    req.on('connect', (res, socket) => {
+      if (res.statusCode === 200) return resolve(socket);
+      socket.destroy();
+      reject(proxyError(`국내 중계 서버가 연결을 거부했습니다 (HTTP ${res.statusCode}) - 중계 서버에 이 오더허브 서버 IP가 허용돼 있는지 확인해주세요`, { proxyStatus: res.statusCode }));
+    });
+    // 2xx 가 아닌 CONNECT 응답은 'connect' 가 아니라 'response' 로 옴 (거부·필터됨)
+    req.on('response', (res) => {
+      res.resume();
+      reject(proxyError(`국내 중계 서버가 연결을 거부했습니다 (HTTP ${res.statusCode}) - 중계 서버에 이 오더허브 서버 IP가 허용돼 있는지 확인해주세요`, { proxyStatus: res.statusCode }));
+    });
+    req.on('timeout', () => req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
+    req.on('error', (e) => reject(proxyError(`국내 중계 서버(${p.label})에 연결하지 못했습니다 (${e.code || e.message})`, { code: e.code })));
+    req.end();
+  });
+}
+
+// 중계 서버를 거쳐 요청 (응답 형식은 request 와 같음)
+async function requestViaProxy(url, { method = 'GET', headers = {}, body, timeoutMs = 30000, proxy }) {
+  const target = new URL(url);
+  const https = target.protocol === 'https:';
+  const port = Number(target.port) || (https ? 443 : 80);
+  const socket = await openTunnel(proxy, target.hostname, port, Math.min(timeoutMs, 15000));
+  const data = body === undefined || body === null ? null : Buffer.from(body);
+  return new Promise((resolve, reject) => {
+    const req = (https ? nodeHttps : nodeHttp).request(
+      {
+        host: target.hostname,
+        port,
+        path: target.pathname + target.search,
+        method,
+        headers: { ...headers, ...(data ? { 'Content-Length': data.length } : {}) },
+        agent: false,
+        timeout: timeoutMs,
+        createConnection: () => (https ? nodeTls.connect({ socket, servername: target.hostname }) : socket),
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('error', reject);
+        res.on('end', () => {
+          const h = res.headers;
+          resolve({
+            status: res.statusCode,
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            headers: { get: (k) => (Array.isArray(h[String(k).toLowerCase()]) ? h[String(k).toLowerCase()].join(', ') : h[String(k).toLowerCase()] ?? null) },
+            buffer: Buffer.concat(chunks),
+          });
+        });
+      }
+    );
+    req.on('timeout', () => req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
+    req.on('error', (e) => {
+      socket.destroy();
+      reject(Object.assign(new Error(`마켓 서버에 연결하지 못했습니다 (${e.code || e.message}) - 중계 서버 경유`), { network: true, viaProxy: true }));
+    });
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 30000, proxy } = {}) {
+  if (proxy) return requestViaProxy(url, { method, headers, body, timeoutMs, proxy });
   let res;
   try {
     res = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(timeoutMs) });
@@ -119,4 +205,4 @@ function decodeText(buffer, headers, fallbackCharset = 'utf-8') {
   }
 }
 
-module.exports = { request, requestRaw, parseJsonBig, stringifyBig, BIG, decodeText };
+module.exports = { request, requestRaw, openTunnel, parseProxy, parseJsonBig, stringifyBig, BIG, decodeText };
