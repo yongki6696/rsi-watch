@@ -9,6 +9,7 @@ const nodeHttp = require('node:http');
 const { request, decodeText, openTunnel, parseProxy } = require('./http');
 const { kstCompact, toIso, toInt, str, sleep } = require('../util');
 const { courierCode } = require('../couriers');
+const { isNoData, dateRanges, compact, plainText } = require('./inquiry-util');
 
 function decodeEntities(s) {
   return s
@@ -349,13 +350,49 @@ async function backfill(ctx) {
   return { groups: collapse(list), state, warnings };
 }
 
+// 상품 Q&A(상품문의): 조회기간 최대 7일, 답변상태 00 전체 · 01 답변완료 · 02 미답변
+async function fetchQna(ctx) {
+  const out = new Map();
+  for (const w of dateRanges(ctx.inquiryDays || 7)) {
+    let xml;
+    try {
+      xml = await api(ctx, `/prodqnaservices/prodqnalist/${compact(w.from)}/${compact(w.to)}/00`);
+    } catch (e) {
+      if (isNoData(e)) continue;
+      throw e;
+    }
+    for (const q of parseList(xml, 'productQna')) {
+      const no = str(pick(q, 'brdInfoNo'));
+      if (!no || out.has(no)) continue;
+      const answer = plainText(pick(q, 'answerCont', 'answerContent'));
+      out.set(no, {
+        key: `q-${no}`,
+        kind: 'product',
+        category: str(pick(q, 'qnaDtlsCdNm', 'qnaDtlsNm')),
+        title: plainText(pick(q, 'brdInfoSbjct')),
+        content: plainText(pick(q, 'brdInfoCont')),
+        productName: plainText(pick(q, 'prdNm')),
+        productId: str(pick(q, 'prdNo')),
+        orderNo: str(pick(q, 'ordNoDe', 'ordNo')),
+        writer: str(pick(q, 'memNM', 'memNm', 'memId')),
+        askedAt: toIso(pick(q, 'createDt', 'regDt', 'brdInfoRegDt')),
+        answered: str(pick(q, 'answerYn')).toUpperCase() === 'Y' || !!answer,
+        answer,
+        extra: { brdInfoNo: no, prdNo: str(pick(q, 'prdNo')) },
+      });
+    }
+  }
+  return [...out.values()];
+}
+
 const meta = {
   type: 'elevenst',
   label: '11번가',
   short: '11',
   color: '#ff0038',
   beta: true,
-  inquiries: false,
+  inquiries: true, // 상품 Q&A (답변은 셀러오피스에서)
+  answerable: false,
   backfill: true,
   sellerCenter: 'https://soffice.11st.co.kr/',
   fields: [
@@ -390,6 +427,11 @@ module.exports = {
       message: `11번가 연결 성공 · 최근 결제완료 주문 ${orders.length}건 확인`,
       diagnostic: orders.length ? `order 필드: ${Object.keys(orders[0]).join(', ')}` : `응답: ${xml.replace(/\s+/g, ' ').slice(0, 300)}`,
     };
+  },
+
+  // 상품 Q&A - 최근 7일 (처음·1시간마다 30일)
+  async fetchInquiries(ctx) {
+    return fetchQna(ctx);
   },
 
   async fetch(ctx) {

@@ -21,8 +21,8 @@ function kstStamp(d = new Date()) {
 
 function createEsmLotteonState() {
   return {
-    esm: { orders: new Map(), calls: { list: [], check: [], ship: [] }, minIntervalMs: 0, lastCall: new Map(), rateLimited: 0 },
-    lotteon: { items: new Map(), calls: { orders: 0, progress: 0, inform: [] } },
+    esm: { orders: new Map(), qnas: [], calls: { list: [], check: [], ship: [], qna: [] }, minIntervalMs: 0, lastCall: new Map(), rateLimited: 0 },
+    lotteon: { items: new Map(), qnas: [], sellerInquiries: [], calls: { orders: 0, progress: 0, inform: [], qna: [], sellerInquiry: [] } },
   };
 }
 
@@ -119,6 +119,17 @@ async function handleEsm(state, req, res, url) {
     o.data.InvoiceNo = body.InvoiceNo;
     o.data.DeliveryCompanyCode = body.DeliveryCompanyCode;
     return send(200, { ResultCode: 0, Message: '성공', Data: { OrderNo: body.OrderNo } });
+  }
+  // 판매자 문의(게시판): 옥션 qnaType 1·2, G마켓 3 / 기간 7일 이내 / G마켓은 배열 그대로, 옥션은 Data 로 감싸서 (두 모양 모두 처리하는지 확인)
+  if (url.pathname === '/item/v1/communications/customer/bulletin-board' && req.method === 'POST') {
+    state.esm.calls.qna.push({ site: auth.site, ...body });
+    const okType = auth.site === 'G' ? body.qnaType === 3 : [1, 2].includes(body.qnaType);
+    if (!okType) return send(200, { ResultCode: 3000, Message: 'qnaType 이 올바르지 않습니다.' });
+    if (body.status !== 1 || body.type !== 1) return send(200, { ResultCode: 3000, Message: 'status/type 오류' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.startDate || '') || !/^\d{4}-\d{2}-\d{2}$/.test(body.endDate || '')) return send(200, { ResultCode: 3000, Message: '조회 기간 형식 오류' });
+    if (Date.parse(body.endDate) - Date.parse(body.startDate) > 8 * 86400000) return send(200, { ResultCode: 3000, Message: '조회 기간은 7일 이내로 입력해주세요.' });
+    const list = state.esm.qnas.filter((q) => q.site === auth.site && q.qnaType === body.qnaType && q.day >= body.startDate && q.day < body.endDate).map((q) => q.data);
+    return auth.site === 'G' ? send(200, list) : send(200, { ResultCode: 0, Message: '성공', Data: list });
   }
   return send(404, { ResultCode: 404, Message: `no route ${url.pathname}` });
 }
@@ -263,6 +274,30 @@ async function handleLotteon(state, req, res, url) {
       return { odNo: x.odNo, odSeq: x.odSeq, spdNo: x.spdNo, resultCode: '0000', resultMessage: '성공' };
     });
     return send(200, { returnCode: '0000', message: '정상', data: results });
+  }
+  // 상품 Q&A (apiNo 99): 거래처번호 + 등록일시(yyyyMMddHHmmss) + 처리상태 + 페이지
+  if (url.pathname === '/v1/openapi/product/v1/product/qna/list' && req.method === 'POST') {
+    state.lotteon.calls.qna.push(body);
+    if (!trOk) return trFail();
+    if (!stamp(body.regStrDttm) || !stamp(body.regEndDttm)) return send(200, { returnCode: '9000', message: '등록일시 형식 오류' });
+    if (!['ALL', 'NPROC', 'PROC', 'CC_TCTL'].includes(body.qnaStatCd) || !(body.rowsPerPage > 0 && body.rowsPerPage <= 100) || !(body.pageNo >= 1)) return send(200, { returnCode: '9000', message: '조회 조건 오류' });
+    const from = stampToDate(body.regStrDttm);
+    const to = stampToDate(body.regEndDttm);
+    if (to - from > 7 * 86400000) return send(200, { returnCode: '2003', message: '조회기간은 7일을 초과할 수 없습니다.' });
+    const all = state.lotteon.qnas.filter((q) => stampToDate(q.regDttm) >= from && stampToDate(q.regDttm) <= to && (body.qnaStatCd === 'ALL' || q.qnaStatCd === body.qnaStatCd));
+    return send(200, { returnCode: '0000', message: '정상', data: all.slice((body.pageNo - 1) * body.rowsPerPage, body.pageNo * body.rowsPerPage) });
+  }
+  // 판매자 문의 (apiNo 179): 거래처번호 불필요, 접수일(yyyymmdd) / 없으면 '조회된 데이터가 없습니다' 오류 / deny 면 403
+  if (url.pathname === '/v1/openapi/customer/v1/getSellerInquiryList' && req.method === 'POST') {
+    state.lotteon.calls.sellerInquiry.push(body);
+    if (state.lotteon.denySellerInquiry) {
+      res.writeHead(403);
+      return res.end();
+    }
+    if (!/^\d{8}$/.test(body.scStrtDt || '') || !/^\d{8}$/.test(body.scEndDt || '')) return send(200, { returnCode: '9000', message: '조회기간 형식 오류' });
+    const list = state.lotteon.sellerInquiries.filter((q) => q.accpDttm.slice(0, 8) >= body.scStrtDt && q.accpDttm.slice(0, 8) <= body.scEndDt);
+    if (!list.length) return send(200, { returnCode: '9999', message: '조회된 데이터가 없습니다.' });
+    return send(200, { returnCode: '0000', message: '정상', data: { rsltList: list.slice((body.pageNo - 1) * body.rowsPerPage, body.pageNo * body.rowsPerPage), totCnt: list.length } });
   }
   return send(404, { returnCode: '404', message: `no route ${url.pathname}` });
 }

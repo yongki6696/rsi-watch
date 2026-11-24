@@ -66,6 +66,8 @@ function toIso(value) {
   } else if (/^\d{8}$/.test(s)) {
     s = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00`;
   }
+  // 2026.07.16 12:34 / 2026/07/16 → 2026-07-16 12:34
+  s = s.replace(/^(\d{4})[./](\d{1,2})[./](\d{1,2})\.?/, (_, y, m, d) => `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`);
   s = s.replace(' ', 'T');
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s += 'T00:00:00';
   const hasZone = /(Z|[+-]\d{2}:?\d{2})$/.test(s);

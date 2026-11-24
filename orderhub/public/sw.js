@@ -1,5 +1,5 @@
 /* 오더허브 서비스워커: 푸시 알림 수신 + 앱 화면 캐시 */
-const CACHE = 'orderhub-shell-v10';
+const CACHE = 'orderhub-shell-v11';
 const SHELL = ['/', '/app.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/badge-96.png'];
 
 self.addEventListener('install', (event) => {

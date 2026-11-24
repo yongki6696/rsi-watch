@@ -63,6 +63,7 @@ function register(router, app) {
       lastSyncAt: s.last_sync_at,
       lastSuccessAt: s.last_success_at,
       lastError: s.last_error,
+      inquiryError: state.inquiryError || null,
       synced: !!state._syncedOnce,
       createdAt: s.created_at,
       orderCount: db.get('SELECT COUNT(*) AS n FROM orders WHERE store_id = ?', s.id).n,
@@ -264,10 +265,35 @@ function register(router, app) {
   });
 
   // ---------- 고객 문의 ----------
-  router.get('/api/inquiries', (req) => ({
-    inquiries: inquiries.list({ filter: req.query.filter === 'all' ? 'all' : 'open', storeId: req.query.store }),
-    counts: inquiries.counts(),
-  }));
+  router.get('/api/inquiries', (req) => {
+    const storeId = Number(req.query.store) || null;
+    const per = new Map(inquiries.storeCounts().map((r) => [r.storeId, r]));
+    // 문의를 가져오는 스토어 목록 (스토어별 보기)
+    const stores = db
+      .all('SELECT id, type, name, enabled FROM stores ORDER BY id')
+      .filter((s) => {
+        try {
+          return !!getConnector(s.type).inquiries;
+        } catch {
+          return false;
+        }
+      })
+      .map((s) => ({ id: s.id, type: s.type, name: s.name, enabled: !!s.enabled, open: per.get(s.id)?.open || 0, all: per.get(s.id)?.n || 0 }));
+    return {
+      inquiries: inquiries.list({ filter: req.query.filter === 'all' ? 'all' : 'open', storeId }),
+      counts: inquiries.counts(storeId),
+      total: inquiries.counts(),
+      stores,
+    };
+  });
+  // 셀러센터에서 답변한 문의를 '답변 완료'로 표시
+  router.post('/api/inquiries/:id/done', (req) => {
+    const q = inquiries.get(req.params.id);
+    if (!q) throw new HttpError(404, '문의를 찾을 수 없습니다');
+    inquiries.markHandled(q.id);
+    db.addEvent({ storeId: q.store_id, type: 'inquiry', message: `문의를 답변 완료로 표시: ${inquiries.describe(q).slice(0, 40)}` });
+    return { ok: true };
+  });
   router.post('/api/inquiries/:id/answer', async (req) => {
     const q = inquiries.get(req.params.id);
     if (!q) throw new HttpError(404, '문의를 찾을 수 없습니다');

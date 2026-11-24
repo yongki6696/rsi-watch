@@ -387,6 +387,74 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     mock.state.naver.failInquiries = false;
   });
 
+  await t.test('11번가 상품 Q&A · 쿠팡 고객센터 문의도 수집 (답변은 셀러센터 → 답변 완료 표시)', async () => {
+    const kstDay = (ms = 0) => new Date(Date.now() + 9 * 3600000 - ms).toISOString().slice(0, 10);
+    // 11번가 첫 문의 수집은 최근 30일을 7일(YYYYMMDD)씩 5번, 0건이면 '조회된 데이터가 없습니다' 결과도 오류 아님
+    const first = mock.state.eleven.calls.qna.slice(0, 5);
+    assert.equal(first.length, 5);
+    for (const c of first) assert.ok(/^\d{8}$/.test(c.s) && c.s <= c.e && c.st === '00');
+    const stores = (await call('GET', '/api/stores')).stores;
+    const eleven = stores.find((s) => s.type === 'elevenst');
+    const coupang = stores.find((s) => s.type === 'coupang');
+    assert.equal(eleven.inquiryError, null);
+    assert.equal(coupang.inquiryError, null);
+
+    mock.state.eleven.qnas.push(
+      { brdInfoNo: '880001', prdNo: '5550001', prdNm: '무선 마우스', brdInfoSbjct: '출발 문의', brdInfoCont: '언제 출발하나요?<br/>급해요 &amp; 감사합니다', qnaDtlsCdNm: '배송', memNM: 'kim***', createDt: `${kstDay()} 09:30:00`, answerYn: 'N', ordNoDe: '202611220001' },
+      { brdInfoNo: '880002', prdNo: '5550001', prdNm: '무선 마우스', brdInfoSbjct: '색상', brdInfoCont: '화이트 있나요?', qnaDtlsCdNm: '상품', memNM: 'lee***', createDt: `${kstDay(86400000)} 10:00:00`, answerYn: 'Y', answerCont: '네 있습니다' }
+    );
+    mock.state.coupang.callCenter.push(
+      { inquiryId: 71001, _status: 'NO_ANSWER', receiptCategory: '배송지연', content: '배송이 늦어요', inquiryAt: `${kstDay()} 08:00:00`, orderId: 30000000001, replies: [] },
+      { inquiryId: 71002, _status: 'ANSWER', receiptCategory: '교환', content: '교환하고 싶어요', inquiryAt: `${kstDay()} 07:00:00`, replies: [{ content: '교환 접수했습니다' }] }
+    );
+    const before = mock.state.telegram.messages.length;
+    const r = await call('POST', '/api/sync', {});
+    assert.equal(r.inquiries, 2, '새 미답변: 11번가 1 + 쿠팡 고객센터 1');
+    const texts = mock.state.telegram.messages.slice(before).map((m) => m.text).join('\n');
+    assert.match(texts, /💬 상품문의 · 내 11번가[\s\S]*\[배송\] 출발 문의 — kim\*\*\*/);
+    assert.match(texts, /💬 고객문의 · 내 쿠팡[\s\S]*\[고객센터 · 배송지연\] 배송이 늦어요/);
+    // 고객센터 문의는 전체(NONE) + 답변완료(ANSWER) 목록을 비교해서 답변 여부 판단
+    const ccStatuses = new Set(mock.state.coupang.calls.callCenter.map((c) => c.partnerCounselingStatus));
+    assert.ok(ccStatuses.has('NONE') && ccStatuses.has('ANSWER'));
+
+    const all = (await call('GET', '/api/inquiries?filter=all')).inquiries;
+    const q1 = all.find((q) => q.title === '출발 문의');
+    assert.equal(q1.store_type, 'elevenst');
+    assert.equal(q1.kind, 'product');
+    assert.equal(q1.content, '언제 출발하나요?\n급해요 & 감사합니다', 'HTML 정리 + EUC-KR');
+    assert.equal(q1.product_name, '무선 마우스');
+    assert.ok(q1.order_id, '11번가 주문과 연결');
+    assert.equal(q1.answered, 0);
+    const q2 = all.find((q) => q.title === '색상');
+    assert.equal(q2.answered, 1);
+    assert.equal(q2.answer, '네 있습니다');
+    const c1 = all.find((q) => q.content === '배송이 늦어요');
+    assert.equal(c1.category, '고객센터 · 배송지연');
+    assert.equal(c1.answered, 0);
+    const c2 = all.find((q) => q.content === '교환하고 싶어요');
+    assert.equal(c2.answered, 1);
+    assert.equal(c2.answer, '교환 접수했습니다');
+
+    // 스토어별 보기: 문의를 가져오는 스토어 목록 + 미답변 수
+    const per = await call('GET', `/api/inquiries?filter=open&store=${eleven.id}`);
+    assert.ok(per.inquiries.length >= 1 && per.inquiries.every((q) => q.store_id === eleven.id));
+    assert.equal(per.stores.find((s) => s.id === eleven.id).open, per.counts.open);
+    assert.ok(per.total.open >= per.counts.open);
+
+    // 11번가는 오더허브에서 답변 불가 → 셀러센터에서 답변 후 '답변 완료로 표시'
+    await assert.rejects(call('POST', `/api/inquiries/${q1.id}/answer`, { text: '오늘 출발합니다' }), /셀러센터에서 답변/);
+    await call('POST', `/api/inquiries/${q1.id}/done`, {});
+    await call('POST', '/api/sync', {});
+    assert.equal((await call('GET', '/api/inquiries?filter=all')).inquiries.find((q) => q.id === q1.id).answered, 1, '마켓이 아직 미답변이라고 해도 유지');
+    // 쿠팡에서 답변하면 다음 수집 때 자동으로 답변 완료
+    mock.state.coupang.callCenter[0]._status = 'ANSWER';
+    mock.state.coupang.callCenter[0].replies = [{ content: '오늘 출고됩니다' }];
+    await call('POST', '/api/sync', {});
+    const c1b = (await call('GET', '/api/inquiries?filter=all')).inquiries.find((q) => q.id === c1.id);
+    assert.equal(c1b.answered, 1);
+    assert.equal(c1b.answer, '오늘 출고됩니다');
+  });
+
   await t.test('CSV 내보내기', async () => {
     const res = await call('GET', '/api/orders/export.csv?tab=all', null, { raw: true });
     assert.equal(res.status, 200);

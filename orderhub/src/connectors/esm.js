@@ -7,6 +7,9 @@ const { request, parseJsonBig, stringifyBig, BIG } = require('./http');
 const { pick, findArray, findCustomsCode, shape } = require('./fields');
 const { kstDate, kstDateWindows, toIso, toInt, str, sleep } = require('../util');
 const { courierCode } = require('../couriers');
+const { isNoData, dateRanges, plainText } = require('./inquiry-util');
+
+const QNA_PATH = '/item/v1/communications/customer/bulletin-board';
 
 const SITES = {
   auction: { code: 'A', siteType: 1, label: '옥션', short: 'A', color: '#f05a28', idLabel: '옥션 판매자 ID' },
@@ -220,13 +223,77 @@ function makeConnector(type) {
     return { groups: [...groups.values()], state, warnings };
   }
 
+  // 판매자 문의(게시판) 한 건 → 오더허브 문의 (실제 응답은 camelCase, 문서 표기 PascalCase 도 받음)
+  function normalizeQna(q, qnaType) {
+    const no = str(pick(q, ['messageNo', 'MessageNo']));
+    if (!no) return null;
+    const st = str(pick(q, ['informStatus', 'InformStatus']));
+    const answer = plainText(pick(q, ['answerDetails', 'AnswerDetails', 'answerContents', 'AnswerContents', 'replyContents', 'ReplyContents', 'answer', 'Answer']));
+    const answeredAt = pick(q, ['answerDate', 'AnswerDate']);
+    const type = str(pick(q, ['contractType', 'ContractType', 'inquiryType', 'InquiryType']));
+    const goodsNo = str(pick(q, ['siteGoodsNo', 'SiteGoodsNo', 'goodsNo', 'GoodsNo']));
+    return {
+      key: `b-${no}`,
+      kind: /상품/.test(type) ? 'product' : 'customer',
+      category: [type, qnaType === 2 ? '비밀글' : ''].filter(Boolean).join(' · '),
+      title: plainText(pick(q, ['title', 'Title'])),
+      content: plainText(pick(q, ['details', 'Details', 'contents', 'Contents'])),
+      productName: plainText(pick(q, ['goodsName', 'GoodsName', 'siteGoodsName', 'itemName', 'ItemName'])),
+      productId: goodsNo,
+      orderNo: str(pick(q, ['orderNo', 'OrderNo', 'contrNo', 'ContrNo'])),
+      writer: str(pick(q, ['inquirerName', 'InquirerName', 'buyerName', 'BuyerName'])),
+      askedAt: toIso(pick(q, ['receiveDate', 'ReceiveDate', 'regDate', 'RegDate'])),
+      // 미처리 / 처리중 / 처리완료 …
+      answered: st ? /완료/.test(st) && !/미/.test(st) : !!(answer || answeredAt),
+      answer,
+      extra: { messageNo: no, siteGoodsNo: goodsNo, qnaType },
+    };
+  }
+
+  // 판매자 문의 조회: 옥션은 일반(1)·비밀글(2)을 각각, G마켓은 전체(3) / 7일씩 / status 1 전체 · type 1 접수일 기준
+  async function fetchQna(ctx) {
+    const types = site.code === 'A' ? [1, 2] : [3];
+    const gap = Math.min(ctx.config.esmOrderIntervalMs ?? 1000, 1000);
+    const plusDay = (d) => kstDate(new Date(Date.parse(`${d}T12:00:00+09:00`) + 86400000));
+    const out = new Map();
+    let calls = 0;
+    for (const w of dateRanges(ctx.inquiryDays || 7)) {
+      for (const qnaType of types) {
+        if (calls++) await sleep(gap);
+        let json;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            json = await api(ctx, 'POST', QNA_PATH, { qnaType, status: 1, type: 1, startDate: w.from, endDate: plusDay(w.to) });
+            break;
+          } catch (e) {
+            if (isNoData(e)) break;
+            // 호출 제한에 걸리면 잠깐 기다렸다 다시
+            if (attempt < 2 && (e.status === 429 || /5초|초당|잠시 후/.test(e.message))) {
+              await sleep(5300);
+              continue;
+            }
+            throw e;
+          }
+        }
+        if (!json) continue;
+        const list = findArray(json?.Data ?? json?.data ?? json, ['BulletinBoards', 'bulletinBoards', 'Items', 'items', 'List', 'list']);
+        for (const q of list) {
+          const n = normalizeQna(q, qnaType);
+          if (n && !out.has(n.key)) out.set(n.key, n);
+        }
+      }
+    }
+    return [...out.values()];
+  }
+
   const meta = {
     type,
     label: site.label,
     short: site.short,
     color: site.color,
     beta: true,
-    inquiries: false,
+    inquiries: true, // 판매자 문의 (답변은 ESM PLUS 에서)
+    answerable: false,
     backfill: true,
     sellerCenter: 'https://www.esmplus.com/',
     fields: [
@@ -301,6 +368,11 @@ function makeConnector(type) {
       return { groups: [...groups.values()], state };
     },
 
+    // 판매자 문의 - 최근 7일 (처음·1시간마다 30일)
+    async fetchInquiries(ctx) {
+      return fetchQna(ctx);
+    },
+
     // 주문확인 (결제완료 → 배송준비중)
     async confirm(ctx, order, items) {
       const ok = [];
@@ -340,7 +412,7 @@ function makeConnector(type) {
       return { ok, failed };
     },
 
-    _internal: { makeToken, normalize, issuer },
+    _internal: { makeToken, normalize, issuer, normalizeQna },
   };
 }
 

@@ -10,10 +10,12 @@
 // 현재 단계·주문순번(odSeq/procSeq): 롯데ON배송상태 조회 SellerDeliveryProgressStateSearch (apiNo 140)
 // 발주확인/발송처리: 배송상태 통보 SellerDeliveryProgressStateInform (apiNo 137) - 12 상품준비 / 13 발송완료(+택배사·송장)
 // ※ 주문정보 조회(getOrderList)는 일반 판매자 키로는 403(접근 거부)이라 쓰지 않음
+// 문의: 상품 Q&A (apiNo 99) + 판매자 문의 (apiNo 179) - 답변은 스토어센터에서
 const { request, requestRaw, parseJsonBig } = require('./http');
 const { pick, findArray, findCustomsCode, shape } = require('./fields');
 const { kstParts, toIso, toInt, str } = require('../util');
 const { courierCode } = require('../couriers');
+const { isNoData, dateRanges, compact, plainText } = require('./inquiry-util');
 
 // 주문진행단계(odPrgsStepCd)
 const STEP = {
@@ -36,6 +38,8 @@ const PATHS = {
   orders: '/v1/openapi/delivery/v1/SellerDeliveryOrdersSearch',
   progress: '/v1/openapi/delivery/v1/SellerDeliveryProgressStateSearch',
   inform: '/v1/openapi/delivery/v1/SellerDeliveryProgressStateInform',
+  productQna: '/v1/openapi/product/v1/product/qna/list',
+  sellerInquiry: '/v1/openapi/customer/v1/getSellerInquiryList',
 };
 
 // yyyymmddhhmmss (KST)
@@ -449,13 +453,142 @@ async function inform(ctx, items, step, extraFields = {}) {
   };
 }
 
+// ---------- 문의 ----------
+// 상품 Q&A 처리상태: NPROC 미처리 / PROC 처리완료 / CC_TCTL 고객센터 이관
+const QNA_STAT = { NPROC: '미처리', PROC: '처리완료', CC_TCTL: '고객센터 이관' };
+
+// 페이지 단위 조회 (한 페이지 최대 100건)
+async function pagedList(ctx, path, bodyFor) {
+  const rows = [];
+  for (let page = 1; page <= 10; page++) {
+    let json;
+    try {
+      json = await api(ctx, path, bodyFor(page));
+    } catch (e) {
+      if (isNoData(e)) break;
+      throw e;
+    }
+    const list = findArray(json?.data ?? json, ['rsltList', 'data', 'list', 'pdQnaList', 'qnaList']);
+    rows.push(...list);
+    if (list.length < 100) break;
+  }
+  return rows;
+}
+
+function normalizeProductQna(q) {
+  const no = str(pick(q, ['pdQnaNo', 'qnaNo']));
+  if (!no) return null;
+  const st = str(pick(q, ['qnaStatCd'])).toUpperCase();
+  const answer = plainText(pick(q, ['ansCnts', 'answCnts', 'ansCont', 'rplyCnts']));
+  const spdNo = str(pick(q, ['spdNo']));
+  const typeName = str(pick(q, ['qstTypNm', 'qstTypCdNm']));
+  return {
+    key: `p-${no}`,
+    kind: 'product',
+    category: typeName || (st === 'CC_TCTL' ? QNA_STAT.CC_TCTL : ''),
+    title: plainText(pick(q, ['qstTtl', 'qnaTtl'])),
+    content: plainText(pick(q, ['qstCnts', 'qnaCnts', 'qstCont'])),
+    productName: unescapeHtml(pick(q, ['spdNm', 'pdNm', 'sitmNm'])),
+    productId: spdNo,
+    orderNo: odNoOf(q),
+    writer: str(pick(q, ['mbNm', 'custNm', 'regrNm'])),
+    askedAt: toIso(pick(q, ['regDttm', 'qstDttm'])),
+    answered: st ? st !== 'NPROC' : !!answer,
+    answer: answer || (st === 'CC_TCTL' ? '고객센터로 이관된 문의입니다' : ''),
+    extra: { pdQnaNo: no, spdNo, sitmNo: str(pick(q, ['sitmNo'])), status: QNA_STAT[st] || st },
+  };
+}
+
+function normalizeSellerInquiry(q) {
+  const no = str(pick(q, ['slrInqNo', 'inqNo']));
+  if (!no) return null;
+  const st = str(pick(q, ['slrInqProcStatCd'])).toUpperCase();
+  const answer = plainText(pick(q, ['ansCnts', 'answCnts']));
+  return {
+    key: `s-${no}`,
+    kind: 'customer',
+    category: str(pick(q, ['vocTypNm', 'vocLcsfNm', 'vocMcsfNm'])),
+    title: plainText(pick(q, ['inqTtl'])),
+    content: plainText(pick(q, ['inqCnts'])),
+    productName: unescapeHtml(pick(q, ['pdNm', 'spdNm'])),
+    productId: str(pick(q, ['spdNo'])),
+    orderNo: odNoOf(q),
+    writer: str(pick(q, ['custNm', 'mbNm', 'inqrNm'])),
+    askedAt: toIso(pick(q, ['accpDttm', 'inqDttm', 'regDttm'])),
+    // ANS 답변 / UNANS 미답변
+    answered: st === 'ANS' || (st !== 'UNANS' && !!answer),
+    answer,
+    extra: { slrInqNo: no },
+  };
+}
+
+async function fetchProductQna(ctx) {
+  const tr = trInfo(ctx);
+  const out = new Map();
+  for (const w of dateRanges(ctx.inquiryDays || 7)) {
+    const rows = await pagedList(ctx, PATHS.productQna, (pageNo) => ({
+      ...tr,
+      lrtrNo: '',
+      regStrDttm: `${compact(w.from)}000000`,
+      regEndDttm: `${compact(w.to)}235959`,
+      qnaStatCd: 'ALL',
+      pageNo,
+      rowsPerPage: 100,
+    }));
+    for (const q of rows) {
+      const n = normalizeProductQna(q);
+      if (n && !out.has(n.key)) out.set(n.key, n);
+    }
+  }
+  return [...out.values()];
+}
+
+async function fetchSellerInquiries(ctx) {
+  const out = new Map();
+  for (const w of dateRanges(ctx.inquiryDays || 7)) {
+    const rows = await pagedList(ctx, PATHS.sellerInquiry, (pageNo) => ({
+      scStrtDt: compact(w.from),
+      scEndDt: compact(w.to),
+      vocLcsfCd: '',
+      slrInqProcStatCd: '',
+      pageNo,
+      rowsPerPage: 100,
+    }));
+    for (const q of rows) {
+      const n = normalizeSellerInquiry(q);
+      if (n && !out.has(n.key)) out.set(n.key, n);
+    }
+  }
+  return [...out.values()];
+}
+
+// 상품 Q&A + 판매자 문의 (한쪽만 실패하면 나머지는 그대로 반영)
+async function fetchInquiries(ctx) {
+  const list = [];
+  const warnings = [];
+  for (const [label, fn] of [
+    ['상품 Q&A', fetchProductQna],
+    ['판매자 문의', fetchSellerInquiries],
+  ]) {
+    try {
+      list.push(...(await fn(ctx)));
+    } catch (e) {
+      if (e.network) throw e;
+      warnings.push(`${label} - ${e.status === 403 ? '이 인증키로는 조회 권한이 없습니다(403). 스토어센터 > 판매자정보 > OpenAPI 관리에서 확인해주세요' : e.message}`);
+    }
+  }
+  if (warnings.length === 2) throw new Error(`롯데ON 문의 조회 실패: ${warnings.join(' / ')}`);
+  return { list, warnings };
+}
+
 module.exports = {
   type: 'lotteon',
   label: '롯데ON',
   short: 'L',
   color: '#262626',
   beta: true,
-  inquiries: false,
+  inquiries: true, // 상품 Q&A + 판매자 문의 (답변은 스토어센터에서)
+  answerable: false,
   backfill: true,
   sellerCenter: 'https://store.lotteon.com/',
   fields: [
@@ -503,6 +636,9 @@ module.exports = {
     return { groups, state, warnings };
   },
 
+  // 상품 Q&A + 판매자 문의 - 최근 7일 (처음·1시간마다 30일)
+  fetchInquiries,
+
   // 발주확인 = 상품준비(12) 통보
   async confirm(ctx, order, items) {
     return inform(ctx, items, '12');
@@ -515,5 +651,5 @@ module.exports = {
     return inform(ctx, items, '13', { invcNbr: '1', dvCoCd: code, invcNo: String(trackingNo).trim() });
   },
 
-  _internal: { normalizeItem, toGroups, dttm, dayWindows, lineKey, matchProgress, STEP, rawMode, unescapeHtml },
+  _internal: { normalizeItem, toGroups, dttm, dayWindows, lineKey, matchProgress, STEP, rawMode, unescapeHtml, normalizeProductQna, normalizeSellerInquiry },
 };

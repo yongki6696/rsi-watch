@@ -324,4 +324,87 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     assert.ok(mock.state.esm.rateLimited >= 1, '제한에 한 번 걸려야 함');
     assert.equal((await call('GET', '/api/stores')).stores.find((s) => s.id === g.id).lastError, null);
   });
+
+  await t.test('문의 수집: G마켓·옥션 판매자 문의 + 롯데ON 상품 Q&A·판매자 문의', async () => {
+    const kstDay = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+    const stamp = (d = new Date()) => new Date(d.getTime() + 9 * 3600000).toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    // 첫 문의 수집: 최근 30일을 7일씩 - G마켓은 qnaType 3, 옥션은 일반(1)·비밀글(2) 각각
+    const g0 = mock.state.esm.calls.qna.filter((c) => c.site === 'G');
+    assert.ok(g0.length >= 5 && g0.every((c) => c.qnaType === 3 && c.status === 1 && c.type === 1));
+    const a0 = mock.state.esm.calls.qna.filter((c) => c.site === 'A');
+    assert.deepEqual([...new Set(a0.map((c) => c.qnaType))].sort(), [1, 2]);
+    assert.ok(a0.length >= 10);
+    assert.ok(mock.state.lotteon.calls.qna.length >= 5 && mock.state.lotteon.calls.qna.every((c) => c.trGrpCd === 'SR' && c.trNo === LOTTEON.trNo && c.qnaStatCd === 'ALL' && c.rowsPerPage === 100));
+    assert.ok(mock.state.lotteon.calls.sellerInquiry.length >= 5 && mock.state.lotteon.calls.sellerInquiry.every((c) => /^\d{8}$/.test(c.scStrtDt) && c.scStrtDt <= c.scEndDt));
+    let stores = (await call('GET', '/api/stores')).stores;
+    for (const st of stores) assert.equal(st.inquiryError, null, `${st.name}: ${st.inquiryError}`);
+
+    const today = kstDay();
+    mock.state.esm.qnas.push(
+      { site: 'G', qnaType: 3, day: today, data: { messageNo: 504346613, informStatus: '미처리', contractType: '상품', title: '상품 문의입니다.', details: '사이즈 크게 나왔나요?', receiveDate: `${today}T09:28:00+09:00`, inquirerName: '박정희', siteGoodsNo: 'B123456789', token: 'tk' } },
+      { site: 'A', qnaType: 2, day: today, data: { messageNo: 604000001, informStatus: '미처리', contractType: '배송', title: '배송 문의', details: '오늘 출발하나요?', receiveDate: `${today}T08:00:00+09:00`, inquirerName: '한옥션', orderNo: 3000000002 } },
+      // 문서 표기(PascalCase)로 와도 처리
+      { site: 'A', qnaType: 1, day: today, data: { MessageNo: 604000002, InformStatus: '처리완료', ContractType: '상품', Title: '재입고', Details: '언제 들어오나요', ReceiveDate: `${today} 07:00:00`, AnswerDate: `${today} 07:30:00` } }
+    );
+    mock.state.lotteon.qnas.push(
+      { pdQnaNo: 'Q1', qstTypCd: 'PD', qnaStatCd: 'NPROC', spdNo: 'LO100001', sitmNo: 'LO100001_1', qstCnts: '사이즈 문의드려요', regDttm: stamp() },
+      { pdQnaNo: 'Q0', qstTypCd: 'PD', qnaStatCd: 'CC_TCTL', spdNo: 'LO999999', qstCnts: '고객센터로 넘어간 문의', regDttm: stamp() }
+    );
+    mock.state.lotteon.sellerInquiries.push({ slrInqNo: 779, vocTypNm: '반품', slrInqProcStatCd: 'ANS', inqTtl: '반품 문의', inqCnts: '반품하려면?', odNo: 'LO2026112200001', pdNm: '캠핑 랜턴', ansCnts: '안내드립니다', accpDttm: stamp(), procDttm: stamp() });
+    const before = tg().length;
+    const r = await call('POST', '/api/sync', {});
+    assert.equal(r.inquiries, 3, '새 미답변: G마켓 1 + 옥션 비밀글 1 + 롯데ON 상품 Q&A 1');
+    const texts = tg().slice(before).join('\n');
+    assert.match(texts, /💬 상품문의 · 내 G마켓[\s\S]*상품 문의입니다/);
+    assert.match(texts, /💬 고객문의 · 내 옥션[\s\S]*\[배송 · 비밀글\] 배송 문의 — 한옥션/);
+    assert.match(texts, /💬 상품문의 · 내 롯데ON[\s\S]*사이즈 문의드려요/);
+
+    const list = (await call('GET', '/api/inquiries?filter=all')).inquiries;
+    const g = list.find((q) => q.store_type === 'gmarket');
+    assert.equal(g.kind, 'product');
+    assert.equal(g.title, '상품 문의입니다.');
+    assert.equal(g.content, '사이즈 크게 나왔나요?');
+    assert.equal(g.writer, '박정희');
+    assert.doesNotMatch(g.product_name, /^상품번호/, '받은 주문의 상품명으로 표시');
+    assert.equal(g.asked_at, `${today}T00:28:00.000Z`);
+    const a2 = list.find((q) => q.title === '배송 문의');
+    assert.equal(a2.store_type, 'auction');
+    assert.equal(a2.category, '배송 · 비밀글');
+    assert.ok(a2.order_id, '옥션 주문과 연결');
+    assert.equal(a2.answered, 0);
+    assert.equal(list.find((q) => q.title === '재입고').answered, 1);
+    const lq = list.find((q) => q.store_type === 'lotteon' && q.content === '사이즈 문의드려요');
+    assert.equal(lq.kind, 'product');
+    assert.doesNotMatch(lq.product_name, /^상품번호/);
+    const lc = list.find((q) => q.content === '고객센터로 넘어간 문의');
+    assert.equal(lc.answered, 1);
+    assert.equal(lc.category, '고객센터 이관');
+    assert.equal(lc.product_name, '상품번호 LO999999');
+    const ls = list.find((q) => q.title === '반품 문의');
+    assert.equal(ls.kind, 'customer');
+    assert.equal(ls.category, '반품');
+    assert.equal(ls.answered, 1);
+    assert.equal(ls.answer, '안내드립니다');
+    assert.ok(ls.order_id, '롯데ON 주문과 연결');
+    await assert.rejects(call('POST', `/api/inquiries/${lq.id}/answer`, { text: '답변' }), /셀러센터에서 답변/);
+
+    // 롯데ON 판매자 문의 권한이 없어도 상품 Q&A 는 계속 수집, 스토어 화면에 안내
+    const lotte = stores.find((x) => x.type === 'lotteon');
+    mock.state.lotteon.denySellerInquiry = true;
+    mock.state.lotteon.qnas.push({ pdQnaNo: 'Q2', qstTypCd: 'PD', qnaStatCd: 'NPROC', spdNo: 'LO100001', qstCnts: '두 번째 문의', regDttm: stamp() });
+    const r2 = await call('POST', '/api/sync', { storeId: lotte.id });
+    assert.equal(r2.inquiries, 1);
+    stores = (await call('GET', '/api/stores')).stores;
+    const l2 = stores.find((x) => x.id === lotte.id);
+    assert.equal(l2.lastError, null);
+    assert.match(l2.inquiryError, /판매자 문의 - 이 인증키로는 조회 권한이 없습니다\(403\)/);
+    mock.state.lotteon.denySellerInquiry = false;
+    await call('POST', '/api/sync', { storeId: lotte.id });
+    assert.equal((await call('GET', '/api/stores')).stores.find((x) => x.id === lotte.id).inquiryError, null);
+
+    // 옥션에서 답변하면 다음 수집 때 자동으로 답변 완료
+    mock.state.esm.qnas[1].data.informStatus = '처리완료';
+    await call('POST', '/api/sync', {});
+    assert.equal((await call('GET', '/api/inquiries?filter=all')).inquiries.find((q) => q.id === a2.id).answered, 1);
+  });
 });

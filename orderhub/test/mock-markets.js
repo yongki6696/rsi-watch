@@ -22,6 +22,28 @@ const EUCKR = {
   '101동 202호': '313031b5bf20323032c8a3',
 };
 
+// 임의의 한글을 EUC-KR 바이트로 (11번가 응답 흉내용)
+let EUC_TABLE = null;
+function eucKr(text) {
+  if (!EUC_TABLE) {
+    EUC_TABLE = new Map();
+    const dec = new TextDecoder('euc-kr');
+    for (let a = 0x81; a <= 0xfe; a++) {
+      for (let b = 0x41; b <= 0xfe; b++) {
+        const ch = dec.decode(Uint8Array.of(a, b));
+        if (ch.length === 1 && ch !== '\ufffd' && !EUC_TABLE.has(ch)) EUC_TABLE.set(ch, [a, b]);
+      }
+    }
+  }
+  const out = [];
+  for (const ch of String(text)) {
+    const code = ch.codePointAt(0);
+    if (code < 0x80) out.push(code);
+    else out.push(...(EUC_TABLE.get(ch) || [0x3f]));
+  }
+  return Buffer.from(out);
+}
+
 function kstIso(d = new Date()) {
   const k = new Date(d.getTime() + 9 * 3600000);
   return k.toISOString().replace('Z', '+09:00');
@@ -43,8 +65,8 @@ function jsonRawIds(obj) {
 function createState() {
   return {
     naver: { tokens: new Set(), orders: new Map(), changes: [], inquiries: [], qnas: [], failInquiries: false, calls: { confirm: [], dispatch: [], token: 0, answers: [], qnaAnswers: [] } },
-    coupang: { sheets: new Map(), inquiries: [], calls: { ack: [], invoices: [], list: [], single: [], inquiries: [] }, rejectAuth: false },
-    eleven: { orders: new Map(), cancelReq: [], canceled: [], calls: { pack: [], deliver: [] } },
+    coupang: { sheets: new Map(), inquiries: [], callCenter: [], calls: { ack: [], invoices: [], list: [], single: [], inquiries: [], callCenter: [] }, rejectAuth: false },
+    eleven: { orders: new Map(), cancelReq: [], canceled: [], qnas: [], calls: { pack: [], deliver: [], qna: [] } },
     telegram: { messages: [] },
     ntfy: { messages: [] },
   };
@@ -323,6 +345,18 @@ async function handleCoupang(state, req, res, url) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(s.get('inquiryStartAt') || '') || s.get('vendorId') !== COUPANG.vendorId) return send(400, { code: 'ERROR', message: 'bad inquiry params' });
     return send(200, { code: 200, message: 'OK', data: { content: state.coupang.inquiries, pagination: { currentPage: 1, totalPages: 1 } } });
   }
+  // 고객센터 문의: partnerCounselingStatus 로 걸러서 (응답에는 상태 필드를 넣지 않음 → 목록 비교로 답변 여부 판단하는지 확인)
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v4\/vendors\/([^/]+)\/callCenterInquiries$/)) && req.method === 'GET') {
+    const s = url.searchParams;
+    state.coupang.calls.callCenter.push(Object.fromEntries(s.entries()));
+    const st = s.get('partnerCounselingStatus');
+    if (!['NONE', 'ANSWER', 'NO_ANSWER', 'TRANSFER'].includes(st) || s.get('vendorId') !== COUPANG.vendorId) return send(400, { code: 'ERROR', message: 'bad call center params' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s.get('inquiryStartAt') || '') || !/^\d{4}-\d{2}-\d{2}$/.test(s.get('inquiryEndAt') || '')) return send(400, { code: 'ERROR', message: 'bad date' });
+    const size = Number(s.get('pageSize')) || 10;
+    const page = Number(s.get('pageNum')) || 1;
+    const list = state.coupang.callCenter.filter((q) => st === 'NONE' || q._status === st).map(({ _status, ...q }) => q);
+    return send(200, { code: 200, message: 'OK', data: { content: list.slice((page - 1) * size, page * size), pagination: { currentPage: page, totalPages: Math.ceil(list.length / size) || 1 } } });
+  }
   return send(404, { code: 'ERROR', message: `no route ${req.method} ${url.pathname}` });
 }
 
@@ -409,6 +443,27 @@ function handleEleven(state, req, res, url) {
     targets.forEach((o) => (o.st = 'SHIPPED'));
     return result('0', 'ok');
   }
+  // 상품 Q&A: YYYYMMDD 기간(최대 7일) + 답변상태 00/01/02, 없으면 '조회된 데이터가 없습니다' 결과
+  if (p[0] === 'prodqnaservices' && p[1] === 'prodqnalist' && p.length === 5) {
+    const [, , s, e, st] = p;
+    if (!/^\d{8}$/.test(s) || !/^\d{8}$/.test(e) || !['00', '01', '02'].includes(st)) return result('-1', 'bad params');
+    const d = (x) => Date.UTC(+x.slice(0, 4), +x.slice(4, 6) - 1, +x.slice(6, 8));
+    if (d(e) - d(s) > 6 * 86400000) return result('-1', 'max 7 days');
+    state.eleven.calls.qna.push({ s, e, st });
+    const day = (q) => q.createDt.slice(0, 10).replace(/-/g, '');
+    const list = state.eleven.qnas.filter((q) => day(q) >= s && day(q) <= e && (st === '00' || (st === '01') === (q.answerYn === 'Y')));
+    if (!list.length) {
+      return sendXml(200, Buffer.concat([Buffer.from('<?xml version="1.0" encoding="euc-kr"?><ns2:productQnas xmlns:ns2="http://skt.tmall.business.openapi.spring.service.client.domain/"><ns2:result_code>-1</ns2:result_code><ns2:result_text>'), eucKr('조회된 데이터가 없습니다.'), Buffer.from('</ns2:result_text></ns2:productQnas>')]));
+    }
+    const parts = [Buffer.from('<?xml version="1.0" encoding="euc-kr" standalone="yes"?><ns2:productQnas xmlns:ns2="http://skt.tmall.business.openapi.spring.service.client.domain/">')];
+    for (const q of list) {
+      parts.push(Buffer.from('<ns2:productQna>'));
+      for (const [k, v] of Object.entries(q)) parts.push(Buffer.from(`<${k}>`), k === 'brdInfoCont' ? Buffer.concat([Buffer.from('<![CDATA['), eucKr(v), Buffer.from(']]>')]) : eucKr(v), Buffer.from(`</${k}>`));
+      parts.push(Buffer.from('</ns2:productQna>'));
+    }
+    parts.push(Buffer.from('</ns2:productQnas>'));
+    return sendXml(200, Buffer.concat(parts));
+  }
   return result('-1', `no route ${url.pathname}`);
 }
 
@@ -441,7 +496,7 @@ function startMock() {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     try {
-      if (url.pathname.startsWith('/shipping/')) return await handleEsm(state, req, res, url);
+      if (url.pathname.startsWith('/shipping/') || url.pathname.startsWith('/item/')) return await handleEsm(state, req, res, url);
       if (url.pathname.startsWith('/v1/openapi/')) return await handleLotteon(state, req, res, url);
       if (url.pathname.startsWith('/external/')) return await handleNaver(state, req, res, url);
       if (url.pathname.startsWith('/v2/providers/')) return await handleCoupang(state, req, res, url);

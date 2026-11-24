@@ -237,19 +237,31 @@ class SyncEngine {
       }
       // 고객 문의 수집 (실패해도 주문 수집은 정상 처리)
       if (connector.fetchInquiries && this.inquiries && getAppSettings(this.db).collectInquiries !== false) {
+        // 이 스토어의 문의를 처음 가져올 때는 이미 있던 문의라 알림 없이
+        const inqFirst = firstSync || !ctx.state.inquirySyncedAt;
+        const inqRun = (ctx.state.inqRun || 0) + 1;
+        newState.inqRun = inqRun;
+        // 평소엔 최근 7일, 처음·1시간마다(12번에 1번) 최근 30일 → 셀러센터에서 늦게 답변한 문의도 반영
+        const inquiryDays = inqFirst || inqRun % 12 === 0 ? 30 : 7;
         try {
-          const list = await connector.fetchInquiries({ ...ctx, firstSync });
-          for (const q of list || []) {
+          const got = await connector.fetchInquiries({ ...ctx, firstSync: inqFirst, inquiryDays });
+          const list = Array.isArray(got) ? got : got?.list || [];
+          const warnings = Array.isArray(got) ? [] : got?.warnings || [];
+          for (const q of list) {
             const r = this.inquiries.apply(store, q);
-            if (r?.isNew && !q.answered && !firstSync) {
+            if (r?.isNew && !q.answered && !inqFirst) {
               result.inquiries++;
               alerts.inquiries.push({ store, id: r.id });
             }
           }
-          delete newState.inquiryError;
+          newState.inquirySyncedAt = ts;
+          const warn = warnings.length ? `일부 문의를 가져오지 못했습니다: ${warnings.join(' / ')}`.slice(0, 500) : null;
+          if (warn && newState.inquiryError !== warn) this.db.addEvent({ storeId: store.id, level: 'warn', type: 'sync', message: warn });
+          if (warn) newState.inquiryError = warn;
+          else delete newState.inquiryError;
         } catch (e) {
           if (newState.inquiryError !== e.message) {
-            this.db.addEvent({ storeId: store.id, level: 'warn', type: 'sync', message: `문의 수집 실패 (주문 수집은 정상): ${e.message}` });
+            this.db.addEvent({ storeId: store.id, level: 'warn', type: 'sync', message: `문의 수집 실패 (주문 수집은 정상): ${e.message}`.slice(0, 500) });
           }
           newState.inquiryError = e.message;
         }

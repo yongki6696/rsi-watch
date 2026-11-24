@@ -275,7 +275,7 @@ const meta = {
   short: 'C',
   color: '#e52528',
   beta: false,
-  inquiries: true,
+  inquiries: true, // 상품 문의 + 고객센터 문의
   answerable: false, // 답변은 Wing 에서
   backfill: true,
   sellerCenter: 'https://wing.coupang.com/',
@@ -292,6 +292,100 @@ const meta = {
     '참고: 쿠팡 OPEN API 키는 약 180일마다 재발급이 필요합니다.',
   ],
 };
+
+// 상품별 고객문의 (답변은 Wing 에서)
+async function fetchOnline(ctx) {
+  const now = new Date();
+  const query = {
+    vendorId: ctx.creds.vendorId,
+    answeredType: 'ALL',
+    inquiryStartAt: kstDate(new Date(now.getTime() - 6 * 86400000)),
+    inquiryEndAt: kstDate(now),
+    pageSize: 50,
+    pageNum: 1,
+  };
+  let r;
+  try {
+    r = await api(ctx, 'GET', `${vendorPath('v5', ctx.creds.vendorId)}/onlineInquiries`, { query });
+  } catch (e) {
+    if (e.status !== 404 && e.status !== 400) throw e;
+    r = await api(ctx, 'GET', `${vendorPath('v4', ctx.creds.vendorId)}/onlineInquiries`, { query });
+  }
+  const list = Array.isArray(r?.data?.content) ? r.data.content : Array.isArray(r?.data) ? r.data : [];
+  return list.map((q) => {
+    const comments = q.commentDtoList || q.comments || q.answers || [];
+    const answered = (Array.isArray(comments) && comments.length > 0) || q.answeredType === 'ANSWERED' || q.answered === true;
+    const last = Array.isArray(comments) && comments.length ? comments[comments.length - 1] : null;
+    return {
+      key: `o-${str(q.inquiryId)}`,
+      kind: 'product',
+      category: '상품',
+      title: '',
+      content: str(q.content),
+      productName: str(q.sellerProductName) || str(q.productName) || str(q.vendorItemName),
+      productId: str(q.vendorItemId),
+      orderNo: Array.isArray(q.orderIds) && q.orderIds.length ? str(q.orderIds[0]) : '',
+      writer: str(q.buyerEmail) || str(q.customerName),
+      askedAt: toIso(q.inquiryAt || q.createdAt),
+      answered,
+      answer: last ? str(last.content) : '',
+      extra: { inquiryId: str(q.inquiryId) },
+    };
+  });
+}
+
+// 고객센터 문의 (쿠팡 고객센터가 판매자에게 넘긴 문의) - 최근 7일
+//   partnerCounselingStatus: NONE 전체 / ANSWER 답변완료 / NO_ANSWER 미답변 / TRANSFER 이관
+async function fetchCallCenter(ctx) {
+  const now = new Date();
+  const base = {
+    vendorId: ctx.creds.vendorId,
+    inquiryStartAt: kstDate(new Date(now.getTime() - 6 * 86400000)),
+    inquiryEndAt: kstDate(now),
+    pageSize: 30,
+  };
+  const load = async (status) => {
+    const rows = [];
+    for (let pageNum = 1; pageNum <= 5; pageNum++) {
+      const r = await api(ctx, 'GET', `${vendorPath('v4', ctx.creds.vendorId)}/callCenterInquiries`, { query: { ...base, partnerCounselingStatus: status, pageNum } });
+      const list = Array.isArray(r?.data?.content) ? r.data.content : Array.isArray(r?.data) ? r.data : [];
+      rows.push(...list);
+      if (list.length < base.pageSize) break;
+    }
+    return rows;
+  };
+  const all = await load('NONE');
+  // 답변완료 목록에 있는 문의만 답변된 것으로 (이관·미답변 등은 확인 필요로 남김)
+  let answeredIds = null;
+  if (all.length) {
+    try {
+      answeredIds = new Set((await load('ANSWER')).map((q) => str(q.inquiryId)));
+    } catch {}
+  }
+  return all.filter((q) => str(q.inquiryId)).map((q) => {
+    const id = str(q.inquiryId);
+    const replies = [q.replies, q.answers, q.commentDtoList].find(Array.isArray) || [];
+    const last = replies.length ? replies[replies.length - 1] : null;
+    const st = str(q.partnerCounselingStatus || q.csPartnerCounselingStatus || q.counselingStatus);
+    const cat = str(q.receiptCategory || q.inquiryCategory || q.categoryName);
+    const orderId = q.orderId ?? (Array.isArray(q.orderIds) ? q.orderIds[0] : '');
+    return {
+      key: `cc-${id}`,
+      kind: 'customer',
+      category: cat ? `고객센터 · ${cat}` : '고객센터',
+      title: '',
+      content: str(q.content || q.inquiryContent || q.question),
+      productName: str(q.vendorItemName || q.itemName || q.productName || q.sellerProductName),
+      productId: str(Array.isArray(q.vendorItemId) ? q.vendorItemId[0] : q.vendorItemId),
+      orderNo: str(orderId),
+      writer: str(q.buyerName || q.customerName || q.buyerEmail),
+      askedAt: toIso(q.inquiryAt || q.receiptAt || q.createdAt || q.inquiryDate),
+      answered: answeredIds ? answeredIds.has(id) : /^(ANSWER|ANSWERED|COMPLETE|DONE)$/i.test(st),
+      answer: last ? str(last.content || last.answerContent || last.reply) : '',
+      extra: { inquiryId: id, callCenter: true },
+    };
+  });
+}
 
 module.exports = {
   ...meta,
@@ -338,44 +432,23 @@ module.exports = {
     return { groups: [...sheets.values()].map(normalizeSheet), state };
   },
 
-  // 상품별 고객문의 (베타 - 답변은 Wing 에서)
+  // 상품별 고객문의 + 고객센터 문의 (한쪽만 실패하면 나머지는 그대로 반영, 답변은 Wing 에서)
   async fetchInquiries(ctx) {
-    const now = new Date();
-    const query = {
-      vendorId: ctx.creds.vendorId,
-      answeredType: 'ALL',
-      inquiryStartAt: kstDate(new Date(now.getTime() - 6 * 86400000)),
-      inquiryEndAt: kstDate(now),
-      pageSize: 50,
-      pageNum: 1,
-    };
-    let r;
-    try {
-      r = await api(ctx, 'GET', `${vendorPath('v5', ctx.creds.vendorId)}/onlineInquiries`, { query });
-    } catch (e) {
-      if (e.status !== 404 && e.status !== 400) throw e;
-      r = await api(ctx, 'GET', `${vendorPath('v4', ctx.creds.vendorId)}/onlineInquiries`, { query });
+    const list = [];
+    const warnings = [];
+    for (const [label, fn] of [
+      ['상품 문의', fetchOnline],
+      ['고객센터 문의', fetchCallCenter],
+    ]) {
+      try {
+        list.push(...(await fn(ctx)));
+      } catch (e) {
+        if (e.network) throw e;
+        warnings.push(`${label} - ${e.message}`);
+      }
     }
-    const list = Array.isArray(r?.data?.content) ? r.data.content : Array.isArray(r?.data) ? r.data : [];
-    return list.map((q) => {
-      const comments = q.commentDtoList || q.comments || q.answers || [];
-      const answered = (Array.isArray(comments) && comments.length > 0) || q.answeredType === 'ANSWERED' || q.answered === true;
-      const last = Array.isArray(comments) && comments.length ? comments[comments.length - 1] : null;
-      return {
-        key: `o-${str(q.inquiryId)}`,
-        kind: 'product',
-        category: '상품',
-        title: '',
-        content: str(q.content),
-        productName: str(q.sellerProductName) || str(q.productName) || str(q.vendorItemName),
-        orderNo: Array.isArray(q.orderIds) && q.orderIds.length ? str(q.orderIds[0]) : '',
-        writer: str(q.buyerEmail) || str(q.customerName),
-        askedAt: toIso(q.inquiryAt || q.createdAt),
-        answered,
-        answer: last ? str(last.content) : '',
-        extra: { inquiryId: str(q.inquiryId) },
-      };
-    });
+    if (warnings.length === 2) throw new Error(`쿠팡 문의 조회 실패: ${warnings.join(' / ')}`);
+    return { list, warnings };
   },
 
   async refresh(ctx, items) {

@@ -176,3 +176,55 @@ test('택배사 이름 → 직접발송', () => {
   assert.equal(isDirect('DIRECT'), true);
   assert.equal(findCourier('CJ대한통운'), 'CJ');
 });
+
+test('문의 공통: HTML 정리 · 0건 응답 · 날짜 구간 · 날짜 형식', () => {
+  const { plainText, isNoData, dateRanges } = require('../src/connectors/inquiry-util');
+  assert.equal(plainText('사이즈<br/>문의 &amp; <b>급해요</b>&nbsp;!'), '사이즈\n문의 & 급해요 !');
+  assert.equal(plainText('<문의> 색상 있나요?'), '<문의> 색상 있나요?', '한글 꺾쇠는 그대로');
+  assert.equal(plainText({ a: 1 }), '');
+  assert.equal(isNoData(new Error('롯데ON API 오류 [9999] 조회된 데이터가 없습니다.')), true);
+  assert.equal(isNoData(new Error('11번가 API 오류 (-1): 조회 결과가 없습니다')), true);
+  assert.equal(isNoData(new Error('API 사용 권한이 없습니다')), false, '권한 오류는 0건이 아님');
+  assert.equal(isNoData(Object.assign(new Error('데이터가 없습니다'), { status: 404 })), false);
+  // 최근 7일 = 1구간, 30일 = 7일씩 5구간 (빈틈 없이)
+  const now = new Date('2026-11-24T03:00:00Z');
+  assert.deepEqual(dateRanges(7, 7, now), [{ from: '2026-11-18', to: '2026-11-24' }]);
+  const r30 = dateRanges(30, 7, now);
+  assert.equal(r30.length, 5);
+  assert.equal(r30[0].from, '2026-10-26');
+  assert.equal(r30.at(-1).to, '2026-11-24');
+  for (let i = 1; i < r30.length; i++) assert.equal(Date.parse(r30[i].from) - Date.parse(r30[i - 1].to), 86400000);
+  assert.equal(toIso('2026.07.16 12:34:56'), '2026-07-16T03:34:56.000Z');
+  assert.equal(toIso('2026/7/6'), '2026-07-05T15:00:00.000Z');
+});
+
+test('문의 응답 필드: ESM 실제(camelCase)·문서(PascalCase), 롯데ON 처리상태', () => {
+  const { gmarket, auction } = require('../src/connectors/esm');
+  const lotteon = require('../src/connectors/lotteon');
+  const g = gmarket._internal.normalizeQna({ messageNo: '504346613', informStatus: '미처리', contractType: '상품', title: '상품 문의입니다.', details: '사이즈 크게 나왔나요?', receiveDate: '2026-07-20T22:28:00+09:00', inquirerName: '박정희', siteGoodsNo: '4761998630', token: 'tk' }, 3);
+  assert.equal(g.key, 'b-504346613');
+  assert.equal(g.kind, 'product');
+  assert.equal(g.answered, false);
+  assert.equal(g.productId, '4761998630');
+  assert.equal(g.askedAt, '2026-07-20T13:28:00.000Z');
+  assert.equal(g.extra.token, undefined, '답변용 토큰은 저장하지 않음');
+  const a = auction._internal.normalizeQna({ MessageNo: 'M1', InformStatus: '처리완료', ContractType: '배송', Title: '언제', ReceiveDate: '2026-07-21' }, 2);
+  assert.equal(a.answered, true);
+  assert.equal(a.kind, 'customer');
+  assert.equal(a.category, '배송 · 비밀글');
+  assert.equal(auction._internal.normalizeQna({ messageNo: 'M2', informStatus: '처리중' }, 1).answered, false);
+  assert.equal(auction._internal.normalizeQna({ title: '번호 없음' }, 1), null);
+
+  const { normalizeProductQna, normalizeSellerInquiry } = lotteon._internal;
+  assert.equal(normalizeProductQna({ pdQnaNo: 'Q1', qnaStatCd: 'NPROC', qstCnts: '사이즈', spdNo: 'LO1', regDttm: '20260716120000' }).answered, false);
+  assert.equal(normalizeProductQna({ pdQnaNo: 'Q2', qnaStatCd: 'PROC', qstCnts: '색상' }).answered, true);
+  const cc = normalizeProductQna({ pdQnaNo: 'Q3', qnaStatCd: 'CC_TCTL', qstCnts: '이관' });
+  assert.equal(cc.answered, true);
+  assert.equal(cc.category, '고객센터 이관');
+  const s = normalizeSellerInquiry({ slrInqNo: 779, inqCnts: '반품하려면?', pdNm: '테스트상품', slrInqProcStatCd: 'ANS', ansCnts: '안내드립니다', accpDttm: '20260716', procDttm: '20260716' });
+  assert.equal(s.key, 's-779');
+  assert.equal(s.answered, true);
+  assert.equal(s.answer, '안내드립니다');
+  assert.equal(s.askedAt, '2026-07-15T15:00:00.000Z');
+  assert.equal(normalizeSellerInquiry({ slrInqNo: 780, slrInqProcStatCd: 'UNANS', ansCnts: '' }).answered, false);
+});
