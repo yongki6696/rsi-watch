@@ -331,16 +331,21 @@ function elevenAddOrder(state, { ordNo, ordPrdSeq = '1', dlvNo, state: st = 'NEW
   state.eleven.orders.set(`${ordNo}-${ordPrdSeq}`, { ordNo, ordPrdSeq, dlvNo, st, qty, amount, addPrdYn: 'N', addPrdNo: '' });
 }
 
-function elevenXml(orders) {
+function elevenXml(orders, { minimal = false, noDlvNo = false } = {}) {
   const parts = [Buffer.from('<?xml version="1.0" encoding="euc-kr" standalone="yes"?><ns2:orders xmlns:ns2="http://skt.tmall.business.openapi.spring.service.client.domain/">', 'latin1')];
   if (!orders.length) parts.push(Buffer.from('<ns2:result_code>0</ns2:result_code><ns2:result_text>no data</ns2:result_text>', 'latin1'));
   for (const o of orders) {
     const field = (k, v) => Buffer.concat([Buffer.from(`<${k}>`), EUCKR[v] ? Buffer.from(EUCKR[v], 'hex') : Buffer.from(String(v)), Buffer.from(`</${k}>`)]);
     parts.push(Buffer.from('<ns2:order>'));
+    if (minimal) {
+      // 배송중 목록: 주문번호·순번·송장만 (상품·배송번호 없음)
+      parts.push(field('ordNo', o.ordNo), field('ordPrdSeq', o.ordPrdSeq), field('invcNo', o.invcNo || '1234567890'), Buffer.from('</ns2:order>'));
+      continue;
+    }
     parts.push(
       field('ordNo', o.ordNo),
       field('ordPrdSeq', o.ordPrdSeq),
-      field('dlvNo', o.dlvNo),
+      noDlvNo ? Buffer.alloc(0) : field('dlvNo', o.dlvNo),
       field('prdNm', '무선 마우스'),
       field('slctPrdOptNm', 'Black'),
       field('ordQty', o.qty),
@@ -376,11 +381,15 @@ function handleEleven(state, req, res, url) {
   const p = url.pathname.replace('/rest', '').split('/').filter(Boolean);
   const isRange = (a, b) => /^\d{12}$/.test(a) && /^\d{12}$/.test(b);
   const orders = [...state.eleven.orders.values()];
-  if (p[0] === 'ordservices' && p[1] === 'complete' && p.length === 4) {
+  // 상태별 목록: 조회기간 최대 7일
+  const LIST = { complete: 'NEW', packaging: 'CONFIRMED', shipping: 'SHIPPED', dlvcompleted: 'DELIVERED', completed: 'DECIDED' };
+  if (p[0] === 'ordservices' && LIST[p[1]] && p.length === 4) {
     if (!isRange(p[2], p[3])) return result('-1', 'bad range');
-    return sendXml(200, elevenXml(orders.filter((o) => o.st === 'NEW')));
+    const t = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12));
+    if (t(p[3]) - t(p[2]) > 7 * 86400000) return result('-1', '조회기간은 최대 7일입니다');
+    (state.eleven.calls.lists ||= []).push({ name: p[1], start: p[2], end: p[3] });
+    return sendXml(200, elevenXml(orders.filter((o) => o.st === LIST[p[1]]), { minimal: p[1] === 'shipping', noDlvNo: p[1] === 'completed' }));
   }
-  if (p[0] === 'ordservices' && p[1] === 'packaging' && p.length === 4) return sendXml(200, elevenXml(orders.filter((o) => o.st === 'CONFIRMED')));
   if (p[0] === 'claimservice' && p[1] === 'cancelorders') return sendXml(200, elevenXml(orders.filter((o) => state.eleven.cancelReq.includes(`${o.ordNo}-${o.ordPrdSeq}`))));
   if (p[0] === 'claimservice' && p[1] === 'canceledorders') return sendXml(200, elevenXml(orders.filter((o) => o.st === 'CANCELED')));
   if (p[0] === 'ordservices' && p[1] === 'reqpackaging' && p.length === 7) {

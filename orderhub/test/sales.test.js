@@ -9,7 +9,7 @@ const path = require('node:path');
 const baseConfig = require('../src/config');
 const { createApp } = require('../server');
 const { kstDate } = require('../src/util');
-const { startMock, naverAddOrder, coupangAddSheet, NAVER, COUPANG } = require('./mock-markets');
+const { startMock, naverAddOrder, coupangAddSheet, elevenAddOrder, NAVER, COUPANG, ELEVEN } = require('./mock-markets');
 
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
 const kst = (s) => new Date(`${s}+09:00`).toISOString(); // '2026-11-20T10:00:00' (KST) → UTC ISO
@@ -278,4 +278,61 @@ test('지난 주문 불러오기: 스마트스토어·쿠팡 (기간을 나눠 �
   assert.equal(r.stores.find((s) => s.id === nv.id).amount, 45000);
   const nvState = JSON.parse(app.db.get('SELECT state FROM stores WHERE id = ?', nv.id).state);
   assert.equal(nvState.coverageFrom, kstDate(new Date(Date.now() - 31 * 86400000)));
+});
+
+test('지난 주문 불러오기: 11번가 (7일씩, 배송완료·구매확정 포함, 내 정보 유지)', async (t) => {
+  const mock = await startMock();
+  t.after(() => mock.close());
+  const { app, call } = await setup(t, { elevenstApiBase: `${mock.url}/rest` });
+  app.notifier.send = async () => {};
+  // 처리 중 주문 1건 → 첫 연결로 수집, 공급처 기록
+  elevenAddOrder(mock.state, { ordNo: '202611230001', dlvNo: '9301' });
+  const { store } = await call('POST', '/api/stores', { type: 'elevenst', name: '11번가', credentials: ELEVEN });
+  await call('POST', '/api/sync', {});
+  const mine = (await call('GET', '/api/orders?tab=all&q=202611230001')).orders[0];
+  assert.ok(mine);
+  await call('POST', `/api/orders/${mine.id}/update`, { supplier: '도매매', memo: '내 메모' });
+
+  // 연결 전 주문들: 배송완료 / 구매확정(배송번호 없이 옴) / 배송중(상품정보 없이 옴)
+  elevenAddOrder(mock.state, { ordNo: '202611010001', dlvNo: '9201', state: 'DELIVERED', amount: 31000 });
+  elevenAddOrder(mock.state, { ordNo: '202611020001', dlvNo: '9202', state: 'DECIDED', amount: 42000 });
+  elevenAddOrder(mock.state, { ordNo: '202611200001', dlvNo: '9203', state: 'SHIPPED' });
+  // 이미 있는 주문이 구매확정됨 → 배송번호 없이 와도 같은 주문으로
+  mock.state.eleven.orders.get('202611230001-1').st = 'DECIDED';
+  mock.state.eleven.calls.lists = [];
+
+  await call('POST', '/api/sales/backfill', { days: 31, storeId: store.id });
+  const bf = await waitBackfill(call);
+  assert.equal(bf.results[0].error, null, bf.results[0].error);
+  assert.equal(bf.results[0].skipped, null);
+  assert.equal(bf.results[0].added, 2, '배송완료·구매확정 주문 추가 (상품정보 없는 배송중은 제외)');
+  const byNo = async (no) => (await call('GET', `/api/orders?tab=all&q=${no}`)).orders;
+  assert.equal((await byNo('202611010001'))[0].status, 'DELIVERED');
+  assert.equal((await byNo('202611010001'))[0].total_amount, 31000);
+  assert.equal((await byNo('202611020001'))[0].status, 'DELIVERED');
+  assert.equal((await byNo('202611200001')).length, 0);
+  // 내 주문은 그대로(같은 id·공급처·메모), 상태만 구매확정 반영
+  const after = await byNo('202611230001');
+  assert.equal(after.length, 1);
+  assert.equal(after[0].id, mine.id);
+  assert.equal(after[0].supplier, '도매매');
+  assert.equal(after[0].memo, '내 메모');
+  assert.equal(after[0].status, 'DELIVERED');
+  // 목록마다 7일 이하로 5구간씩
+  const calls = mock.state.eleven.calls.lists;
+  for (const name of ['complete', 'packaging', 'shipping', 'dlvcompleted', 'completed']) {
+    assert.equal(calls.filter((c) => c.name === name).length, 5, name);
+  }
+
+  // 평소 수집(30분마다): 다른 곳에서 발송한 주문은 배송중으로 반영
+  elevenAddOrder(mock.state, { ordNo: '202611240001', dlvNo: '9401' });
+  await call('POST', '/api/sync', {});
+  const open = (await byNo('202611240001'))[0];
+  assert.equal(open.status, 'NEW');
+  mock.state.eleven.orders.get('202611240001-1').st = 'SHIPPED';
+  const st = JSON.parse(app.db.get('SELECT state FROM stores WHERE id = ?', store.id).state);
+  st.runCount = 6; // 다음 수집이 7번째 → 배송 단계 목록도 확인
+  app.db.run('UPDATE stores SET state = ? WHERE id = ?', JSON.stringify(st), store.id);
+  await call('POST', '/api/sync', {});
+  assert.equal((await byNo('202611240001'))[0].status, 'SHIPPED');
 });

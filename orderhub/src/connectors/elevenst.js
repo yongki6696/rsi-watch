@@ -2,6 +2,7 @@
 // 11번가 - 셀러 Open API (https://openapi.11st.co.kr)
 // 인증: 요청 헤더 openapikey / 응답: XML (EUC-KR)
 // 주문 수집: 결제완료(발주확인할 내역) / 배송준비중(발송처리할 내역) / 취소요청 목록
+//   + 30분마다 배송중·배송완료 목록, 지난 주문 불러오기는 구매확정까지 (조회기간은 최대 7일씩)
 const net = require('node:net');
 const tls = require('node:tls');
 const nodeHttp = require('node:http');
@@ -195,7 +196,8 @@ function findCustoms(o) {
 function normalizeOrder(o, state, label) {
   const ordNo = pick(o, 'ordNo');
   const seq = pick(o, 'ordPrdSeq');
-  const dlvNo = pick(o, 'dlvNo') || `${ordNo}`;
+  const realDlvNo = pick(o, 'dlvNo');
+  const dlvNo = realDlvNo || `${ordNo}`;
   const qty = toInt(pick(o, 'ordQty', 'ordCnt'), 1);
   return {
     groupKey: String(dlvNo),
@@ -234,6 +236,7 @@ function normalizeOrder(o, state, label) {
           addPrdYn: pick(o, 'addPrdYn') || 'N',
           addPrdNo: pick(o, 'addPrdNo') || 'null',
           dlvNo: String(dlvNo),
+          hasDlvNo: !!realDlvNo,
         },
         raw: o,
       },
@@ -260,6 +263,92 @@ function mergeGroups(list) {
   return [...map.values(), ...partials];
 }
 
+// 상태별 주문 목록 (경로 · 상태 · 표시 이름)
+const LISTS = {
+  complete: ['NEW', '결제완료'],
+  packaging: ['CONFIRMED', '배송준비중'],
+  shipping: ['SHIPPED', '배송중'],
+  dlvcompleted: ['DELIVERED', '배송완료'],
+  completed: ['DELIVERED', '구매확정'],
+};
+
+// 최대 조회기간(7일) 이하 구간으로 나눔
+function weekWindows(days, now = Date.now()) {
+  const out = [];
+  for (let back = days; back > 0; back -= 7) {
+    const from = now - back * 86400000;
+    const to = Math.min(now, from + 7 * 86400000 - 60000);
+    out.push({ start: kstCompact(new Date(from)), end: kstCompact(new Date(to)) });
+  }
+  return out;
+}
+
+async function fetchStatusList(ctx, name, start, end) {
+  const [state, label] = LISTS[name];
+  const xml = await api(ctx, `/ordservices/${name}/${start}/${end}`);
+  return parseList(xml, 'order').map((o) => {
+    const g = normalizeOrder(o, state, label);
+    // 배송중 목록처럼 상품·배송번호 없이 오는 목록은 이미 있는 주문의 상태만 갱신
+    if (!pick(o, 'prdNm') || (name === 'shipping' && !pick(o, 'dlvNo'))) g.partial = true;
+    return g;
+  });
+}
+
+// 같은 상품이 여러 목록에 보이면 나중(더 진행된) 것으로, 묶음번호는 실제 배송번호를 우선
+function collapse(list) {
+  const latest = new Map();
+  const realDlv = new Map();
+  for (const g of list) {
+    for (const it of g.items) {
+      if (it.extra?.hasDlvNo) realDlv.set(it.itemKey, it.extra.dlvNo);
+      latest.set(it.itemKey, { group: g, item: it });
+    }
+  }
+  const out = new Map();
+  const partials = [];
+  for (const [key, { group, item }] of latest) {
+    if (group.partial) {
+      partials.push({ ...group, items: [item] });
+      continue;
+    }
+    const gk = realDlv.get(key) || group.groupKey;
+    if (!out.has(gk)) out.set(gk, { ...group, groupKey: gk, items: [] });
+    out.get(gk).items.push({ ...item, extra: { ...item.extra, dlvNo: gk } });
+  }
+  return [...out.values(), ...partials];
+}
+
+// 지난 주문 불러오기: 결제완료~구매확정 목록을 7일씩 + 취소완료
+async function backfill(ctx) {
+  const state = { ...(ctx.state || {}) };
+  const list = [];
+  const warnings = [];
+  const windows = weekWindows(ctx.backfillDays);
+  for (const name of Object.keys(LISTS)) {
+    try {
+      for (const w of windows) list.push(...(await fetchStatusList(ctx, name, w.start, w.end)));
+    } catch (e) {
+      if (e.network || /HTTP 40[13]/.test(e.message)) throw e;
+      warnings.push(`${LISTS[name][1]} 조회 실패: ${e.message}`);
+    }
+  }
+  if (warnings.length === Object.keys(LISTS).length) throw new Error(warnings.join(' / '));
+  try {
+    for (const w of windows) {
+      const xml = await api(ctx, `/claimservice/canceledorders/${w.start}/${w.end}`);
+      for (const c of parseList(xml, 'order')) {
+        const g = normalizeOrder(c, 'CANCELED', '취소완료');
+        g.partial = true;
+        list.push(g);
+      }
+    }
+  } catch (e) {
+    if (e.network) throw e;
+    warnings.push(`취소완료 조회 실패: ${e.message}`);
+  }
+  return { groups: collapse(list), state, warnings };
+}
+
 const meta = {
   type: 'elevenst',
   label: '11번가',
@@ -267,6 +356,7 @@ const meta = {
   color: '#ff0038',
   beta: true,
   inquiries: false,
+  backfill: true,
   sellerCenter: 'https://soffice.11st.co.kr/',
   fields: [
     { key: 'apiKey', label: 'Open API Key', required: true, secret: true },
@@ -303,17 +393,34 @@ module.exports = {
   },
 
   async fetch(ctx) {
+    if (ctx.backfillDays) return backfill(ctx);
     const state = { ...(ctx.state || {}) };
+    const runCount = (state.runCount || 0) + 1;
+    state.runCount = runCount;
     const now = new Date();
     const start = kstCompact(new Date(now.getTime() - 7 * 86400000 + 60000)); // 최대 7일
     const end = kstCompact(now);
     const list = [];
-    const newXml = await api(ctx, `/ordservices/complete/${start}/${end}`);
-    for (const o of parseList(newXml, 'order')) list.push(normalizeOrder(o, 'NEW', '결제완료'));
-    const packXml = await api(ctx, `/ordservices/packaging/${start}/${end}`);
-    for (const o of parseList(packXml, 'order')) list.push(normalizeOrder(o, 'CONFIRMED', '배송준비중'));
+    list.push(...(await fetchStatusList(ctx, 'complete', start, end)));
+    list.push(...(await fetchStatusList(ctx, 'packaging', start, end)));
+    // 30분마다(6회에 1번) 배송중·배송완료 목록도 확인 → 셀러오피스·다른 프로그램에서 발송한 주문, 배송완료 반영
+    if (runCount % 6 === 1) {
+      const errors = [];
+      for (const name of ['shipping', 'dlvcompleted']) {
+        try {
+          list.push(...(await fetchStatusList(ctx, name, start, end)));
+        } catch (e) {
+          if (e.network) throw e;
+          errors.push(`${LISTS[name][1]}: ${e.message}`);
+        }
+      }
+      const msg = errors.length ? `11번가 배송 단계 조회 실패 (주문 수집은 정상): ${errors.join(' / ')}` : null;
+      if (msg && msg !== state.listError) ctx.log?.(msg);
+      if (msg) state.listError = msg;
+      else delete state.listError;
+    }
 
-    const groups = mergeGroups(list);
+    const groups = collapse(list);
     // 취소요청 목록 → 해당 상품에 취소요청 표시
     try {
       const cancelXml = await api(ctx, `/claimservice/cancelorders/${start}/${end}`);
@@ -408,5 +515,7 @@ module.exports = {
     };
   },
 
-  _internal: { parseList, parseFlat, resultOf, normalizeOrder },
+  _internal: {
+    weekWindows,
+    collapse, parseList, parseFlat, resultOf, normalizeOrder },
 };

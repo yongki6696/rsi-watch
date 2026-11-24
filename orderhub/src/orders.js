@@ -166,6 +166,12 @@ class OrderStore {
       g = { groupKey: existing.group_key, partial: true, items: g.items.map((i) => ({ ...i, partial: true })) };
     }
     if (!existing && g.items.every((i) => i.marketState === 'PENDING')) return null; // 미입금 주문은 입금 후 수집
+    if (!existing) {
+      // 같은 상품들이 이미 한 주문으로 저장돼 있으면(마켓이 묶음 번호를 다르게 보낸 경우) 그 주문에 반영 → 내 메모·공급처·송장 유지
+      const keys = g.items.map((i) => i.itemKey);
+      const owners = db.all(`SELECT order_id, COUNT(*) AS n FROM order_items WHERE store_id = ? AND item_key IN (${keys.map(() => '?').join(',')}) GROUP BY order_id`, store.id, ...keys);
+      if (owners.length === 1 && owners[0].n === keys.length) existing = db.get('SELECT * FROM orders WHERE id = ?', owners[0].order_id);
+    }
 
     return db.tx(() => {
       let orderId;
