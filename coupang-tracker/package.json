@@ -1,0 +1,21 @@
+{
+  "name": "coupang-cart-price-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "쿠팡 장바구니 상품 가격 변동을 주식 차트처럼 보여주는 개인용 웹앱",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node server.js --demo",
+    "test": "node --test",
+    "test:e2e": "node --test --test-concurrency=1 e2e/e2e.mjs"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "lightweight-charts": "4.2.3",
+    "playwright-core": "1.63.0"
+  }
+}

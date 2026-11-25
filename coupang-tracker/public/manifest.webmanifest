@@ -1,0 +1,10 @@
+{
+  "name": "장바구니 시세",
+  "short_name": "장바구니 시세",
+  "description": "쿠팡 장바구니 상품 가격 변동 차트",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f2f4f6",
+  "theme_color": "#f2f4f6",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
