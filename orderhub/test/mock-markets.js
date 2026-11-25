@@ -72,8 +72,8 @@ function jsonRawIds(obj) {
 
 function createState() {
   return {
-    naver: { tokens: new Set(), orders: new Map(), changes: [], inquiries: [], qnas: [], failInquiries: false, calls: { confirm: [], dispatch: [], token: 0, answers: [], qnaAnswers: [] } },
-    coupang: { sheets: new Map(), inquiries: [], callCenter: [], calls: { ack: [], invoices: [], list: [], single: [], inquiries: [], callCenter: [], replies: [] }, rejectAuth: false },
+    naver: { tokens: new Set(), orders: new Map(), changes: [], inquiries: [], qnas: [], failInquiries: false, calls: { confirm: [], dispatch: [], token: 0, answers: [], qnaAnswers: [], claimApprove: [] } },
+    coupang: { sheets: new Map(), inquiries: [], callCenter: [], returns: [], calls: { ack: [], invoices: [], list: [], single: [], inquiries: [], callCenter: [], replies: [], returnLists: [], returnActions: [] }, rejectAuth: false },
     eleven: { orders: new Map(), cancelReq: [], canceled: [], qnas: [], calls: { pack: [], deliver: [], qna: [], answers: [] } },
     telegram: { messages: [] },
     ntfy: { messages: [] },
@@ -178,6 +178,26 @@ async function handleNaver(state, req, res, url) {
       }
     }
     return send(200, { timestamp: kstIso(), traceId: 't', data: { successProductOrderInfos: ok, failProductOrderInfos: [] } });
+  }
+  // 취소 요청 승인 / 반품 승인: 취소는 취소요청 상태에서, 반품은 수거완료 뒤에만
+  let cm;
+  if ((cm = path.match(/^\/v1\/pay-order\/seller\/product-orders\/([^/]+)\/claim\/(cancel|return)\/approve$/)) && req.method === 'POST') {
+    const raw = await readBody(req);
+    state.naver.calls.claimApprove.push({ productOrderId: cm[1], kind: cm[2], raw });
+    const d = state.naver.orders.get(cm[1]);
+    if (!d) return send(404, { code: '104105', message: '상품 주문을 찾을 수 없음' });
+    const p = d.productOrder;
+    if (cm[2] === 'cancel') {
+      if (!['CANCEL_REQUEST', 'CANCELING'].includes(p.claimStatus)) return send(400, { code: '104403', message: '취소 요청 상태가 아닙니다' });
+      p.productOrderStatus = 'CANCELED';
+      p.claimStatus = 'CANCEL_DONE';
+    } else {
+      if (p.claimStatus !== 'COLLECT_DONE') return send(400, { code: '104404', message: '수거 완료된 반품만 승인할 수 있습니다' });
+      p.productOrderStatus = 'RETURNED';
+      p.claimStatus = 'RETURN_DONE';
+    }
+    naverChange(state, cm[1]);
+    return send(200, { timestamp: kstIso(), traceId: 't', data: { successProductOrderIds: [cm[1]], failProductOrderInfos: [] } });
   }
   if (path === '/v1/pay-order/seller/product-orders/dispatch' && req.method === 'POST') {
     const body = JSON.parse(await readBody(req));
@@ -352,6 +372,49 @@ async function handleCoupang(state, req, res, url) {
     state.coupang.calls.inquiries.push(Object.fromEntries(s.entries()));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(s.get('inquiryStartAt') || '') || s.get('vendorId') !== COUPANG.vendorId) return send(400, { code: 'ERROR', message: 'bad inquiry params' });
     return send(200, { code: 200, message: 'OK', data: { content: state.coupang.inquiries, pagination: { currentPage: 1, totalPages: 1 } } });
+  }
+  // 반품/취소 요청 목록 (v6): status RU·UC·PR·CC, 날짜 yyyy-MM-dd (31일 이내), 50건씩
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v6\/vendors\/([^/]+)\/returnRequests$/)) && req.method === 'GET') {
+    const s = url.searchParams;
+    state.coupang.calls.returnLists.push(Object.fromEntries(s.entries()));
+    const STATUS = { RU: ['RELEASE_STOP_UNCHECKED'], UC: ['RETURNS_UNCHECKED', 'VENDOR_WAREHOUSE_CONFIRM'], PR: ['REQUEST_COUPANG_CHECK'], CC: ['RETURNS_COMPLETED'] };
+    const from = s.get('createdAtFrom') || '';
+    const to = s.get('createdAtTo') || '';
+    if (m[1] !== COUPANG.vendorId || !STATUS[s.get('status')] || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return send(400, { code: 'ERROR', message: 'bad returnRequests params' });
+    if (Date.parse(to) - Date.parse(from) > 30 * 86400000) return send(400, { code: 'ERROR', message: '조회 기간은 31일 이내' });
+    if (Number(s.get('maxPerPage') || 50) > 50) return send(400, { code: 'ERROR', message: 'maxPerPage <= 50' });
+    const list = state.coupang.returns.filter((r) => STATUS[s.get('status')].includes(r.receiptStatus));
+    return send(200, { code: 200, message: 'OK', data: list, nextToken: '' });
+  }
+  // 출고중지완료 / 입고확인 / 반품승인: receiptId 는 숫자, cancelCount 는 접수 전체 수량
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v4\/vendors\/([^/]+)\/returnRequests\/(\d+)\/(stoppedShipment|receiveConfirmation|approval)$/)) && req.method === 'PATCH') {
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || '{}');
+    state.coupang.calls.returnActions.push({ action: m[3], receiptId: m[2], raw });
+    const rc = state.coupang.returns.find((r) => r.receiptId === `#${m[2]}`);
+    const fail = (msg) => send(200, { code: 200, message: 'OK', data: { resultCode: 'FAIL', resultMessage: msg } });
+    if (!rc || body.vendorId !== COUPANG.vendorId || !new RegExp(`"receiptId":${m[2]}[,}]`).test(raw)) return send(400, { code: 'ERROR', message: '필수 값 오류 (receiptId 는 숫자)' });
+    if (m[3] === 'stoppedShipment') {
+      if (rc.receiptStatus !== 'RELEASE_STOP_UNCHECKED') return fail('출고중지요청 상태가 아닙니다');
+      if (body.cancelCount !== rc.cancelCountSum) return fail('cancelCount 는 접수 전체 수량이어야 합니다');
+      rc.receiptStatus = 'RELEASE_STOP_DONE'; // 목록에서 빠짐
+      for (const ri of rc.returnItems) {
+        const sheet = state.coupang.sheets.get(ri.shipmentBoxId.replace('#', ''));
+        const it = sheet?.orderItems.find((x) => x.vendorItemId === ri.vendorItemId);
+        if (it) {
+          it.cancelCount = it.shippingCount;
+          it.holdCountForCancel = 0;
+        }
+      }
+    } else if (m[3] === 'receiveConfirmation') {
+      if (rc.receiptStatus !== 'RETURNS_UNCHECKED') return fail('반품접수 상태가 아닙니다');
+      rc.receiptStatus = 'VENDOR_WAREHOUSE_CONFIRM';
+    } else {
+      if (rc.receiptStatus !== 'VENDOR_WAREHOUSE_CONFIRM') return fail('입고완료 상태에서만 반품 승인할 수 있습니다');
+      if (body.cancelCount !== rc.cancelCountSum) return fail('cancelCount 오류');
+      rc.receiptStatus = 'RETURNS_COMPLETED';
+    }
+    return send(200, { code: 200, message: 'OK', data: { resultCode: 'SUCCESS', resultMessage: '' } });
   }
   // 상품 문의 답변: 본문 content·vendorId·replyBy(Wing 아이디) 모두 필수, 두 번 답하면 오류
   if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v4\/vendors\/([^/]+)\/onlineInquiries\/(\d+)\/replies$/)) && req.method === 'POST') {

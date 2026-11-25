@@ -295,6 +295,146 @@ const meta = {
   ],
 };
 
+// ---------- 반품·출고중지 접수 (반품/취소 요청 목록 v6) ----------
+// 조회 status: RU 출고중지요청 / UC 반품접수 / PR 쿠팡확인요청 / CC 반품완료 (최대 31일, 페이지당 50건)
+// 접수 상태(receiptStatus) → 오더허브 표시
+const RECEIPT = {
+  RELEASE_STOP_UNCHECKED: { claim: 'CANCEL', label: '출고중지요청' },
+  RETURNS_UNCHECKED: { claim: 'RETURN', label: '반품접수' },
+  VENDOR_WAREHOUSE_CONFIRM: { claim: 'RETURN', label: '반품 입고완료' },
+  REQUEST_COUPANG_CHECK: { claim: 'RETURN', label: '반품 쿠팡확인요청' },
+  RETURNS_COMPLETED: { claim: null, state: 'RETURNED', label: '반품완료' },
+};
+
+async function listReturns(ctx, status, days = 31) {
+  const now = new Date();
+  const base = { createdAtFrom: kstDate(new Date(now.getTime() - (days - 1) * 86400000)), createdAtTo: kstDate(now), status, cancelType: 'RETURN', maxPerPage: 50 };
+  const out = [];
+  let nextToken = '';
+  for (let page = 0; page < 20; page++) {
+    const r = await api(ctx, 'GET', `${vendorPath('v6', ctx.creds.vendorId)}/returnRequests`, { query: { ...base, ...(nextToken ? { nextToken } : {}) } });
+    const list = Array.isArray(r?.data) ? r.data : Array.isArray(r?.data?.content) ? r.data.content : [];
+    out.push(...list);
+    nextToken = str(r?.nextToken ?? r?.data?.nextToken);
+    if (!nextToken || !list.length) break;
+  }
+  return out;
+}
+
+// 접수에 들어있는 상품의 오더허브 키 (묶음배송번호-옵션ID)
+function receiptKeys(rc) {
+  return (rc.returnItems || []).filter((ri) => ri && ri.shipmentBoxId && ri.vendorItemId).map((ri) => `${str(ri.shipmentBoxId)}-${str(ri.vendorItemId)}`);
+}
+
+// 반품·출고중지 접수 → 상품별 요청 표시. 반품완료는 30분마다, 또는 열려 있던 접수가 목록에서 빠졌을 때 확인
+async function collectReturns(ctx, state, runCount) {
+  const updates = new Map(); // itemKey → { claim, marketState?, label, vanished? }
+  const open = {};
+  for (const status of ['RU', 'UC', 'PR']) {
+    for (const rc of await listReturns(ctx, status)) {
+      const info = RECEIPT[str(rc.receiptStatus)] || (status === 'RU' ? RECEIPT.RELEASE_STOP_UNCHECKED : RECEIPT.RETURNS_UNCHECKED);
+      const keys = receiptKeys(rc);
+      if (!info.claim || !keys.length) continue;
+      open[str(rc.receiptId)] = { keys, claim: info.claim };
+      for (const k of keys) updates.set(k, { claim: info.claim, label: info.label });
+    }
+  }
+  const prev = state.openReceipts || {};
+  const vanished = Object.keys(prev).filter((id) => !open[id]);
+  if (runCount % 6 === 1 || vanished.length) {
+    for (const rc of await listReturns(ctx, 'CC')) {
+      for (const k of receiptKeys(rc)) if (!updates.has(k)) updates.set(k, { claim: null, marketState: 'RETURNED', label: '반품완료' });
+    }
+  }
+  // 반품완료도 아닌데 목록에서 빠진 접수 = 고객 철회 또는 처리 끝남 → 요청 표시만 지움
+  for (const id of vanished) {
+    for (const k of prev[id].keys || []) {
+      if (!updates.has(k)) updates.set(k, { claim: null, label: prev[id].claim === 'CANCEL' ? '출고중지요청 종료' : '반품요청 철회', vanished: true });
+    }
+  }
+  state.openReceipts = open;
+  return updates;
+}
+
+// 발주서 상품에 접수 내용을 반영하고, 이번에 발주서를 받지 않은 상품은 상태만 바꾸는 묶음으로
+function applyReturns(groups, updates) {
+  const seen = new Set();
+  for (const g of groups) {
+    for (const it of g.items) {
+      const u = updates.get(it.itemKey);
+      if (!u) continue;
+      seen.add(it.itemKey);
+      if (u.vanished || it.marketState === 'CANCELED') continue; // 방금 받은 발주서가 최신
+      if (u.marketState) it.marketState = u.marketState;
+      it.claim = u.claim;
+      it.marketStatus = u.marketState ? u.label : it.marketStatus.includes(u.label) ? it.marketStatus : `${it.marketStatus} · ${u.label}`;
+    }
+  }
+  const byBox = new Map();
+  for (const [key, u] of updates) {
+    if (seen.has(key)) continue;
+    const box = key.split('-')[0];
+    if (!byBox.has(box)) byBox.set(box, []);
+    byBox.get(box).push({ itemKey: key, partial: true, claim: u.claim, marketState: u.marketState || null, marketStatus: u.label });
+  }
+  return [...groups, ...[...byBox].map(([box, items]) => ({ groupKey: box, partial: true, items }))];
+}
+
+// 쿠팡 응답의 처리 결과 확인 (data.resultCode SUCCESS)
+function checkResult(r) {
+  const d = r?.data;
+  if (d && typeof d === 'object' && d.resultCode && String(d.resultCode).toUpperCase() !== 'SUCCESS') throw new Error(str(d.resultMessage) || str(d.resultCode));
+}
+
+// 출고중지요청 → 출고중지완료(취소완료) / 반품접수 → 입고확인 + 반품승인(반품완료)
+//   PATCH v4 …/returnRequests/{receiptId}/stoppedShipment {vendorId, receiptId, cancelCount(접수 전체 수량)}
+//   PATCH v4 …/returnRequests/{receiptId}/receiveConfirmation {vendorId, receiptId}
+//   PATCH v4 …/returnRequests/{receiptId}/approval {vendorId, receiptId, cancelCount}
+async function approveClaim(ctx, order, items, type) {
+  const vendorId = ctx.creds.vendorId;
+  const keys = new Set(items.map((i) => i.itemKey));
+  const vendorItems = new Set(items.map((i) => str(i.extra?.vendorItemId)).filter(Boolean));
+  const receipts = [];
+  for (const s of type === 'CANCEL' ? ['RU'] : ['UC', 'PR']) {
+    receipts.push(...(await listReturns(ctx, s)).filter((rc) => str(rc.orderId) === str(order.order_no)));
+  }
+  const ok = new Set();
+  const failed = new Map();
+  const v4 = `${vendorPath('v4', vendorId)}/returnRequests`;
+  for (const rc of receipts) {
+    const rcKeys = receiptKeys(rc);
+    const mine = rcKeys.length ? rcKeys.filter((k) => keys.has(k)) : (rc.returnItems || []).some((ri) => vendorItems.has(str(ri.vendorItemId))) ? [...keys] : [];
+    if (!mine.length) continue;
+    const receiptId = str(rc.receiptId);
+    const count =
+      toInt(rc.cancelCountSum, 0) ||
+      (rc.returnItems || []).reduce((n, ri) => n + toInt(ri.cancelCount, 0), 0) ||
+      items.filter((i) => mine.includes(i.itemKey)).reduce((n, i) => n + (toInt(i.quantity, 0) || 1), 0);
+    const st = str(rc.receiptStatus);
+    try {
+      if (type === 'CANCEL') {
+        if (st && st !== 'RELEASE_STOP_UNCHECKED') throw new Error(`출고중지요청 상태가 아닙니다 (${RECEIPT[st]?.label || st})`);
+        checkResult(await api(ctx, 'PATCH', `${v4}/${encodeURIComponent(receiptId)}/stoppedShipment`, { body: { vendorId, receiptId: BIG(receiptId), cancelCount: count } }));
+      } else {
+        if (st === 'REQUEST_COUPANG_CHECK') throw new Error('쿠팡이 확인 중인 반품이라 쿠팡 처리를 기다려야 합니다 (Wing에서 확인)');
+        // 반품 상품을 받았다는 입고 확인 → 반품 승인
+        if (st === 'RETURNS_UNCHECKED' || !st) checkResult(await api(ctx, 'PATCH', `${v4}/${encodeURIComponent(receiptId)}/receiveConfirmation`, { body: { vendorId, receiptId: BIG(receiptId) } }));
+        checkResult(await api(ctx, 'PATCH', `${v4}/${encodeURIComponent(receiptId)}/approval`, { body: { vendorId, receiptId: BIG(receiptId), cancelCount: count } }));
+      }
+      for (const k of mine) ok.add(k);
+    } catch (e) {
+      if (e.network) throw e;
+      for (const k of mine) failed.set(k, e.message);
+    }
+  }
+  for (const k of keys) {
+    if (!ok.has(k) && !failed.has(k)) {
+      failed.set(k, type === 'CANCEL' ? '쿠팡에서 이 상품의 출고중지요청을 찾지 못했습니다 (이미 처리됐거나 고객이 철회했을 수 있어요)' : '쿠팡에서 이 상품의 반품 접수를 찾지 못했습니다 (이미 처리됐거나 고객이 철회했을 수 있어요)');
+    }
+  }
+  return { ok: [...ok], failed: [...failed].map(([itemKey, message]) => ({ itemKey, message })) };
+}
+
 // 상품별 고객문의 (답변은 Wing 에서)
 async function fetchOnline(ctx) {
   const now = new Date();
@@ -427,6 +567,7 @@ module.exports = {
   ...meta,
   answerCheck,
   answerInquiry,
+  approveClaim,
 
   async test(ctx) {
     const state = {};
@@ -467,7 +608,23 @@ module.exports = {
       }
     }
     state.initialized = true;
-    return { groups: [...sheets.values()].map(normalizeSheet), state };
+    const groups = [...sheets.values()].map(normalizeSheet);
+    // 반품·출고중지 접수 (실패해도 주문 수집은 정상, 마지막으로 확인한 요청 표시는 유지)
+    let updates;
+    try {
+      updates = await collectReturns(ctx, state, runCount);
+      delete state.returnsError;
+    } catch (e) {
+      if (e.network) throw e;
+      const msg = `쿠팡 반품·출고중지 목록 조회 실패 (주문 수집은 정상): ${e.message}`;
+      if (state.returnsError !== msg) ctx.log?.(msg);
+      state.returnsError = msg;
+      updates = new Map();
+      for (const r of Object.values(state.openReceipts || {})) {
+        for (const k of r.keys || []) updates.set(k, { claim: r.claim, label: r.claim === 'CANCEL' ? '출고중지요청' : '반품요청' });
+      }
+    }
+    return { groups: applyReturns(groups, updates), state };
   },
 
   // 상품별 고객문의 + 고객센터 문의 (한쪽만 실패하면 나머지는 그대로 반영, 답변은 Wing 에서)
@@ -546,5 +703,7 @@ module.exports = {
     return resultForItems(items, r, '송장 등록 실패');
   },
 
-  _internal: { sign, signedDate, buildQuery, normalizeSheet, mapState },
+  _internal: {
+    applyReturns,
+    receiptKeys, sign, signedDate, buildQuery, normalizeSheet, mapState },
 };

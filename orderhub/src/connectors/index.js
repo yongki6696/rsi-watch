@@ -24,6 +24,7 @@ function listConnectors() {
     inquiries: !!c.inquiries,
     answerable: !!c.answerable,
     backfill: !!c.backfill,
+    claims: !!c.approveClaim, // 취소 요청 승인 · 반품 완료 처리
     sellerCenter: c.sellerCenter || '',
     fields: c.fields,
     guide: c.guide,

@@ -237,6 +237,35 @@ class Actions {
     return results;
   }
 
+  // 고객의 취소 요청 승인(취소완료) / 반품 완료 처리 - 마켓에 전송 (쿠팡·스마트스토어)
+  async approveClaim(id, type) {
+    const order = this.load(id);
+    if (!['CANCEL', 'RETURN'].includes(type)) throw new HttpError(400, '처리할 요청 종류(취소/반품)를 골라주세요');
+    const label = type === 'CANCEL' ? '취소완료' : '반품완료';
+    const store = this.storeOf(order);
+    const connector = getConnector(store.type);
+    if (!connector.approveClaim) throw new HttpError(400, `${connector.label}은(는) 오더허브에서 ${type === 'CANCEL' ? '취소' : '반품'} 처리를 지원하지 않습니다. 셀러센터에서 처리해주세요`);
+    const items = order.items.filter((i) => i.claim === type && !['CANCELED', 'RETURNED'].includes(i.market_state));
+    if (!items.length) throw new HttpError(400, type === 'CANCEL' ? '취소 요청이 들어온 상품이 없습니다' : '반품 요청이 들어온 상품이 없습니다');
+    const ctx = this.sync.ctxFor(store);
+    const r = await connector.approveClaim(ctx, order, forConnector(items), type);
+    if (r.ok.length) {
+      // 마켓 처리 결과를 바로 반영 (다음 수집 때 마켓 상태로 다시 확인)
+      this.orders.applyGroup(store, {
+        groupKey: order.group_key,
+        partial: true,
+        items: r.ok.map((itemKey) => ({ itemKey, partial: true, marketState: type === 'CANCEL' ? 'CANCELED' : 'RETURNED', marketStatus: label, claim: null })),
+      });
+      this.event(order, `${label} 처리 (${r.ok.length}개 상품)`);
+    }
+    if (r.failed.length) {
+      const msg = [...new Set(r.failed.map((f) => f.message))].join(', ');
+      this.event(order, `${label} 처리 실패: ${msg}`, 'error');
+      return { ok: false, message: r.ok.length ? `일부 상품만 ${label} 처리했습니다. 실패: ${msg}` : `${label} 처리 실패: ${msg}` };
+    }
+    return { ok: true, message: `${connector.label}에 ${label} 처리했습니다` };
+  }
+
   // 송장 일괄 등록: rows = [{ orderNo, courier, trackingNo }]
   async bulkInvoices(rows, { dispatch = false } = {}) {
     const report = [];

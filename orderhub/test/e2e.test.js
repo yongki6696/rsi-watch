@@ -557,6 +557,90 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     assert.equal(direct.elevenst, false);
   });
 
+  await t.test('취소·반품 요청 → 오더허브에서 취소 승인 · 반품 완료 (스마트스토어·쿠팡)', async () => {
+    const meta = await call('GET', '/api/meta');
+    const flag = (t) => meta.connectors.find((c) => c.type === t).claims;
+    assert.deepEqual([flag('naver'), flag('coupang'), flag('elevenst')], [true, true, false]);
+
+    // 스마트스토어: 발주확인 뒤 취소요청 / 배송완료 뒤 반품요청(아직 수거 전)
+    naverAddOrder(mock.state, { productOrderId: '2026112500000901', orderId: '2026112590000901', name: '취소고객', place: 'OK' });
+    naverAddOrder(mock.state, { productOrderId: '2026112500000902', orderId: '2026112590000902', name: '반품고객', status: 'DELIVERED', place: 'OK', claimType: 'RETURN', claimStatus: 'RETURN_REQUEST' });
+    // 쿠팡: 상품준비중 주문
+    coupangAddSheet(mock.state, { shipmentBoxId: '700000000911', orderId: '9200000911', vendorItemId: '911', name: '출고중지', status: 'INSTRUCT' });
+    await call('POST', '/api/sync', {});
+    const nc = mock.state.naver.orders.get('2026112500000901').productOrder;
+    nc.claimType = 'CANCEL';
+    nc.claimStatus = 'CANCEL_REQUEST';
+    naverChange(mock.state, '2026112500000901');
+    // 쿠팡 출고중지요청(상품준비중에서 고객 취소) + 발송한 주문(BIG_BOX)의 반품접수 - 큰 숫자 ID
+    mock.state.coupang.sheets.get('700000000911').orderItems[0].holdCountForCancel = 1;
+    mock.state.coupang.returns.push(
+      { receiptId: '#600000000000000911', orderId: '#9200000911', receiptType: 'CANCEL', receiptStatus: 'RELEASE_STOP_UNCHECKED', createdAt: '2026-11-25T10:00:00', cancelCountSum: 1, returnItems: [{ vendorItemId: '#911', vendorItemName: '스테인리스 텀블러, 실버', cancelCount: 1, purchaseCount: 1, shipmentBoxId: '#700000000911' }] },
+      { receiptId: '#600000000000000912', orderId: `#${BIG_ORDER}`, receiptType: 'RETURN', receiptStatus: 'RETURNS_UNCHECKED', createdAt: '2026-11-25T11:00:00', cancelCountSum: 1, returnItems: [{ vendorItemId: '#70000000001', vendorItemName: '스테인리스 텀블러, 실버', cancelCount: 1, purchaseCount: 1, shipmentBoxId: `#${BIG_BOX}` }] }
+    );
+    await call('POST', '/api/sync', {});
+    const lists = mock.state.coupang.calls.returnLists;
+    assert.ok(['RU', 'UC', 'PR'].every((s) => lists.some((l) => l.status === s && l.cancelType === 'RETURN')), '출고중지·반품접수·쿠팡확인요청 목록 조회');
+
+    const nCancel = await orderByNo('2026112590000901');
+    const nReturn = await orderByNo('2026112590000902');
+    const cCancel = await orderByNo('9200000911');
+    const cReturn = await orderByNo(BIG_ORDER);
+    assert.equal(nCancel.claim, 'CANCEL');
+    assert.equal(nReturn.claim, 'RETURN');
+    assert.equal(cCancel.claim, 'CANCEL');
+    assert.equal(cReturn.claim, 'RETURN', '쿠팡 반품접수를 발송한 주문에 표시');
+    assert.match((await call('GET', `/api/orders/${cReturn.id}`)).items[0].market_status, /반품접수/);
+    const claimTab = (await call('GET', '/api/orders?tab=claim')).orders.map((o) => o.id);
+    for (const o of [nCancel, nReturn, cCancel, cReturn]) assert.ok(claimTab.includes(o.id));
+
+    // 스마트스토어 취소 승인 → 바로 취소완료
+    let r = await call('POST', `/api/orders/${nCancel.id}/claim`, { type: 'CANCEL' });
+    assert.equal(r.ok, true, r.message);
+    assert.deepEqual(mock.state.naver.calls.claimApprove.at(-1), { productOrderId: '2026112500000901', kind: 'cancel', raw: '{}' });
+    assert.equal((await call('GET', `/api/orders/${nCancel.id}`)).status, 'CANCELED');
+
+    // 스마트스토어 반품: 수거 전이면 마켓 오류 + 안내, 수거완료 뒤 승인 → 반품완료
+    r = await call('POST', `/api/orders/${nReturn.id}/claim`, { type: 'RETURN' });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /수거/);
+    assert.equal((await orderByNo('2026112590000902')).claim, 'RETURN', '실패하면 그대로');
+    mock.state.naver.orders.get('2026112500000902').productOrder.claimStatus = 'COLLECT_DONE';
+    naverChange(mock.state, '2026112500000902');
+    await call('POST', '/api/sync', {});
+    r = await call('POST', `/api/orders/${nReturn.id}/claim`, { type: 'RETURN' });
+    assert.equal(r.ok, true, r.message);
+    assert.equal(mock.state.naver.calls.claimApprove.at(-1).kind, 'return');
+    assert.equal((await call('GET', `/api/orders/${nReturn.id}`)).status, 'RETURNED');
+
+    // 쿠팡 출고중지완료: 접수번호(큰 숫자 그대로) + 접수 전체 수량
+    r = await call('POST', `/api/orders/${cCancel.id}/claim`, { type: 'CANCEL' });
+    assert.equal(r.ok, true, r.message);
+    const stop = mock.state.coupang.calls.returnActions.at(-1);
+    assert.equal(stop.action, 'stoppedShipment');
+    assert.match(stop.raw, /"receiptId":600000000000000911,"cancelCount":1/);
+    assert.equal((await call('GET', `/api/orders/${cCancel.id}`)).status, 'CANCELED');
+
+    // 쿠팡 반품: 입고 확인 → 반품 승인
+    r = await call('POST', `/api/orders/${cReturn.id}/claim`, { type: 'RETURN' });
+    assert.equal(r.ok, true, r.message);
+    assert.deepEqual(mock.state.coupang.calls.returnActions.slice(-2).map((a) => a.action), ['receiveConfirmation', 'approval']);
+    assert.equal((await call('GET', `/api/orders/${cReturn.id}`)).status, 'RETURNED');
+
+    // 다음 수집에도 그대로 (마켓 상태와 일치)
+    await call('POST', '/api/sync', {});
+    assert.equal((await orderByNo('2026112590000901')).status, 'CANCELED');
+    assert.equal((await orderByNo('2026112590000902')).status, 'RETURNED');
+    assert.equal((await orderByNo('9200000911')).status, 'CANCELED');
+    assert.equal((await orderByNo(BIG_ORDER)).status, 'RETURNED');
+
+    // 요청이 없는 주문 / 지원하지 않는 마켓은 안내
+    await assert.rejects(call('POST', `/api/orders/${nCancel.id}/claim`, { type: 'CANCEL' }), /요청이 들어온 상품이 없습니다/);
+    const el = (await call('GET', '/api/orders?tab=all&q=202611220001')).orders[0];
+    await assert.rejects(call('POST', `/api/orders/${el.id}/claim`, { type: 'CANCEL' }), /지원하지 않습니다/);
+    await assert.rejects(call('POST', `/api/orders/${el.id}/claim`, { type: 'EXCHANGE' }), /취소\/반품/);
+  });
+
   await t.test('수집 오류 알림은 한 번만, 복구되면 정상화 알림', async () => {
     mock.state.coupang.rejectAuth = true;
     const before = mock.state.telegram.messages.length;

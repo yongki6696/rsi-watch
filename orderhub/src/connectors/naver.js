@@ -145,7 +145,8 @@ function mapState(p) {
 
 function mapClaim(p) {
   const s = p.claimStatus || '';
-  if (!s || /_REJECT$|_DONE$|^PURCHASE_DECISION/.test(s)) return null;
+  // 끝난 클레임만 제외 (수거완료 COLLECT_DONE 은 반품·교환 진행 중)
+  if (!s || /^(CANCEL|RETURN|EXCHANGE|ADMIN_CANCEL)_DONE$|_REJECT$|^PURCHASE_DECISION/.test(s)) return null;
   const t = p.claimType || '';
   if (t === 'CANCEL' || t === 'ADMIN_CANCEL' || s.startsWith('CANCEL') || s.startsWith('ADMIN_CANCEL')) return 'CANCEL';
   if (t === 'RETURN' || s.startsWith('RETURN')) return 'RETURN';
@@ -197,7 +198,7 @@ function normalize(detail) {
       marketState: mapState(p),
       marketStatus,
       claim,
-      extra: { productOrderId: str(p.productOrderId), orderId: str(o.orderId) },
+      extra: { productOrderId: str(p.productOrderId), orderId: str(o.orderId), claimType: str(p.claimType), claimStatus: str(p.claimStatus) },
       raw: detail,
     },
   };
@@ -306,6 +307,30 @@ module.exports = {
     // 변경 내역 반영 지연을 고려해 10분 겹쳐서 다음 조회
     state.cursor = new Date(Math.max(from.getTime(), now.getTime() - 10 * 60000)).toISOString();
     return { groups: toGroups(details), state };
+  },
+
+  // 고객의 취소 요청 승인(바로 환불) / 반품 승인(환불) - 상품주문마다
+  //   POST /v1/pay-order/seller/product-orders/{productOrderId}/claim/cancel/approve
+  //   POST /v1/pay-order/seller/product-orders/{productOrderId}/claim/return/approve (보통 수거완료 뒤)
+  async approveClaim(ctx, order, items, type) {
+    const kind = type === 'CANCEL' ? 'cancel' : 'return';
+    const ok = [];
+    const failed = [];
+    for (const it of items) {
+      const id = it.extra?.productOrderId || it.itemKey;
+      try {
+        const r = await api(ctx, 'POST', `/v1/pay-order/seller/product-orders/${encodeURIComponent(id)}/claim/${kind}/approve`, { body: {} });
+        const fail = (r?.data?.failProductOrderInfos || []).find((f) => String(f.productOrderId) === String(id));
+        if (fail) failed.push({ itemKey: it.itemKey, message: `${fail.message || ''} (${fail.code || ''})`.trim() });
+        else ok.push(it.itemKey);
+      } catch (e) {
+        let message = e.message;
+        // 반품은 수거가 끝나야 승인되는 경우가 많음
+        if (type === 'RETURN' && ['RETURN_REQUEST', 'COLLECTING'].includes(it.extra?.claimStatus)) message += ' - 아직 수거 전이라면 수거가 끝난 뒤 다시 눌러주세요 (스마트스토어센터에서 수거완료 처리도 가능)';
+        failed.push({ itemKey: it.itemKey, message });
+      }
+    }
+    return { ok, failed };
   },
 
   // 특정 상품주문 최신 상태 다시 조회

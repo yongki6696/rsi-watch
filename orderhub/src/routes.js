@@ -223,6 +223,8 @@ function register(router, app) {
   });
   router.post('/api/orders/:id/revert', (req) => actions.revert(req.params.id));
   router.post('/api/orders/:id/cancel-local', (req) => actions.cancelLocal(req.params.id));
+  // 취소 요청 승인 / 반품 완료 처리 (마켓에 전송)
+  router.post('/api/orders/:id/claim', (req) => actions.approveClaim(req.params.id, str(req.body?.type).toUpperCase()));
 
   // ---------- 매출 ----------
   router.get('/api/sales', (req) => sales.report({ from: req.query.from, to: req.query.to }));

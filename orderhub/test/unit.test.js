@@ -229,3 +229,25 @@ test('문의 응답 필드: ESM 실제(camelCase)·문서(PascalCase), 롯데ON 
   assert.equal(s.askedAt, '2026-07-15T15:00:00.000Z');
   assert.equal(normalizeSellerInquiry({ slrInqNo: 780, slrInqProcStatCd: 'UNANS', ansCnts: '' }).answered, false);
 });
+
+test('쿠팡 반품·출고중지 접수 반영: 받은 발주서는 덮어쓰고, 나머지는 상태만', () => {
+  const { applyReturns, receiptKeys } = coupang._internal;
+  assert.deepEqual(receiptKeys({ returnItems: [{ shipmentBoxId: '642538970006401429', vendorItemId: 70000000001 }, { vendorItemId: 1 }] }), ['642538970006401429-70000000001']);
+  const groups = [
+    { groupKey: 'B1', items: [{ itemKey: 'B1-1', marketState: 'DELIVERED', marketStatus: '배송완료', claim: null }, { itemKey: 'B1-2', marketState: 'CANCELED', marketStatus: '취소', claim: null }] },
+  ];
+  const updates = new Map([
+    ['B1-1', { claim: 'RETURN', label: '반품접수' }],
+    ['B1-2', { claim: 'CANCEL', label: '출고중지요청' }],
+    ['B2-9', { claim: null, marketState: 'RETURNED', label: '반품완료' }],
+    ['B3-7', { claim: null, label: '반품요청 철회', vanished: true }],
+  ]);
+  const out = applyReturns(groups, updates);
+  assert.equal(out[0].items[0].claim, 'RETURN');
+  assert.equal(out[0].items[0].marketStatus, '배송완료 · 반품접수');
+  assert.equal(out[0].items[1].claim, null, '발주서에서 이미 취소된 상품은 그대로');
+  const b2 = out.find((g) => g.groupKey === 'B2');
+  assert.deepEqual(b2.items[0], { itemKey: 'B2-9', partial: true, claim: null, marketState: 'RETURNED', marketStatus: '반품완료' });
+  assert.equal(b2.partial, true);
+  assert.equal(out.find((g) => g.groupKey === 'B3').items[0].marketStatus, '반품요청 철회');
+});

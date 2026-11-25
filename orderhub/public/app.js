@@ -733,6 +733,8 @@ function orderCard(o) {
     append(foot, h('span', { class: 'muted small' }, o.market_status || ''));
     append(card, top, body, foot);
   }
+  // 취소·반품 탭: 카드에서 바로 승인
+  if (S.tab === 'claim' && canApproveClaim(o)) append(card, h('div', { class: 'claim-row' }, h('span', { class: 'muted small' }, o.market_status || CLAIM[o.claim]), claimButton(o)));
   return card;
 }
 
@@ -794,6 +796,33 @@ function showResults(results, okMsg) {
   if (bad.length) toast(`${ok.length ? `${ok.length}건 ${okMsg}, ` : ''}${bad.length}건 실패\n${bad.map((b) => b.message).slice(0, 3).join('\n')}`, 'err');
   else if (warn.length) toast(`${ok.length}건 ${okMsg}\n주의: ${warn[0].warning}`, 'err');
   else toast(`${ok.length}건 ${okMsg}`, 'ok');
+}
+
+// 취소 요청 승인 / 반품 완료 버튼 (쿠팡·스마트스토어)
+function canApproveClaim(o) {
+  return !!(o.claim && ['CANCEL', 'RETURN'].includes(o.claim) && !['CANCELED', 'RETURNED'].includes(o.status) && connector(o.store_type).claims);
+}
+function claimButton(o, cls = 'btn sm primary') {
+  const cancel = o.claim === 'CANCEL';
+  const c = connector(o.store_type);
+  return h(
+    'button',
+    {
+      class: cls,
+      onclick: (e) =>
+        withBtn(e.currentTarget, async () => {
+          const msg = cancel
+            ? `${c.label} 고객의 취소 요청을 승인할까요?\n승인하면 바로 취소·환불되고 되돌릴 수 없습니다.${o.purchased_at ? '\n공급처에 넣은 발주도 꼭 취소하세요.' : ''}`
+            : `반품 상품을 돌려받으셨나요?\n${c.label}에 반품완료 처리하면 고객에게 환불되고 되돌릴 수 없습니다.`;
+          if (!confirm(msg)) return;
+          const r = await api('POST', `/api/orders/${o.id}/claim`, { type: o.claim });
+          toast(r.message, r.ok ? 'ok' : 'err');
+          await afterAction();
+        }),
+    },
+    icon('check', 'sm'),
+    cancel ? '취소 승인 (취소완료)' : '반품 완료 처리'
+  );
 }
 
 async function afterAction() {
@@ -1029,8 +1058,18 @@ function renderOrderDetail(body, o) {
     )
   );
 
-  // 경고
-  if (o.claim && open)
+  // 경고 (취소·반품 요청: 쿠팡·스마트스토어는 여기서 바로 승인)
+  if (o.claim && canApproveClaim(o)) {
+    const guide =
+      o.claim === 'CANCEL'
+        ? o.status === 'NEW'
+          ? '발주하지 말고 [취소 승인]을 누르면 바로 취소·환불됩니다. '
+          : o.purchased_at
+            ? '이미 공급처에 발주했다면 공급처 주문을 먼저 취소한 뒤 [취소 승인]을 누르세요. '
+            : '[취소 승인]을 누르면 바로 취소·환불됩니다. '
+        : `반품 상품을 돌려받았으면 [반품 완료 처리]를 누르세요. 고객에게 환불됩니다.${o.store_type === 'coupang' ? ' (쿠팡은 입고 확인 → 반품 승인을 한 번에 처리)' : ''} `;
+    append(body, notice('err', h('b', null, `${CLAIM[o.claim]} 접수됨. `), guide, h('div', { class: 'btn-row', style: { marginTop: '8px' } }, claimButton(o))));
+  } else if (o.claim && open)
     append(
       body,
       notice(
