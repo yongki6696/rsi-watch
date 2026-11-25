@@ -1872,21 +1872,22 @@ function inquiryCard(q) {
   const answerBox = h('div');
   if (q.answered) {
     append(answerBox, notice('ok', h('b', null, '답변 완료 '), q.answer ? h('span', { class: 'pre' }, q.answer) : ''));
-  } else if (c.answerable) {
-    const ta = h('textarea', { class: 'input', placeholder: '답변을 입력하세요', style: { minHeight: '84px', fontFamily: 'inherit', fontSize: '14px' } });
+  } else if (q.can_answer) {
+    const ta = h('textarea', { class: 'input', placeholder: `${c.label} 고객에게 보낼 답변을 입력하세요`, style: { minHeight: '84px', fontFamily: 'inherit', fontSize: '14px' } });
     const send = h('button', {
       class: 'btn sm primary',
       onclick: (e) =>
         withBtn(e.currentTarget, async () => {
           if (!ta.value.trim()) throw new Error('답변 내용을 입력해주세요');
           await api('POST', `/api/inquiries/${q.id}/answer`, { text: ta.value.trim() });
-          toast('답변을 등록했습니다', 'ok');
+          toast(`${c.label}에 답변을 등록했습니다`, 'ok');
           renderInquiries();
         }),
     }, icon('send', 'sm'), '답변 등록');
     append(answerBox, ta, h('div', { class: 'btn-row end', style: { marginTop: '8px' } }, send));
   } else {
-    // 오더허브에서 답변할 수 없는 마켓: 셀러센터에서 답변 → 다음 수집 때 자동으로 답변 완료, 또는 직접 표시
+    // 오더허브에서 답변할 수 없는 문의: 이유 안내 + 셀러센터에서 답변 → 다음 수집 때 자동으로 답변 완료, 또는 직접 표시
+    if (q.answer_hint) append(answerBox, notice('warn', h('span', null, q.answer_hint)));
     const done = h(
       'button',
       {
@@ -2349,7 +2350,7 @@ async function renderSettings() {
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '자동 수집 주기'), h('small', null, '이 간격으로 모든 스토어의 새 주문을 확인합니다')), interval),
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '발주완료 시 마켓 발주확인'), h('small', null, '[발주완료]를 누르면 마켓에도 발주확인(상품준비중) 처리')), switchEl(app.confirmOnPurchase, (v) => saveApp({ confirmOnPurchase: v }))),
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '신규주문 자동 발주확인'), h('small', null, '수집 즉시 마켓에 발주확인 → 구매자가 바로 취소할 수 없게 됩니다')), switchEl(app.autoConfirm, (v) => saveApp({ autoConfirm: v }))),
-      h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '고객 문의 수집'), h('small', null, '스마트스토어·쿠팡·11번가·G마켓·옥션·롯데ON의 고객·상품 문의 (답변은 스마트스토어만 오더허브에서, 나머지는 셀러센터에서)')), switchEl(app.collectInquiries, (v) => saveApp({ collectInquiries: v }))),
+      h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '고객 문의 수집'), h('small', null, '스마트스토어·쿠팡·11번가·G마켓·옥션·롯데ON의 고객·상품 문의 (롯데ON 말고는 오더허브에서 바로 답변)')), switchEl(app.collectInquiries, (v) => saveApp({ collectInquiries: v }))),
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '기본 택배사'), h('small', null, '송장 입력 시 기본으로 선택')), courier),
       h('div', { class: 'setting-row' }, h('div', { class: 'label' }, h('b', null, '스토어 첫 연결 시 불러올 기간'), h('small', null, '처리 대기 중인 과거 주문을 가져옵니다 (알림 없음)')), days)
     ),

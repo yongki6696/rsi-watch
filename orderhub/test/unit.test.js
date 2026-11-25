@@ -207,13 +207,14 @@ test('문의 응답 필드: ESM 실제(camelCase)·문서(PascalCase), 롯데ON 
   assert.equal(g.answered, false);
   assert.equal(g.productId, '4761998630');
   assert.equal(g.askedAt, '2026-07-20T13:28:00.000Z');
-  assert.equal(g.extra.token, undefined, '답변용 토큰은 저장하지 않음');
+  assert.equal(g.extra.token, 'tk', '답변할 때 쓰는 토큰');
   const a = auction._internal.normalizeQna({ MessageNo: 'M1', InformStatus: '처리완료', ContractType: '배송', Title: '언제', ReceiveDate: '2026-07-21' }, 2);
   assert.equal(a.answered, true);
   assert.equal(a.kind, 'customer');
   assert.equal(a.category, '배송 · 비밀글');
   assert.equal(auction._internal.normalizeQna({ messageNo: 'M2', informStatus: '처리중' }, 1).answered, false);
   assert.equal(auction._internal.normalizeQna({ title: '번호 없음' }, 1), null);
+  assert.equal(gmarket._internal.normalizeQna({ messageNo: 'M3', informStatus: '미처리', orderNo: '-' }, 3).orderNo, '');
 
   const { normalizeProductQna, normalizeSellerInquiry } = lotteon._internal;
   assert.equal(normalizeProductQna({ pdQnaNo: 'Q1', qnaStatCd: 'NPROC', qstCnts: '사이즈', spdNo: 'LO1', regDttm: '20260716120000' }).answered, false);

@@ -10,6 +10,7 @@ const { request, decodeText, openTunnel, parseProxy } = require('./http');
 const { kstCompact, toIso, toInt, str, sleep } = require('../util');
 const { courierCode } = require('../couriers');
 const { isNoData, dateRanges, compact, plainText } = require('./inquiry-util');
+const { encodeXmlEucKr, escapeXml } = require('./euckr');
 
 function decodeEntities(s) {
   return s
@@ -54,15 +55,18 @@ function resultOf(xml) {
 
 const ERROR_CODES = new Set(['-1', '2', '1000', '-1000']);
 
-async function api(ctx, path, attempt = 0) {
+// opts: { method, body(Buffer) } - 기본은 GET (GET 에는 Content-Type 을 보내지 않음)
+async function api(ctx, path, opts = {}, attempt = 0) {
   const key = ctx.creds.apiKey;
   if (!key) throw new Error('11번가 Open API Key를 입력해주세요');
   const proxy = str(ctx.creds.proxy) || undefined;
+  const method = opts.method || 'GET';
   let res;
   try {
     res = await request(ctx.config.elevenstApiBase + path, {
-      method: 'GET',
-      headers: { openapikey: key, Accept: 'application/xml, text/xml' },
+      method,
+      headers: { openapikey: key, Accept: 'application/xml, text/xml', ...(opts.body ? { 'Content-Type': 'text/xml; charset=euc-kr' } : {}) },
+      body: opts.body,
       proxy,
     });
   } catch (e) {
@@ -83,7 +87,7 @@ async function api(ctx, path, attempt = 0) {
   const xml = decodeText(res.buffer, res.headers, 'euc-kr');
   if (res.status === 429 && attempt < 3) {
     await sleep(1500 * (attempt + 1));
-    return api(ctx, path, attempt + 1);
+    return api(ctx, path, opts, attempt + 1);
   }
   if (!res.ok) {
     const r = resultOf(xml);
@@ -385,14 +389,28 @@ async function fetchQna(ctx) {
   return [...out.values()];
 }
 
+// 상품 Q&A 답변 등록/수정: PUT /prodqnaservices/prodqnaanswer/{brdInfoNo}/{prdNo}
+//   본문 <ProductQna><answerCont>…</answerCont></ProductQna> (EUC-KR), 응답 <ClientMessage> resultCode 200 = 성공
+//   (답변하면 11번가가 고객에게 이메일로 알려줌)
+async function answerQna(ctx, inquiry, text) {
+  const e = inquiry.extra || {};
+  if (!e.brdInfoNo || !e.prdNo) throw new Error('문의 번호·상품번호가 없어 11번가 셀러오피스에서 답변해주세요');
+  const xml = `<?xml version="1.0" encoding="euc-kr"?><ProductQna><answerCont>${escapeXml(text)}</answerCont></ProductQna>`;
+  const res = await api(ctx, `/prodqnaservices/prodqnaanswer/${encodeURIComponent(e.brdInfoNo)}/${encodeURIComponent(e.prdNo)}`, { method: 'PUT', body: encodeXmlEucKr(xml) });
+  const code = (res.match(/<(?:[A-Za-z0-9_]+:)?resultCode>\s*([^<]*?)\s*</) || [])[1];
+  const msg = decodeEntities((res.match(/<(?:[A-Za-z0-9_]+:)?(?:message|resultMessage)>([\s\S]*?)</) || [])[1] || '').trim();
+  if (code !== undefined && !['200', '0'].includes(code)) throw new Error(`11번가 답변 등록 실패 (${code}): ${msg || res.replace(/\s+/g, ' ').slice(0, 200)}`);
+  return { ok: true };
+}
+
 const meta = {
   type: 'elevenst',
   label: '11번가',
   short: '11',
   color: '#ff0038',
   beta: true,
-  inquiries: true, // 상품 Q&A (답변은 셀러오피스에서)
-  answerable: false,
+  inquiries: true, // 상품 Q&A
+  answerable: true, // 오더허브에서 답변 (11번가가 고객에게 이메일 발송)
   backfill: true,
   sellerCenter: 'https://soffice.11st.co.kr/',
   fields: [
@@ -433,6 +451,14 @@ module.exports = {
   async fetchInquiries(ctx) {
     return fetchQna(ctx);
   },
+
+  // 답변할 수 없는 문의면 이유
+  answerCheck(creds, inquiry) {
+    const e = inquiry.extra || {};
+    return e.brdInfoNo && e.prdNo ? null : '문의 번호·상품번호가 없어 셀러오피스에서 답변해주세요';
+  },
+
+  answerInquiry: answerQna,
 
   async fetch(ctx) {
     if (ctx.backfillDays) return backfill(ctx);

@@ -49,6 +49,14 @@ function kstIso(d = new Date()) {
   return k.toISOString().replace('Z', '+09:00');
 }
 
+function readRaw(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+  });
+}
+
 function readBody(req) {
   return new Promise((resolve) => {
     const chunks = [];
@@ -65,8 +73,8 @@ function jsonRawIds(obj) {
 function createState() {
   return {
     naver: { tokens: new Set(), orders: new Map(), changes: [], inquiries: [], qnas: [], failInquiries: false, calls: { confirm: [], dispatch: [], token: 0, answers: [], qnaAnswers: [] } },
-    coupang: { sheets: new Map(), inquiries: [], callCenter: [], calls: { ack: [], invoices: [], list: [], single: [], inquiries: [], callCenter: [] }, rejectAuth: false },
-    eleven: { orders: new Map(), cancelReq: [], canceled: [], qnas: [], calls: { pack: [], deliver: [], qna: [] } },
+    coupang: { sheets: new Map(), inquiries: [], callCenter: [], calls: { ack: [], invoices: [], list: [], single: [], inquiries: [], callCenter: [], replies: [] }, rejectAuth: false },
+    eleven: { orders: new Map(), cancelReq: [], canceled: [], qnas: [], calls: { pack: [], deliver: [], qna: [], answers: [] } },
     telegram: { messages: [] },
     ntfy: { messages: [] },
   };
@@ -345,6 +353,31 @@ async function handleCoupang(state, req, res, url) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(s.get('inquiryStartAt') || '') || s.get('vendorId') !== COUPANG.vendorId) return send(400, { code: 'ERROR', message: 'bad inquiry params' });
     return send(200, { code: 200, message: 'OK', data: { content: state.coupang.inquiries, pagination: { currentPage: 1, totalPages: 1 } } });
   }
+  // 상품 문의 답변: 본문 content·vendorId·replyBy(Wing 아이디) 모두 필수, 두 번 답하면 오류
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v4\/vendors\/([^/]+)\/onlineInquiries\/(\d+)\/replies$/)) && req.method === 'POST') {
+    const body = JSON.parse((await readBody(req)) || '{}');
+    state.coupang.calls.replies.push({ kind: 'online', id: m[2], body });
+    if (m[1] !== COUPANG.vendorId || body.vendorId !== COUPANG.vendorId || !body.replyBy || !body.content) return send(400, { code: 'ERROR', message: 'content, vendorId, replyBy 는 필수입니다' });
+    const q = state.coupang.inquiries.find((x) => String(x.inquiryId) === m[2]);
+    if (!q) return send(400, { code: 'ERROR', message: '문의를 찾을 수 없습니다' });
+    if ((q.commentDtoList || []).length) return send(400, { code: 'ERROR', message: '동일한 답변이 존재합니다' });
+    q.commentDtoList = [{ inquiryCommentId: 1, inquiryId: q.inquiryId, content: body.content, inquiryCommentAt: kstIso() }];
+    return send(200, { code: 200, message: 'OK', data: null });
+  }
+  // 고객센터 문의 답변: parentAnswerId 는 상담원의 답변요청(requestAnswer) 글 번호, 내용 2~1000자
+  if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v4\/vendors\/([^/]+)\/callCenterInquiries\/(\d+)\/replies$/)) && req.method === 'POST') {
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || '{}');
+    state.coupang.calls.replies.push({ kind: 'callCenter', id: m[2], body, raw });
+    const q = state.coupang.callCenter.find((x) => String(x.inquiryId) === m[2]);
+    if (!q || String(body.inquiryId) !== m[2] || body.vendorId !== COUPANG.vendorId || !body.replyBy) return send(400, { code: 'ERROR', message: '필수 값 누락' });
+    const target = (q.replies || []).find((r) => r.partnerTransferStatus === 'requestAnswer');
+    if (!target || typeof body.parentAnswerId !== 'number' || body.parentAnswerId !== target.answerId) return send(400, { code: 'ERROR', message: 'parentAnswerId 가 올바르지 않습니다' });
+    if (!(body.content?.length >= 2 && body.content.length <= 1000)) return send(400, { code: 'ERROR', message: '답변은 2~1000자' });
+    q.replies.push({ answerId: target.answerId + 1, parentAnswerId: target.answerId, answerType: 'vendor', needAnswer: false, content: body.content, replyAt: kstIso() });
+    q._status = 'ANSWER';
+    return send(200, { code: 200, message: 'OK', data: null });
+  }
   // 고객센터 문의: partnerCounselingStatus 로 걸러서 (응답에는 상태 필드를 넣지 않음 → 목록 비교로 답변 여부 판단하는지 확인)
   if ((m = url.pathname.match(/^\/v2\/providers\/openapi\/apis\/api\/v4\/vendors\/([^/]+)\/callCenterInquiries$/)) && req.method === 'GET') {
     const s = url.searchParams;
@@ -442,6 +475,26 @@ function handleEleven(state, req, res, url) {
     if (!targets.length) return result('-1', 'not packaging');
     targets.forEach((o) => (o.st = 'SHIPPED'));
     return result('0', 'ok');
+  }
+  // 상품 Q&A 답변: PUT, EUC-KR XML <ProductQna><answerCont>…</answerCont></ProductQna> → <ClientMessage> resultCode 200
+  if (p[0] === 'prodqnaservices' && p[1] === 'prodqnaanswer' && p.length === 4 && req.method === 'PUT') {
+    return readRaw(req).then((buf) => {
+      const xml = new TextDecoder('euc-kr').decode(buf);
+      const reply = (code, msg) => sendXml(200, Buffer.concat([Buffer.from(`<?xml version="1.0" encoding="euc-kr"?><ClientMessage><resultCode>${code}</resultCode><message>`), eucKr(msg), Buffer.from('</message></ClientMessage>')]));
+      const m2 = xml.match(/<ProductQna>\s*<answerCont>([\s\S]*?)<\/answerCont>\s*<\/ProductQna>/);
+      if (!/xml/.test(req.headers['content-type'] || '') || !m2 || !/encoding="euc-kr"/i.test(xml)) return reply(500, '요청 형식 오류');
+      const text = m2[1]
+        .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+      const q = state.eleven.qnas.find((x) => x.brdInfoNo === p[2]);
+      state.eleven.calls.answers.push({ brdInfoNo: p[2], prdNo: p[3], text, bytes: buf });
+      if (!q || q.prdNo !== p[3]) return reply(500, '상품번호가 일치하지 않습니다');
+      q.answerYn = 'Y';
+      q.answerCont = text;
+      return reply(200, '정상 처리되었습니다');
+    });
   }
   // 상품 Q&A: YYYYMMDD 기간(최대 7일) + 답변상태 00/01/02, 없으면 '조회된 데이터가 없습니다' 결과
   if (p[0] === 'prodqnaservices' && p[1] === 'prodqnalist' && p.length === 5) {

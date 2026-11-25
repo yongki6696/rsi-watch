@@ -276,19 +276,21 @@ const meta = {
   color: '#e52528',
   beta: false,
   inquiries: true, // 상품 문의 + 고객센터 문의
-  answerable: false, // 답변은 Wing 에서
+  answerable: true, // 오더허브에서 답변 (답변자 = Wing 로그인 아이디)
   backfill: true,
   sellerCenter: 'https://wing.coupang.com/',
   fields: [
     { key: 'vendorId', label: '업체코드 (Vendor ID)', placeholder: '예) A00012345', required: true },
     { key: 'accessKey', label: 'Access Key', required: true },
     { key: 'secretKey', label: 'Secret Key', required: true, secret: true },
+    { key: 'wingId', label: 'Wing 로그인 아이디 (문의 답변용)', placeholder: '쿠팡 Wing에 로그인하는 아이디 - 오더허브에서 문의에 답변할 때 필요' },
   ],
   guide: [
     '쿠팡 Wing(wing.coupang.com)에 로그인 → 우측 상단 [판매자명] → [추가판매정보]로 이동합니다.',
     '[OPEN API 키 발급] → 연동 방식은 "자체개발(직접입력)"을 선택합니다.',
     'IP 주소 칸에 아래 표시된 이 서버의 IP를 입력합니다. (여러 개면 쉼표로 구분)',
     '발급된 업체코드(A로 시작), Access Key, Secret Key를 아래에 입력하고 [연결 테스트]를 누릅니다.',
+    '오더허브에서 쿠팡 문의에 답변하려면 Wing 로그인 아이디도 넣어주세요. (쿠팡이 답변한 사람을 이 아이디로 기록합니다)',
     '참고: 쿠팡 OPEN API 키는 약 180일마다 재발급이 필요합니다.',
   ],
 };
@@ -365,16 +367,21 @@ async function fetchCallCenter(ctx) {
   return all.filter((q) => str(q.inquiryId)).map((q) => {
     const id = str(q.inquiryId);
     const replies = [q.replies, q.answers, q.commentDtoList].find(Array.isArray) || [];
-    const last = replies.length ? replies[replies.length - 1] : null;
+    // 답변 대상: 쿠팡 상담원이 판매자 답변을 요청한 글(requestAnswer) → 답변 API 의 parentAnswerId
+    const request = [...replies].reverse().find((r) => r && (r.partnerTransferStatus === 'requestAnswer' || r.needAnswer === true) && r.answerId != null);
+    const vendorReplies = replies.filter((r) => r && /vendor|seller|partner/i.test(str(r.answerType || r.authorType)));
+    const last = vendorReplies.length ? vendorReplies[vendorReplies.length - 1] : null;
     const st = str(q.partnerCounselingStatus || q.csPartnerCounselingStatus || q.counselingStatus);
-    const cat = str(q.receiptCategory || q.inquiryCategory || q.categoryName);
+    const cat = str(q.receiptCategory || q.inquiryCategory || q.categoryName).replace(/\s*>\s*/g, ' > ');
     const orderId = q.orderId ?? (Array.isArray(q.orderIds) ? q.orderIds[0] : '');
+    const note = request ? str(request.content) : '';
     return {
       key: `cc-${id}`,
       kind: 'customer',
       category: cat ? `고객센터 · ${cat}` : '고객센터',
       title: '',
-      content: str(q.content || q.inquiryContent || q.question),
+      // 고객 문의 + 쿠팡 상담원이 판매자에게 남긴 요청
+      content: [str(q.content || q.inquiryContent || q.question), note ? `[쿠팡 상담원] ${note}` : ''].filter(Boolean).join('\n\n'),
       productName: str(q.vendorItemName || q.itemName || q.productName || q.sellerProductName),
       productId: str(Array.isArray(q.vendorItemId) ? q.vendorItemId[0] : q.vendorItemId),
       orderNo: str(orderId),
@@ -382,13 +389,44 @@ async function fetchCallCenter(ctx) {
       askedAt: toIso(q.inquiryAt || q.receiptAt || q.createdAt || q.inquiryDate),
       answered: answeredIds ? answeredIds.has(id) : /^(ANSWER|ANSWERED|COMPLETE|DONE)$/i.test(st),
       answer: last ? str(last.content || last.answerContent || last.reply) : '',
-      extra: { inquiryId: id, callCenter: true },
+      extra: { inquiryId: id, callCenter: true, parentAnswerId: request ? str(request.answerId) : '' },
     };
   });
 }
 
+// 답변할 수 없는 문의면 이유 (화면에 안내)
+function answerCheck(creds, inquiry) {
+  if (!str(creds?.wingId)) return '쿠팡은 답변하는 사람의 Wing 로그인 아이디가 필요해요. [스토어] → 쿠팡 [키 변경]에서 Wing 로그인 아이디만 넣고 저장하면 여기서 바로 답변할 수 있어요.';
+  if (inquiry.extra?.callCenter && !inquiry.extra?.parentAnswerId) return '쿠팡 상담원이 답변을 요청한 문의가 아니라서 Wing에서 확인해주세요.';
+  return null;
+}
+
+// 상품 문의: POST v4 …/onlineInquiries/{inquiryId}/replies {content, vendorId, replyBy}
+// 고객센터 문의: POST v4 …/callCenterInquiries/{inquiryId}/replies {vendorId, inquiryId, content(2~1000자), replyBy, parentAnswerId}
+async function answerInquiry(ctx, inquiry, text) {
+  const reason = answerCheck(ctx.creds, inquiry);
+  if (reason) throw new Error(reason);
+  const e = inquiry.extra || {};
+  if (!e.inquiryId) throw new Error('문의 번호가 없어 Wing에서 답변해주세요');
+  const vendorId = ctx.creds.vendorId;
+  const replyBy = str(ctx.creds.wingId);
+  if (e.callCenter) {
+    if (text.length < 2 || text.length > 1000) throw new Error('쿠팡 고객센터 문의 답변은 2~1,000자로 입력해주세요');
+    await api(ctx, 'POST', `${vendorPath('v4', vendorId)}/callCenterInquiries/${encodeURIComponent(e.inquiryId)}/replies`, {
+      body: { vendorId, inquiryId: BIG(e.inquiryId), content: text, replyBy, parentAnswerId: BIG(e.parentAnswerId) },
+    });
+  } else {
+    await api(ctx, 'POST', `${vendorPath('v4', vendorId)}/onlineInquiries/${encodeURIComponent(e.inquiryId)}/replies`, {
+      body: { content: text, vendorId, replyBy },
+    });
+  }
+  return { ok: true };
+}
+
 module.exports = {
   ...meta,
+  answerCheck,
+  answerInquiry,
 
   async test(ctx) {
     const state = {};

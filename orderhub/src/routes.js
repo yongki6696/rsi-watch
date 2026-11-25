@@ -279,8 +279,30 @@ function register(router, app) {
         }
       })
       .map((s) => ({ id: s.id, type: s.type, name: s.name, enabled: !!s.enabled, open: per.get(s.id)?.open || 0, all: per.get(s.id)?.n || 0 }));
+    // 문의마다 오더허브에서 바로 답변할 수 있는지 + 안 되면 이유 (예: 쿠팡 Wing 아이디 없음)
+    const credsCache = new Map();
+    const credsOf = (id) => {
+      if (!credsCache.has(id)) {
+        let c = {};
+        try {
+          const row = db.get('SELECT credentials FROM stores WHERE id = ?', id);
+          c = row?.credentials ? secrets.decrypt(row.credentials) : {};
+        } catch {}
+        credsCache.set(id, c);
+      }
+      return credsCache.get(id);
+    };
+    const list = inquiries.list({ filter: req.query.filter === 'all' ? 'all' : 'open', storeId }).map((q) => {
+      let c = null;
+      try {
+        c = getConnector(q.store_type);
+      } catch {}
+      const ok = !!(c?.answerable && c.answerInquiry);
+      const hint = ok && !q.answered && c.answerCheck ? c.answerCheck(credsOf(q.store_id), q) : null;
+      return { ...q, can_answer: ok && !hint, answer_hint: hint || null };
+    });
     return {
-      inquiries: inquiries.list({ filter: req.query.filter === 'all' ? 'all' : 'open', storeId }),
+      inquiries: list,
       counts: inquiries.counts(storeId),
       total: inquiries.counts(),
       stores,
@@ -303,7 +325,10 @@ function register(router, app) {
     const store = db.get('SELECT * FROM stores WHERE id = ?', q.store_id);
     const c = getConnector(store.type);
     if (!c.answerable || !c.answerInquiry) throw new HttpError(400, `${c.label} 문의는 셀러센터에서 답변해주세요`);
-    await c.answerInquiry(sync.ctxFor(store), q, text);
+    const ctx = sync.ctxFor(store);
+    const reason = c.answerCheck ? c.answerCheck(ctx.creds, q) : null;
+    if (reason) throw new HttpError(400, reason);
+    await c.answerInquiry(ctx, q, text);
     inquiries.markAnswered(q.id, text);
     db.addEvent({ storeId: store.id, type: 'inquiry', message: `문의 답변 등록: ${inquiries.describe(q).slice(0, 40)}` });
     return { ok: true };

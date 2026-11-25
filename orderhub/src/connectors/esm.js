@@ -10,6 +10,7 @@ const { courierCode } = require('../couriers');
 const { isNoData, dateRanges, plainText } = require('./inquiry-util');
 
 const QNA_PATH = '/item/v1/communications/customer/bulletin-board';
+const QNA_ANSWER_PATH = '/item/v1/communications/customer/bulletin-board/qna';
 
 const SITES = {
   auction: { code: 'A', siteType: 1, label: '옥션', short: 'A', color: '#f05a28', idLabel: '옥션 판매자 ID' },
@@ -52,7 +53,8 @@ function friendlyError(status, json, text, site) {
     return `${site.label} 인증 실패: 마스터 ID·판매자 ID·Secret Key와 ESM API 신청 시 등록한 서버 IP를 확인해주세요. (HTTP ${status} ${msg})`.trim();
   }
   if (/5초/.test(msg)) return `${site.label} 주문조회 호출 제한(5초당 1회)에 걸렸습니다. 다음 수집 때 자동으로 다시 시도합니다.`;
-  return `${site.label} API 오류${status ? ` (HTTP ${status})` : ''}${json?.ResultCode !== undefined ? ` [${json.ResultCode}]` : ''}: ${msg}`;
+  const rc = json?.ResultCode ?? json?.resultCode;
+  return `${site.label} API 오류${status ? ` (HTTP ${status})` : ''}${rc !== undefined && rc !== null ? ` [${rc}]` : ''}: ${msg}`;
 }
 
 function makeConnector(type) {
@@ -77,10 +79,10 @@ function makeConnector(type) {
     try {
       json = text ? parseJsonBig(text) : null;
     } catch {}
-    if (!res.ok) throw Object.assign(new Error(friendlyError(res.status, json, text.slice(0, 200), site)), { status: res.status });
+    if (!res.ok) throw Object.assign(new Error(friendlyError(res.status, json, text.slice(0, 200), site)), { status: res.status, body: json });
     const rc = json?.ResultCode ?? json?.resultCode;
     if (rc !== undefined && rc !== null && !['0', '0000', '200', 'SUCCESS'].includes(String(rc).toUpperCase())) {
-      throw Object.assign(new Error(friendlyError(0, json, '', site)), { resultCode: json.ResultCode });
+      throw Object.assign(new Error(friendlyError(0, json, '', site)), { resultCode: rc, body: json });
     }
     return json;
   }
@@ -235,48 +237,60 @@ function makeConnector(type) {
     return {
       key: `b-${no}`,
       kind: /상품/.test(type) ? 'product' : 'customer',
-      category: [type, qnaType === 2 ? '비밀글' : ''].filter(Boolean).join(' · '),
+      category: [type, qnaType === 2 ? '비밀글' : '', q.reAsking === true || q.ReAsking === true ? '재문의' : ''].filter(Boolean).join(' · '),
       title: plainText(pick(q, ['title', 'Title'])),
       content: plainText(pick(q, ['details', 'Details', 'contents', 'Contents'])),
       productName: plainText(pick(q, ['goodsName', 'GoodsName', 'siteGoodsName', 'itemName', 'ItemName'])),
       productId: goodsNo,
-      orderNo: str(pick(q, ['orderNo', 'OrderNo', 'contrNo', 'ContrNo'])),
+      // 주문 없는 문의는 옥션 "0", G마켓 "-" 로 옴
+      orderNo: ['0', '-'].includes(str(pick(q, ['orderNo', 'OrderNo']))) ? '' : str(pick(q, ['orderNo', 'OrderNo', 'contrNo', 'ContrNo'])),
       writer: str(pick(q, ['inquirerName', 'InquirerName', 'buyerName', 'BuyerName'])),
       askedAt: toIso(pick(q, ['receiveDate', 'ReceiveDate', 'regDate', 'RegDate'])),
       // 미처리 / 처리중 / 처리완료 …
       answered: st ? /완료/.test(st) && !/미/.test(st) : !!(answer || answeredAt),
       answer,
-      extra: { messageNo: no, siteGoodsNo: goodsNo, qnaType },
+      // 답변할 때 문의번호와 함께 보내야 하는 토큰
+      extra: { messageNo: no, siteGoodsNo: goodsNo, qnaType, token: str(pick(q, ['token', 'Token'])) },
     };
+  }
+
+  // 문의 조회 결과 없음: ESM 은 resultCode 1000 '조회된 기간에 조회 대상이 없습니다' (HTTP 400) 로 돌려줌 → 오류 아님
+  //   같은 1000 이라도 '7일 기간이상 조회 요청이 불가능합니다' 는 진짜 오류
+  const qnaEmpty = (e) => {
+    if (isNoData(e)) return true;
+    const rc = String(e.body?.resultCode ?? e.body?.ResultCode ?? '');
+    const msg = String(e.body?.message ?? e.body?.Message ?? '');
+    return rc === '1000' && !/기간\s*이상|초과|불가/.test(msg);
+  };
+
+  // 판매자 문의 한 구간 조회 (호출 제한에 걸리면 잠깐 기다렸다 다시)
+  async function qnaList(ctx, qnaType, from, to) {
+    const plusDay = (d) => kstDate(new Date(Date.parse(`${d}T12:00:00+09:00`) + 86400000));
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const json = await api(ctx, 'POST', QNA_PATH, { qnaType, status: 1, type: 1, startDate: from, endDate: plusDay(to) });
+        return findArray(json?.Data ?? json?.data ?? json, ['BulletinBoards', 'bulletinBoards', 'Items', 'items', 'List', 'list']);
+      } catch (e) {
+        if (qnaEmpty(e)) return [];
+        if (attempt < 2 && (e.status === 429 || /5초|초당|잠시 후/.test(e.message))) {
+          await sleep(5300);
+          continue;
+        }
+        throw e;
+      }
+    }
   }
 
   // 판매자 문의 조회: 옥션은 일반(1)·비밀글(2)을 각각, G마켓은 전체(3) / 7일씩 / status 1 전체 · type 1 접수일 기준
   async function fetchQna(ctx) {
     const types = site.code === 'A' ? [1, 2] : [3];
     const gap = Math.min(ctx.config.esmOrderIntervalMs ?? 1000, 1000);
-    const plusDay = (d) => kstDate(new Date(Date.parse(`${d}T12:00:00+09:00`) + 86400000));
     const out = new Map();
     let calls = 0;
     for (const w of dateRanges(ctx.inquiryDays || 7)) {
       for (const qnaType of types) {
         if (calls++) await sleep(gap);
-        let json;
-        for (let attempt = 0; ; attempt++) {
-          try {
-            json = await api(ctx, 'POST', QNA_PATH, { qnaType, status: 1, type: 1, startDate: w.from, endDate: plusDay(w.to) });
-            break;
-          } catch (e) {
-            if (isNoData(e)) break;
-            // 호출 제한에 걸리면 잠깐 기다렸다 다시
-            if (attempt < 2 && (e.status === 429 || /5초|초당|잠시 후/.test(e.message))) {
-              await sleep(5300);
-              continue;
-            }
-            throw e;
-          }
-        }
-        if (!json) continue;
-        const list = findArray(json?.Data ?? json?.data ?? json, ['BulletinBoards', 'bulletinBoards', 'Items', 'items', 'List', 'list']);
+        const list = await qnaList(ctx, qnaType, w.from, w.to);
         for (const q of list) {
           const n = normalizeQna(q, qnaType);
           if (n && !out.has(n.key)) out.set(n.key, n);
@@ -286,14 +300,48 @@ function makeConnector(type) {
     return [...out.values()];
   }
 
+  // 답변 직전에 그 문의를 다시 조회해서 최신 토큰 받기 (조회 때 받은 토큰이 만료됐을 수 있음)
+  async function freshToken(ctx, inquiry) {
+    const e = inquiry.extra || {};
+    const types = e.qnaType ? [Number(e.qnaType)] : site.code === 'A' ? [1, 2] : [3];
+    const asked = inquiry.asked_at ? new Date(inquiry.asked_at) : null;
+    const ranges = asked && !isNaN(asked) ? [{ from: kstDate(new Date(asked.getTime() - 86400000)), to: kstDate(asked) }] : dateRanges(7);
+    for (const r of ranges) {
+      for (const t of types) {
+        for (const q of await qnaList(ctx, t, r.from, r.to)) {
+          if (str(pick(q, ['messageNo', 'MessageNo'])) === String(e.messageNo)) return str(pick(q, ['token', 'Token']));
+        }
+      }
+    }
+    return '';
+  }
+
+  // 판매자 문의 답변: POST bulletin-board/qna { messageNo, token, answerStatus(2 처리완료), title, comments }
+  //   성공 응답 { messageNo }, 실패 { resultCode: 1000, message } / 같은 문의에 다시 보내면 답변 수정
+  async function answerQna(ctx, inquiry, text) {
+    const e = inquiry.extra || {};
+    if (!e.messageNo) throw new Error('문의 번호가 없어 ESM PLUS에서 답변해주세요');
+    let token = '';
+    try {
+      token = await freshToken(ctx, inquiry);
+    } catch (err) {
+      if (err.network) throw err;
+    }
+    token = token || str(e.token);
+    if (!token) throw new Error(`${site.label} 문의 토큰을 받지 못했습니다. 잠시 후 다시 시도하거나 ESM PLUS에서 답변해주세요`);
+    const title = (inquiry.title ? `RE: ${inquiry.title}` : '문의하신 내용에 대한 답변입니다').slice(0, 100);
+    await api(ctx, 'POST', QNA_ANSWER_PATH, { title, messageNo: String(e.messageNo), comments: text, token, answerStatus: 2 });
+    return { ok: true };
+  }
+
   const meta = {
     type,
     label: site.label,
     short: site.short,
     color: site.color,
     beta: true,
-    inquiries: true, // 판매자 문의 (답변은 ESM PLUS 에서)
-    answerable: false,
+    inquiries: true, // 판매자 문의
+    answerable: true, // 오더허브에서 답변 (처리완료로 등록)
     backfill: true,
     sellerCenter: 'https://www.esmplus.com/',
     fields: [
@@ -372,6 +420,12 @@ function makeConnector(type) {
     async fetchInquiries(ctx) {
       return fetchQna(ctx);
     },
+
+    answerCheck(creds, inquiry) {
+      return inquiry.extra?.messageNo ? null : '문의 번호가 없어 ESM PLUS에서 답변해주세요';
+    },
+
+    answerInquiry: answerQna,
 
     // 주문확인 (결제완료 → 배송준비중)
     async confirm(ctx, order, items) {

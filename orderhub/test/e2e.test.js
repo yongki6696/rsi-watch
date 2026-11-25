@@ -368,7 +368,8 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     await call('POST', `/api/inquiries/${qna.id}/answer`, { text: '다음 주 입고됩니다.' });
     assert.deepEqual(mock.state.naver.calls.qnaAnswers.at(-1), { questionId: '7001', commentContent: '다음 주 입고됩니다.' });
     const cq = list.inquiries.find((q) => q.store_type === 'coupang');
-    await assert.rejects(call('POST', `/api/inquiries/${cq.id}/answer`, { text: '답변' }), /셀러센터에서 답변/);
+    // 쿠팡은 Wing 로그인 아이디(답변자)가 있어야 답변 가능
+    await assert.rejects(call('POST', `/api/inquiries/${cq.id}/answer`, { text: '답변' }), /Wing 로그인 아이디/);
     await assert.rejects(call('POST', `/api/inquiries/${naverQ.id}/answer`, { text: '  ' }), /답변 내용/);
     list = await call('GET', '/api/inquiries?filter=open');
     assert.equal(list.counts.open, 1);
@@ -387,7 +388,7 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     mock.state.naver.failInquiries = false;
   });
 
-  await t.test('11번가 상품 Q&A · 쿠팡 고객센터 문의도 수집 (답변은 셀러센터 → 답변 완료 표시)', async () => {
+  await t.test('11번가 상품 Q&A · 쿠팡 고객센터 문의 수집 + 오더허브에서 답변', async () => {
     const kstDay = (ms = 0) => new Date(Date.now() + 9 * 3600000 - ms).toISOString().slice(0, 10);
     // 11번가 첫 문의 수집은 최근 30일을 7일(YYYYMMDD)씩 5번, 0건이면 '조회된 데이터가 없습니다' 결과도 오류 아님
     const first = mock.state.eleven.calls.qna.slice(0, 5);
@@ -404,15 +405,28 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
       { brdInfoNo: '880002', prdNo: '5550001', prdNm: '무선 마우스', brdInfoSbjct: '색상', brdInfoCont: '화이트 있나요?', qnaDtlsCdNm: '상품', memNM: 'lee***', createDt: `${kstDay(86400000)} 10:00:00`, answerYn: 'Y', answerCont: '네 있습니다' }
     );
     mock.state.coupang.callCenter.push(
-      { inquiryId: 71001, _status: 'NO_ANSWER', receiptCategory: '배송지연', content: '배송이 늦어요', inquiryAt: `${kstDay()} 08:00:00`, orderId: 30000000001, replies: [] },
-      { inquiryId: 71002, _status: 'ANSWER', receiptCategory: '교환', content: '교환하고 싶어요', inquiryAt: `${kstDay()} 07:00:00`, replies: [{ content: '교환 접수했습니다' }] }
+      {
+        inquiryId: 71001,
+        _status: 'NO_ANSWER',
+        csPartnerCounselingStatus: 'requestAnswer',
+        receiptCategory: '배송문의>배송지연',
+        content: '배송이 늦어요',
+        itemName: '방한 장갑',
+        vendorItemId: [3000000001],
+        inquiryAt: `${kstDay()}T08:00:00.123456+09:00`,
+        orderId: 30000000001,
+        replies: [{ answerId: 11, parentAnswerId: null, answerType: 'csAgent', receptionistName: '상담원', partnerTransferStatus: 'requestAnswer', needAnswer: true, content: '판매자님 출고일 확인 부탁드립니다' }],
+      },
+      { inquiryId: 71002, _status: 'ANSWER', csPartnerCounselingStatus: 'answered', receiptCategory: '교환', content: '교환하고 싶어요', inquiryAt: `${kstDay()} 07:00:00`, replies: [{ answerId: 21, answerType: 'csAgent', partnerTransferStatus: 'requestAnswer', needAnswer: true, content: '확인 부탁드립니다' }, { answerId: 22, answerType: 'vendor', needAnswer: false, content: '교환 접수했습니다' }] },
+      // 상담원이 답변을 요청한 글이 없는 이관 문의 → Wing에서 확인
+      { inquiryId: 71003, _status: 'TRANSFER', receiptCategory: '기타', content: '단순 확인 요청', inquiryAt: `${kstDay()} 06:00:00`, replies: [{ answerId: 31, answerType: 'csAgent', partnerTransferStatus: 'complete', needAnswer: false, content: '참고 바랍니다' }] }
     );
     const before = mock.state.telegram.messages.length;
     const r = await call('POST', '/api/sync', {});
-    assert.equal(r.inquiries, 2, '새 미답변: 11번가 1 + 쿠팡 고객센터 1');
+    assert.equal(r.inquiries, 3, '새 미답변: 11번가 1 + 쿠팡 고객센터 2');
     const texts = mock.state.telegram.messages.slice(before).map((m) => m.text).join('\n');
     assert.match(texts, /💬 상품문의 · 내 11번가[\s\S]*\[배송\] 출발 문의 — kim\*\*\*/);
-    assert.match(texts, /💬 고객문의 · 내 쿠팡[\s\S]*\[고객센터 · 배송지연\] 배송이 늦어요/);
+    assert.match(texts, /💬 고객문의 · 내 쿠팡[\s\S]*\[고객센터 · 배송문의 > 배송지연\] 배송이 늦어요/);
     // 고객센터 문의는 전체(NONE) + 답변완료(ANSWER) 목록을 비교해서 답변 여부 판단
     const ccStatuses = new Set(mock.state.coupang.calls.callCenter.map((c) => c.partnerCounselingStatus));
     assert.ok(ccStatuses.has('NONE') && ccStatuses.has('ANSWER'));
@@ -428,10 +442,13 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     const q2 = all.find((q) => q.title === '색상');
     assert.equal(q2.answered, 1);
     assert.equal(q2.answer, '네 있습니다');
-    const c1 = all.find((q) => q.content === '배송이 늦어요');
-    assert.equal(c1.category, '고객센터 · 배송지연');
+    const c1 = all.find((q) => q.content.startsWith('배송이 늦어요'));
+    assert.equal(c1.content, '배송이 늦어요\n\n[쿠팡 상담원] 판매자님 출고일 확인 부탁드립니다');
+    assert.equal(c1.category, '고객센터 · 배송문의 > 배송지연');
+    assert.equal(c1.product_name, '방한 장갑');
     assert.equal(c1.answered, 0);
-    const c2 = all.find((q) => q.content === '교환하고 싶어요');
+    assert.equal(c1.asked_at, new Date(`${kstDay()}T08:00:00.123+09:00`).toISOString(), '소수점 6자리 시각도 읽음');
+    const c2 = all.find((q) => q.content.startsWith('교환하고 싶어요'));
     assert.equal(c2.answered, 1);
     assert.equal(c2.answer, '교환 접수했습니다');
 
@@ -441,18 +458,57 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     assert.equal(per.stores.find((s) => s.id === eleven.id).open, per.counts.open);
     assert.ok(per.total.open >= per.counts.open);
 
-    // 11번가는 오더허브에서 답변 불가 → 셀러센터에서 답변 후 '답변 완료로 표시'
-    await assert.rejects(call('POST', `/api/inquiries/${q1.id}/answer`, { text: '오늘 출발합니다' }), /셀러센터에서 답변/);
-    await call('POST', `/api/inquiries/${q1.id}/done`, {});
+    // 11번가: 오더허브에서 답변 → EUC-KR XML 로 PUT (EUC-KR 에 없는 글자·이모지는 문자참조)
+    assert.equal(q1.can_answer, true);
+    const elevenText = '오늘 출발합니다 😊 똠얌꿍 <특가> & 감사합니다\n좋은 하루 되세요';
+    await call('POST', `/api/inquiries/${q1.id}/answer`, { text: elevenText });
+    const sent = mock.state.eleven.calls.answers.at(-1);
+    assert.equal(sent.brdInfoNo, '880001');
+    assert.equal(sent.prdNo, '5550001');
+    assert.equal(sent.text, elevenText);
+    assert.ok(sent.bytes.includes(Buffer.from('bfc0b4c3', 'hex')), "'오늘' 이 EUC-KR 바이트로");
+    assert.ok(sent.bytes.includes(Buffer.from('&#128522;')) && sent.bytes.includes(Buffer.from(`&#${'똠'.codePointAt(0)};`)), '이모지·똠 은 문자참조');
+    assert.ok(sent.bytes.includes(Buffer.from('&lt;')) && sent.bytes.includes(Buffer.from('&amp;')), 'XML 특수문자 이스케이프');
+    let after = (await call('GET', '/api/inquiries?filter=all')).inquiries.find((q) => q.id === q1.id);
+    assert.equal(after.answered, 1);
+    assert.equal(after.answer, elevenText);
+
+    // 쿠팡: Wing 아이디가 없으면 이유를 보여주고, [키 변경]에서 Wing 아이디만 넣으면 답변 가능
+    let cc = (await call('GET', '/api/inquiries?filter=open')).inquiries.find((q) => q.id === c1.id);
+    assert.equal(cc.can_answer, false);
+    assert.match(cc.answer_hint, /Wing 로그인 아이디/);
+    await call('PUT', `/api/stores/${coupang.id}`, { credentials: { wingId: 'wing-seller' } });
+    const kept = (await call('GET', '/api/stores')).stores.find((s) => s.id === coupang.id);
+    assert.ok(kept.credentials.accessKey && kept.credentials.secretKey, '다른 키는 그대로');
+    const open = (await call('GET', '/api/inquiries?filter=open')).inquiries;
+    cc = open.find((q) => q.id === c1.id);
+    assert.equal(cc.can_answer, true);
+    // 상담원 요청글이 없는 이관 문의는 Wing에서 → '답변 완료로 표시'
+    const c3 = open.find((q) => q.content.startsWith('단순 확인 요청'));
+    assert.equal(c3.can_answer, false);
+    assert.match(c3.answer_hint, /Wing에서 확인/);
+    await assert.rejects(call('POST', `/api/inquiries/${c3.id}/answer`, { text: '확인했습니다' }), /Wing에서 확인/);
+    await call('POST', `/api/inquiries/${c3.id}/done`, {});
+
+    // 고객센터 문의 답변: 2~1,000자, inquiryId·parentAnswerId 는 숫자, 답변자는 Wing 아이디
+    await assert.rejects(call('POST', `/api/inquiries/${c1.id}/answer`, { text: '네' }), /2~1,000자/);
+    await call('POST', `/api/inquiries/${c1.id}/answer`, { text: '오늘 출고됩니다. 죄송합니다.' });
+    const ccReply = mock.state.coupang.calls.replies.at(-1);
+    assert.equal(ccReply.kind, 'callCenter');
+    assert.deepEqual(ccReply.body, { vendorId: COUPANG.vendorId, inquiryId: 71001, content: '오늘 출고됩니다. 죄송합니다.', replyBy: 'wing-seller', parentAnswerId: 11 });
+    // 상품 문의 답변
+    const online = open.find((q) => q.store_type === 'coupang' && q.kind === 'product');
+    assert.equal(online.can_answer, true);
+    await call('POST', `/api/inquiries/${online.id}/answer`, { text: '프리사이즈입니다.' });
+    assert.deepEqual(mock.state.coupang.calls.replies.at(-1), { kind: 'online', id: '9001', body: { content: '프리사이즈입니다.', vendorId: COUPANG.vendorId, replyBy: 'wing-seller' } });
+
+    // 다음 수집에도 답변 완료 유지 + 쿠팡의 답변 내용으로
     await call('POST', '/api/sync', {});
-    assert.equal((await call('GET', '/api/inquiries?filter=all')).inquiries.find((q) => q.id === q1.id).answered, 1, '마켓이 아직 미답변이라고 해도 유지');
-    // 쿠팡에서 답변하면 다음 수집 때 자동으로 답변 완료
-    mock.state.coupang.callCenter[0]._status = 'ANSWER';
-    mock.state.coupang.callCenter[0].replies = [{ content: '오늘 출고됩니다' }];
-    await call('POST', '/api/sync', {});
-    const c1b = (await call('GET', '/api/inquiries?filter=all')).inquiries.find((q) => q.id === c1.id);
-    assert.equal(c1b.answered, 1);
-    assert.equal(c1b.answer, '오늘 출고됩니다');
+    const all2 = (await call('GET', '/api/inquiries?filter=all')).inquiries;
+    assert.equal(all2.find((q) => q.id === c1.id).answered, 1);
+    assert.equal(all2.find((q) => q.id === c1.id).answer, '오늘 출고됩니다. 죄송합니다.');
+    assert.equal(all2.find((q) => q.id === c3.id).answered, 1, '직접 표시한 답변 완료 유지');
+    assert.equal(all2.find((q) => q.id === online.id).answered, 1);
   });
 
   await t.test('CSV 내보내기', async () => {

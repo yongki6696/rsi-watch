@@ -342,7 +342,9 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     const today = kstDay();
     mock.state.esm.qnas.push(
       { site: 'G', qnaType: 3, day: today, data: { messageNo: 504346613, informStatus: '미처리', contractType: '상품', title: '상품 문의입니다.', details: '사이즈 크게 나왔나요?', receiveDate: `${today}T09:28:00+09:00`, inquirerName: '박정희', siteGoodsNo: 'B123456789', token: 'tk' } },
-      { site: 'A', qnaType: 2, day: today, data: { messageNo: 604000001, informStatus: '미처리', contractType: '배송', title: '배송 문의', details: '오늘 출발하나요?', receiveDate: `${today}T08:00:00+09:00`, inquirerName: '한옥션', orderNo: 3000000002 } },
+      { site: 'A', qnaType: 2, day: today, data: { messageNo: 604000001, informStatus: '미처리', contractType: '배송', title: '배송 문의', details: '오늘 출발하나요?', receiveDate: `${today}T08:00:00+09:00`, inquirerName: '한옥션', orderNo: '3000000002', reAsking: false } },
+      // 주문 없는 문의(옥션 "0") + 재문의
+      { site: 'A', qnaType: 1, day: today, data: { messageNo: 604000003, informStatus: '미처리', contractType: '상품(성능/사이즈)', title: '사이즈', details: '[처리완료내역][문의번호: 604000000]지난번 문의\n[미처리][문의번호: 604000003]다시 여쭤봐요', receiveDate: `${today}T06:00:00+09:00`, inquirerName: '재문의', orderNo: '0', reAsking: true, answerDate: '0001-01-01T00:00:00+09:00' } },
       // 문서 표기(PascalCase)로 와도 처리
       { site: 'A', qnaType: 1, day: today, data: { MessageNo: 604000002, InformStatus: '처리완료', ContractType: '상품', Title: '재입고', Details: '언제 들어오나요', ReceiveDate: `${today} 07:00:00`, AnswerDate: `${today} 07:30:00` } }
     );
@@ -353,11 +355,8 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     mock.state.lotteon.sellerInquiries.push({ slrInqNo: 779, vocTypNm: '반품', slrInqProcStatCd: 'ANS', inqTtl: '반품 문의', inqCnts: '반품하려면?', odNo: 'LO2026112200001', pdNm: '캠핑 랜턴', ansCnts: '안내드립니다', accpDttm: stamp(), procDttm: stamp() });
     const before = tg().length;
     const r = await call('POST', '/api/sync', {});
-    assert.equal(r.inquiries, 3, '새 미답변: G마켓 1 + 옥션 비밀글 1 + 롯데ON 상품 Q&A 1');
-    const texts = tg().slice(before).join('\n');
-    assert.match(texts, /💬 상품문의 · 내 G마켓[\s\S]*상품 문의입니다/);
-    assert.match(texts, /💬 고객문의 · 내 옥션[\s\S]*\[배송 · 비밀글\] 배송 문의 — 한옥션/);
-    assert.match(texts, /💬 상품문의 · 내 롯데ON[\s\S]*사이즈 문의드려요/);
+    assert.equal(r.inquiries, 4, '새 미답변: G마켓 1 + 옥션 2 + 롯데ON 상품 Q&A 1');
+    assert.match(tg().slice(before).join('\n'), /💬 새 문의 4건/, '4건 이상이면 한 번에 알림');
 
     const list = (await call('GET', '/api/inquiries?filter=all')).inquiries;
     const g = list.find((q) => q.store_type === 'gmarket');
@@ -373,6 +372,11 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     assert.ok(a2.order_id, '옥션 주문과 연결');
     assert.equal(a2.answered, 0);
     assert.equal(list.find((q) => q.title === '재입고').answered, 1);
+    const re = list.find((q) => q.title === '사이즈');
+    assert.equal(re.order_no, '', '옥션 주문번호 "0" 은 비움');
+    assert.equal(re.category, '상품(성능/사이즈) · 재문의');
+    assert.equal(re.kind, 'product');
+    assert.equal(re.answered, 0);
     const lq = list.find((q) => q.store_type === 'lotteon' && q.content === '사이즈 문의드려요');
     assert.equal(lq.kind, 'product');
     assert.doesNotMatch(lq.product_name, /^상품번호/);
@@ -401,6 +405,21 @@ test('G마켓·옥션·롯데ON: 수집 → 알림 → 주문확인 → 발송�
     mock.state.lotteon.denySellerInquiry = false;
     await call('POST', '/api/sync', { storeId: lotte.id });
     assert.equal((await call('GET', '/api/stores')).stores.find((x) => x.id === lotte.id).inquiryError, null);
+
+    // G마켓 문의에 오더허브에서 답변: 답변 직전에 다시 조회해서 받은 최신 토큰으로, 처리완료(2)
+    assert.equal(list.find((q) => q.id === g.id).can_answer, true);
+    const seqBefore = mock.state.esm.tokenSeq;
+    await call('POST', `/api/inquiries/${g.id}/answer`, { text: '정사이즈로 나왔습니다. 감사합니다.' });
+    const sent = mock.state.esm.calls.answers.at(-1);
+    assert.equal(sent.site, 'G');
+    assert.equal(sent.messageNo, '504346613');
+    assert.equal(sent.answerStatus, 2);
+    assert.equal(sent.title, 'RE: 상품 문의입니다.');
+    assert.equal(sent.comments, '정사이즈로 나왔습니다. 감사합니다.');
+    assert.ok(mock.state.esm.tokenSeq > seqBefore && sent.token === `tk-504346613-${mock.state.esm.tokenSeq}`, '최신 토큰');
+    assert.equal((await call('GET', '/api/inquiries?filter=all')).inquiries.find((q) => q.id === g.id).answered, 1);
+    await call('POST', '/api/sync', {});
+    assert.equal((await call('GET', '/api/inquiries?filter=all')).inquiries.find((q) => q.id === g.id).answer, '정사이즈로 나왔습니다. 감사합니다.');
 
     // 옥션에서 답변하면 다음 수집 때 자동으로 답변 완료
     mock.state.esm.qnas[1].data.informStatus = '처리완료';

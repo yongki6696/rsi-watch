@@ -21,7 +21,7 @@ function kstStamp(d = new Date()) {
 
 function createEsmLotteonState() {
   return {
-    esm: { orders: new Map(), qnas: [], calls: { list: [], check: [], ship: [], qna: [] }, minIntervalMs: 0, lastCall: new Map(), rateLimited: 0 },
+    esm: { orders: new Map(), qnas: [], tokenSeq: 0, calls: { list: [], check: [], ship: [], qna: [], answers: [] }, minIntervalMs: 0, lastCall: new Map(), rateLimited: 0 },
     lotteon: { items: new Map(), qnas: [], sellerInquiries: [], calls: { orders: 0, progress: 0, inform: [], qna: [], sellerInquiry: [] } },
   };
 }
@@ -127,9 +127,26 @@ async function handleEsm(state, req, res, url) {
     if (!okType) return send(200, { ResultCode: 3000, Message: 'qnaType 이 올바르지 않습니다.' });
     if (body.status !== 1 || body.type !== 1) return send(200, { ResultCode: 3000, Message: 'status/type 오류' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(body.startDate || '') || !/^\d{4}-\d{2}-\d{2}$/.test(body.endDate || '')) return send(200, { ResultCode: 3000, Message: '조회 기간 형식 오류' });
-    if (Date.parse(body.endDate) - Date.parse(body.startDate) > 8 * 86400000) return send(200, { ResultCode: 3000, Message: '조회 기간은 7일 이내로 입력해주세요.' });
-    const list = state.esm.qnas.filter((q) => q.site === auth.site && q.qnaType === body.qnaType && q.day >= body.startDate && q.day < body.endDate).map((q) => q.data);
+    // 종료일은 마지막 날 + 1일 (당일 조회 = 시작일 + 1일), 7일 넘으면 오류
+    if (Date.parse(body.endDate) - Date.parse(body.startDate) > 7 * 86400000) return send(400, { resultCode: 1000, message: '7일 기간이상 조회 요청이 불가능합니다.' });
+    const found = state.esm.qnas.filter((q) => q.site === auth.site && q.qnaType === body.qnaType && q.day >= body.startDate && q.day < body.endDate);
+    // 조회할 때마다 새 토큰 (답변은 가장 최근 토큰만 통과)
+    for (const q of found) q.data.token = `tk-${q.data.messageNo ?? q.data.MessageNo}-${++state.esm.tokenSeq}`;
+    // 실제 ESM 처럼: 조회 대상이 없으면 HTTP 400 + resultCode 1000
+    if (!found.length) return send(400, { resultCode: 1000, message: '조회된 기간에 조회 대상이 없습니다' });
+    const list = found.map((q) => q.data);
     return auth.site === 'G' ? send(200, list) : send(200, { ResultCode: 0, Message: '성공', Data: list });
+  }
+  // 판매자 문의 답변: messageNo + 최신 token + answerStatus(2 처리완료) + title + comments (실제 API 처럼 이름 대소문자 무시)
+  if (url.pathname === '/item/v1/communications/customer/bulletin-board/qna' && req.method === 'POST') {
+    const b = Object.fromEntries(Object.entries(body).map(([k, v]) => [k.toLowerCase(), v]));
+    state.esm.calls.answers.push({ site: auth.site, ...body });
+    const q = state.esm.qnas.find((x) => x.site === auth.site && String(x.data.messageNo ?? x.data.MessageNo) === String(b.messageno));
+    if (!q || !b.token || b.token !== q.data.token) return send(200, { resultCode: 1000, message: `${auth.sellerId}는 token정보와 관련이 없습니다.` });
+    if (b.answerstatus !== 2 || !b.title || !b.comments) return send(200, { resultCode: 1000, message: '필수 값 누락' });
+    q.data.informStatus = '처리완료';
+    q.data.answer = b.comments;
+    return send(200, { messageNo: Number(b.messageno) });
   }
   return send(404, { ResultCode: 404, Message: `no route ${url.pathname}` });
 }
