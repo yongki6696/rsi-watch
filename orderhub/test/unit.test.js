@@ -268,3 +268,13 @@ test('주문 상품 링크: 마켓 판매 페이지 + 상품코드로 도매매 
   assert.equal(supplierOf(''), null);
   assert.equal(itemLinks('naver', { product_id: '1', product_code: 'dmm123456' }).supplier_url, 'https://domeme.domeggook.com/s/123456');
 });
+
+test('11번가 접속 진단 결론: API 만 막힘(허용 IP 목록) / 서버 IP 통째로 막힘', () => {
+  const { blockConclusion } = elevenst._internal;
+  const ok = '연결됨 (IPv4)';
+  assert.match(blockConclusion({ tcp: '실패 (ETIMEDOUT)', apiTls: '건너뜀', webTls: null }), /연결 자체가 안 됩니다/);
+  assert.match(blockConclusion({ tcp: ok, apiTls: '실패 (ECONNRESET)', webTls: '성공 (TLSv1.3, x)' }), /쇼핑몰은 이 서버에서 열리는데 API만 막힙니다[\s\S]*\[수정하기\]로 한 번 더 저장/);
+  assert.match(blockConclusion({ tcp: ok, apiTls: '실패 (ECONNRESET)', webTls: '실패 (ECONNRESET)' }), /쇼핑몰\(www\)까지 이 서버 IP를 막고[\s\S]*국내 중계 서버/);
+  assert.match(blockConclusion({ tcp: ok, apiTls: '실패 (ECONNRESET)', webTls: null }), /방화벽이 이 서버 IP를 막고/);
+  assert.match(blockConclusion({ tcp: ok, apiTls: '성공 (TLSv1.3, x)', webTls: null }), /IP 등록이 아직 반영되지 않음/);
+});

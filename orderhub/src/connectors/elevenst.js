@@ -169,6 +169,17 @@ function probeHttp(host, port, path) {
     req.end();
   });
 }
+// 진단 결론: API 만 막혔는지(허용 IP 목록에서 빠짐), 11번가 전체가 이 서버를 막았는지(해외 IP 차단 등)
+function blockConclusion({ tcp, apiTls, webTls }) {
+  if (!tcp.startsWith('연결됨')) return '→ 11번가 서버까지 연결 자체가 안 됩니다. IP 차단 또는 네트워크 문제입니다.';
+  if (apiTls.startsWith('성공')) return '→ 연결은 되지만 API 요청을 보내면 끊깁니다. 11번가가 IP를 확인하고 막은 것입니다 (IP 등록이 아직 반영되지 않음).';
+  if (webTls && webTls.startsWith('성공')) {
+    return '→ 11번가 쇼핑몰은 이 서버에서 열리는데 API만 막힙니다. 11번가 API 허용 IP 목록에 이 서버 IP가 없다는 뜻이에요. OPEN API CENTER → API 관리의 IP 칸 세 곳을 확인하고, 그대로 있어도 [수정하기]로 한 번 더 저장해주세요.';
+  }
+  if (webTls) return '→ 11번가 쇼핑몰(www)까지 이 서버 IP를 막고 있습니다. 11번가가 이 서버(해외 IP)를 통째로 막은 것으로 보여 IP 칸을 다시 저장해도 안 풀릴 수 있어요. 그러면 국내 중계 서버가 필요합니다 (안내서 참고).';
+  return '→ 보안 연결 단계에서 끊깁니다. 11번가 방화벽이 이 서버 IP를 막고 있을 가능성이 큽니다.';
+}
+
 async function connectionReport(baseUrl, proxy, info = null) {
   const ip = cachedPublicIp();
   const u = new URL(baseUrl);
@@ -216,9 +227,14 @@ async function connectionReport(baseUrl, proxy, info = null) {
     lines.push(`② 보안 연결(TLS): ${tlsr}`);
     lines.push(`③ HTTP 80 (키 없이): ${await probeHttp(host, 80, '/rest/')}`);
     if (tcp.includes('IPv6')) lines.push('※ IPv6 로 연결되고 있습니다. 11번가에는 IPv4 주소를 등록하므로 IPv6 연결은 막힐 수 있습니다.');
-    if (!tcp.startsWith('연결됨')) lines.push('→ 11번가 서버까지 연결 자체가 안 됩니다. IP 차단 또는 네트워크 문제입니다.');
-    else if (!tlsr.startsWith('성공')) lines.push('→ 보안 연결 단계에서 끊깁니다. 11번가 방화벽이 이 서버 IP를 막고 있을 가능성이 큽니다.');
-    else lines.push('→ 연결은 되지만 API 요청을 보내면 끊깁니다. 11번가가 IP를 확인하고 막은 것입니다 (IP 등록이 아직 반영되지 않음).');
+    // API 가 막혔으면 11번가 쇼핑몰(www)도 이 서버에서 열리는지 비교 → API 허용 IP 문제인지, 서버 IP 자체가 막혔는지
+    const webHost = info?.webHost !== undefined ? info.webHost : host === 'api.11st.co.kr' ? 'www.11st.co.kr' : null;
+    let webTls = null;
+    if (webHost && tcp.startsWith('연결됨') && !tlsr.startsWith('성공')) {
+      webTls = await probeTls(webHost, 443);
+      lines.push(`④ 11번가 쇼핑몰(${webHost}) 보안 연결: ${webTls}`);
+    }
+    lines.push(blockConclusion({ tcp, apiTls: tlsr, webTls }));
   } else {
     lines.push(`서버 연결(TCP ${Number(u.port) || 80}): ${await probeTcp(host, Number(u.port) || 80)}`);
   }
@@ -627,6 +643,7 @@ module.exports = {
   },
 
   _internal: {
+    blockConclusion,
     weekWindows,
     collapse, parseList, parseFlat, resultOf, normalizeOrder },
 };
