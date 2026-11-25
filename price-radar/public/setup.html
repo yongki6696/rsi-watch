@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>운영자 설정</title>
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { padding-bottom: 40px; }
+  h1 { font-size: 22px; margin: 18px 2px 4px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 14px; }
+  .kv b { font-weight: 600; color: var(--text-2); }
+  .ok { color: var(--down-text); font-weight: 700; }
+  .no { color: var(--err-text); font-weight: 700; }
+  .keyname { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-weight: 700; margin-top: 12px; }
+  ol { padding-left: 20px; } li { margin: 6px 0; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; background: var(--surface-2); padding: 10px; border-radius: 10px; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>운영자 설정</h1>
+  <p class="fine">이 페이지는 서비스를 운영하는 사람만 쓰면 돼요. 여기서 만든 값은 이 휴대폰 화면에만 보이고 어디에도 저장·전송되지 않아요.</p>
+
+  <section class="card section">
+    <h3>1. 지금 서버 상태</h3>
+    <div class="kv" id="status"><span class="muted">확인 중…</span></div>
+  </section>
+
+  <section class="card section">
+    <h3>2. 알림 키 만들기 (VAPID)</h3>
+    <p class="fine">푸시 알림을 보내려면 한 쌍의 키가 필요해요. 아래 버튼을 누르면 이 화면 안에서 새로 만들어요. 한 번 정해서 넣은 뒤에는 바꾸지 마세요 (바꾸면 모든 사람이 알림을 다시 켜야 해요).</p>
+    <button class="btn" type="button" id="gen">키 만들기</button>
+    <div id="keys" hidden>
+      <div class="keyname">VAPID_PUBLIC_KEY</div>
+      <code class="code" id="pub"></code>
+      <button class="btn ghost small" type="button" data-copy="pub">복사</button>
+      <div class="keyname">VAPID_PRIVATE_KEY <span class="no">(비밀)</span></div>
+      <code class="code" id="priv"></code>
+      <button class="btn ghost small" type="button" data-copy="priv">복사</button>
+      <div class="keyname">ADMIN_TOKEN <span class="no">(비밀)</span></div>
+      <code class="code" id="admin"></code>
+      <button class="btn ghost small" type="button" data-copy="admin">복사</button>
+    </div>
+  </section>
+
+  <section class="card section">
+    <h3>3. Cloudflare 에 넣기</h3>
+    <ol class="fine">
+      <li>Cloudflare 대시보드 → Workers &amp; Pages → <b>price-radar</b> → <b>Settings</b> → <b>Variables and Secrets</b></li>
+      <li><b>Add</b> → Type 은 <b>Secret</b> 으로, 아래 이름과 값을 하나씩 넣고 <b>Deploy</b>
+        <pre>COUPANG_ACCESS_KEY   (쿠팡 파트너스 Access Key)
+COUPANG_SECRET_KEY   (쿠팡 파트너스 Secret Key)
+VAPID_PUBLIC_KEY     (위에서 만든 값)
+VAPID_PRIVATE_KEY    (위에서 만든 값)
+VAPID_SUBJECT        mailto:내이메일@example.com
+ADMIN_TOKEN          (위에서 만든 값)</pre></li>
+      <li>쿠팡 키를 넣기 전에는 <b>데모 모드</b>(가상 가격)로 동작해요. 키를 넣으면 데모 데이터는 자동으로 지워져요.</li>
+    </ol>
+  </section>
+
+  <section class="card section">
+    <h3>4. 운영 현황 보기</h3>
+    <p class="fine">ADMIN_TOKEN 을 넣으면 사용자 수, 쿠팡 API 사용량, 마지막 확인 결과를 볼 수 있어요.</p>
+    <div class="inline"><input class="input" id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="off"><button class="btn small" type="button" id="stats">보기</button></div>
+    <button class="btn ghost small" type="button" id="run">지금 가격 확인 한 번 실행</button>
+    <pre id="out" hidden></pre>
+  </section>
+</main>
+<div class="toasts" id="toasts"></div>
+<script type="module">
+  import { h, fill, toast, ago } from '/lib.js';
+  const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const $ = (id) => document.getElementById(id);
+
+  async function status() {
+    try {
+      const c = await (await fetch('/api/config')).json();
+      const row = (k, ok, text) => [h('b', { text: k }), h('span', { class: ok ? 'ok' : 'no', text })];
+      fill($('status'),
+        ...row('쿠팡 파트너스', c.mode === 'live', c.mode === 'live' ? '연결됨 (실제 가격)' : '키 없음 → 데모 모드'),
+        ...row('푸시 알림', c.push, c.push ? '설정됨' : 'VAPID 키 없음'),
+        h('b', { text: '앱 이름' }), h('span', { text: c.appName }));
+    } catch (e) { fill($('status'), h('span', { class: 'no', text: `서버에 연결하지 못했어요: ${e.message}` })); }
+  }
+
+  $('gen').addEventListener('click', async () => {
+    const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    $('pub').textContent = b64u(await crypto.subtle.exportKey('raw', pair.publicKey));
+    $('priv').textContent = (await crypto.subtle.exportKey('jwk', pair.privateKey)).d;
+    $('admin').textContent = b64u(crypto.getRandomValues(new Uint8Array(24)));
+    $('keys').hidden = false;
+  });
+  document.addEventListener('click', async (e) => {
+    const id = e.target.dataset && e.target.dataset.copy;
+    if (!id) return;
+    try { await navigator.clipboard.writeText($(id).textContent); toast('복사했어요.'); } catch { toast('길게 눌러 복사해 주세요.'); }
+  });
+
+  async function admin(method, path, body) {
+    const res = await fetch(path, { method, headers: { 'X-Admin-Token': $('token').value.trim(), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.status);
+    return data;
+  }
+  $('stats').addEventListener('click', async () => {
+    try {
+      const s = await admin('GET', '/api/admin/stats');
+      const lines = [
+        `모드: ${s.mode === 'live' ? '실제' : '데모'}`,
+        `사용자: ${s.users}명 (최근 7일 ${s.activeUsers7d}명) · 알림 기기 ${s.devices}대`,
+        `알림: ${s.watches}개 · 추적 상품 ${s.products}개 · 키워드 ${s.keywords}개 · 못 찾는 상품 ${s.notFound}개`,
+        `확인 대기: ${s.dueNow}개`,
+        `쿠팡 API: 최근 1시간 ${s.apiCallsLastHour}/${s.apiHourlyLimit}회 · 24시간 ${s.apiCalls24h}회`,
+        s.apiPausedUntil > Date.now() ? `⚠ API 사용 멈춤: ${new Date(s.apiPausedUntil).toLocaleString('ko-KR')}까지` : 'API 상태: 정상',
+        s.lastApiError ? `마지막 API 오류 (${ago(s.lastApiError.t)}): ${s.lastApiError.message}` : '',
+        s.lastRun ? `마지막 확인: ${ago(s.lastRun.at)} · 확인 ${s.lastRun.checked}개 · 호출 ${s.lastRun.calls}회 · 변동 ${s.lastRun.changes}건 · 알림 ${s.lastRun.sent}건` : '아직 확인 기록이 없어요',
+      ].filter(Boolean);
+      $('out').textContent = lines.join('\n');
+      $('out').hidden = false;
+    } catch (e) { toast(`실패: ${e.message}`); }
+  });
+  $('run').addEventListener('click', async () => {
+    try { const r = await admin('POST', '/api/admin/run', { force: true }); toast(`확인 ${r.checked}개 · 호출 ${r.calls}회 · 변동 ${r.changes}건`); } catch (e) { toast(`실패: ${e.message}`); }
+  });
+  status();
+</script>
+</body>
+</html>

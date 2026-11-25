@@ -1,0 +1,16 @@
+{
+  "name": "price-radar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "쿠팡 파트너스 API 기반 상품·키워드 최저가 알림 (Cloudflare Workers)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test --no-warnings test/*.test.js",
+    "test:e2e": "node --test --no-warnings --test-concurrency=1 e2e/e2e.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.158.0"
+  }
+}
