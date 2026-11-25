@@ -135,7 +135,7 @@ function normalizeSheet(s) {
       marketState: canceled ? 'CANCELED' : state,
       marketStatus,
       claim: !canceled && hold > 0 ? 'CANCEL' : null,
-      extra: { shipmentBoxId: boxId, orderId: orderNo, vendorItemId: str(it.vendorItemId) },
+      extra: { shipmentBoxId: boxId, orderId: orderNo, vendorItemId: str(it.vendorItemId), displayProductId: str(it.productId) },
       raw: { ...s, orderItems: [it] },
     };
   });

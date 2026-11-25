@@ -11,6 +11,37 @@ const { kstCompact, toIso, toInt, str, sleep } = require('../util');
 const { courierCode } = require('../couriers');
 const { isNoData, dateRanges, compact, plainText } = require('./inquiry-util');
 const { encodeXmlEucKr, escapeXml } = require('./euckr');
+const { cachedPublicIp } = require('../publicip');
+
+// 11번가 호출 간격 (한꺼번에 몰아서 부르지 않도록, API 키별)
+const lastCall = new Map();
+async function pace(ctx, key) {
+  const gap = ctx.config.elevenstGapMs ?? 700;
+  if (!gap) return;
+  const at = Math.max(Date.now(), (lastCall.get(key) || 0) + gap);
+  lastCall.set(key, at);
+  if (at > Date.now()) await sleep(at - Date.now());
+}
+
+const fmtKst = (iso) => {
+  const d = new Date(Date.parse(iso) + 9 * 3600000);
+  return isNaN(d) ? '' : `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+};
+
+// 접속이 막혔을 때 원인 안내 (전에 잘 되던 곳인지, 서버 IP 가 바뀌었는지에 따라)
+function blockedMessage(ctx, reason) {
+  const ip = cachedPublicIp();
+  const okIp = str(ctx.state?.okIp);
+  const okAt = ctx.store?.last_success_at;
+  const ipText = ip || '[스토어] 화면 맨 위의 서버 IP';
+  if (ip && okIp && ip !== okIp) {
+    return `서버 IP가 바뀌어서 11번가가 접속을 막았습니다 (전: ${okIp} → 지금: ${ip}). 11번가 OPEN API CENTER의 IP 칸 세 곳(그리고 다른 마켓의 IP 설정)에 새 IP ${ip} 를 등록해주세요. (${reason})`;
+  }
+  if (okAt) {
+    return `11번가가 이 서버의 접속을 막았습니다 (마지막 정상 수집 ${fmtKst(okAt)}${okIp ? `, 서버 IP ${okIp} 그대로` : ''}). 잘 되다가 막혔다면 11번가 OPEN API CENTER → API 관리에서 ① 'IP 직접 입력' 세 칸(개발서버 IP·개발자 PC·상용서버 IP)에 ${ipText} 가 아직 있는지 (다른 프로그램(샵모아 등) 설정을 바꾸다 지워지거나 덮어써졌을 수 있어요) ② 연동 방식이 '솔루션 업체 선택'으로 바뀌지 않았는지 ③ API KEY를 새로 발급하지 않았는지 확인해주세요. 모두 그대로인데도 계속 막히면 11번가가 해외(오라클 일본) 서버 IP를 막은 것이라 '국내 중계 서버'가 필요합니다 (안내서 참고). (${reason})`;
+  }
+  return null;
+}
 
 function decodeEntities(s) {
   return s
@@ -61,6 +92,7 @@ async function api(ctx, path, opts = {}, attempt = 0) {
   if (!key) throw new Error('11번가 Open API Key를 입력해주세요');
   const proxy = str(ctx.creds.proxy) || undefined;
   const method = opts.method || 'GET';
+  await pace(ctx, key);
   let res;
   try {
     res = await request(ctx.config.elevenstApiBase + path, {
@@ -75,9 +107,10 @@ async function api(ctx, path, opts = {}, attempt = 0) {
     if (e.network && /ECONNRESET|UND_ERR_SOCKET|ETIMEDOUT|CONNECT_TIMEOUT|ECONNREFUSED|EPIPE|TimeoutError/i.test(e.message)) {
       const relay = proxy ? parseProxy(proxy).host : null;
       const err = new Error(
-        relay
+        (!relay && blockedMessage(ctx, e.message)) ||
+        (relay
           ? `11번가가 국내 중계 서버(${relay})의 접속을 막았습니다. 11번가 OPEN API CENTER → API 관리 → 'IP 직접 입력'의 개발서버 IP·개발자 PC·상용서버 IP 세 칸 모두에 중계 서버 IP ${relay} 를 세미콜론(;)으로 이어 적고 [수정하기]를 눌러주세요. 반영까지 시간이 걸릴 수 있습니다. (${e.message})`
-          : `11번가가 이 서버의 접속을 막았습니다. 11번가 OPEN API CENTER → API 관리 → 'IP 직접 입력'의 세 칸(개발서버 IP·개발자 PC·상용서버 IP)에 [스토어] 화면 맨 위의 서버 IP를 띄어쓰기 없이 세미콜론(;)으로 이어 적고 [수정하기]를 눌러주세요. 오더허브 서버가 해외(예: 오라클 일본)에 있으면 11번가가 해외 IP를 막기 때문에 '국내 중계 서버'가 필요합니다 (안내서 참고). (${e.message})`
+          : `11번가가 이 서버의 접속을 막았습니다. 11번가 OPEN API CENTER → API 관리 → 'IP 직접 입력'의 세 칸(개발서버 IP·개발자 PC·상용서버 IP)에 [스토어] 화면 맨 위의 서버 IP를 띄어쓰기 없이 세미콜론(;)으로 이어 적고 [수정하기]를 눌러주세요. 오더허브 서버가 해외(예: 오라클 일본)에 있으면 11번가가 해외 IP를 막기 때문에 '국내 중계 서버'가 필요합니다 (안내서 참고). (${e.message})`)
       );
       err.network = true;
       throw err;
@@ -105,7 +138,11 @@ async function api(ctx, path, opts = {}, attempt = 0) {
 function probeTcp(host, port) {
   return new Promise((resolve) => {
     const s = net.connect({ host, port, timeout: 8000 });
-    s.on('connect', () => (s.destroy(), resolve('연결됨')));
+    s.on('connect', () => {
+      const fam = s.remoteFamily === 'IPv6' ? 'IPv6' : 'IPv4';
+      s.destroy();
+      resolve(`연결됨 (${fam})`);
+    });
     s.on('timeout', () => (s.destroy(), resolve('시간 초과')));
     s.on('error', (e) => resolve(`실패 (${e.code || e.message})`));
   });
@@ -132,7 +169,8 @@ function probeHttp(host, port, path) {
     req.end();
   });
 }
-async function connectionReport(baseUrl, proxy) {
+async function connectionReport(baseUrl, proxy, info = null) {
+  const ip = cachedPublicIp();
   const u = new URL(baseUrl);
   const host = u.hostname;
   const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
@@ -141,7 +179,7 @@ async function connectionReport(baseUrl, proxy) {
     const lines = [`대상: ${host} (국내 중계 서버 ${p.label} 경유)`];
     const relayTcp = await probeTcp(p.host, p.port);
     lines.push(`① 중계 서버 연결(TCP ${p.port}): ${relayTcp}`);
-    if (relayTcp !== '연결됨') {
+    if (!relayTcp.startsWith('연결됨')) {
       lines.push('→ 중계 서버에 연결이 안 됩니다. 중계 서버 IP와 방화벽(포트), 서버가 켜져 있는지 확인해주세요.');
       return lines.join('\n');
     }
@@ -174,15 +212,19 @@ async function connectionReport(baseUrl, proxy) {
     const port = Number(u.port) || 443;
     const tcp = await probeTcp(host, port);
     lines.push(`① 서버 연결(TCP ${port}): ${tcp}`);
-    const tlsr = tcp === '연결됨' ? await probeTls(host, port) : '건너뜀';
+    const tlsr = tcp.startsWith('연결됨') ? await probeTls(host, port) : '건너뜀';
     lines.push(`② 보안 연결(TLS): ${tlsr}`);
     lines.push(`③ HTTP 80 (키 없이): ${await probeHttp(host, 80, '/rest/')}`);
-    if (tcp !== '연결됨') lines.push('→ 11번가 서버까지 연결 자체가 안 됩니다. IP 차단 또는 네트워크 문제입니다.');
+    if (tcp.includes('IPv6')) lines.push('※ IPv6 로 연결되고 있습니다. 11번가에는 IPv4 주소를 등록하므로 IPv6 연결은 막힐 수 있습니다.');
+    if (!tcp.startsWith('연결됨')) lines.push('→ 11번가 서버까지 연결 자체가 안 됩니다. IP 차단 또는 네트워크 문제입니다.');
     else if (!tlsr.startsWith('성공')) lines.push('→ 보안 연결 단계에서 끊깁니다. 11번가 방화벽이 이 서버 IP를 막고 있을 가능성이 큽니다.');
     else lines.push('→ 연결은 되지만 API 요청을 보내면 끊깁니다. 11번가가 IP를 확인하고 막은 것입니다 (IP 등록이 아직 반영되지 않음).');
   } else {
     lines.push(`서버 연결(TCP ${Number(u.port) || 80}): ${await probeTcp(host, Number(u.port) || 80)}`);
   }
+  // 서버 IP 가 바뀌었는지, 전에 잘 되던 곳인지
+  if (ip) lines.push(`이 서버 IP: ${ip} (11번가 IP 칸 세 곳에 이 IP가 있어야 합니다)`);
+  if (info?.okAt) lines.push(`11번가 마지막 정상 수집: ${fmtKst(info.okAt)}${info.okIp ? ` (그때 서버 IP ${info.okIp}${ip && ip !== info.okIp ? ' → 지금과 다름!' : ''})` : ''}`);
   return lines.join('\n');
 }
 
@@ -410,6 +452,7 @@ const meta = {
   color: '#ff0038',
   beta: true,
   inquiries: true, // 상품 Q&A
+  inquiryEvery: 6, // 11번가는 호출을 아끼려고 30분마다 (지금 수집을 누르면 바로)
   answerable: true, // 오더허브에서 답변 (11번가가 고객에게 이메일 발송)
   backfill: true,
   sellerCenter: 'https://soffice.11st.co.kr/',
@@ -436,7 +479,7 @@ module.exports = {
     try {
       xml = await api(ctx, `/ordservices/complete/${kstCompact(new Date(now.getTime() - 86400000))}/${kstCompact(now)}`);
     } catch (e) {
-      if (e.network) e.diagnostic = await connectionReport(ctx.config.elevenstApiBase, str(ctx.creds.proxy) || null).catch((x) => `진단 실패: ${x.message}`);
+      if (e.network) e.diagnostic = await connectionReport(ctx.config.elevenstApiBase, str(ctx.creds.proxy) || null, { okAt: ctx.store?.last_success_at, okIp: ctx.state?.okIp }).catch((x) => `진단 실패: ${x.message}`);
       throw e;
     }
     const orders = parseList(xml, 'order');

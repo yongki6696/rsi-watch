@@ -660,12 +660,23 @@ function itemLines(o) {
           { class: 'oi-tags' },
           it.option_name ? h('span', { class: 'tag-opt' }, it.option_name) : null,
           h('span', { class: `tag-qty ${Number(it.quantity) > 1 ? 'multi' : ''}` }, `${it.quantity ?? 1}개`),
-          it.product_code ? h('span', { class: 'tag-code', title: '상품코드' }, it.product_code) : null
+          it.product_code ? h('span', { class: 'tag-code', title: '상품코드' }, it.product_code) : null,
+          ...productLinks(it)
         )
       );
     }),
     items.length > shown.length ? h('div', { class: 'muted small' }, `외 ${items.length - shown.length}개 상품 (상세에서 확인)`) : null
   );
+}
+
+// 판매 페이지 / 공급처(도매매 등) 상품 페이지 바로가기 - 카드를 눌러 상세가 열리지 않게
+function productLinks(it, big = false) {
+  const out = [];
+  const a = (href, label, cls) =>
+    h('a', { class: `plink ${cls} ${big ? 'big' : ''}`, href, target: '_blank', rel: 'noopener noreferrer', onclick: (e) => e.stopPropagation() }, icon('ext', 'sm'), label);
+  if (it.product_url) out.push(a(it.product_url, big ? '판매 페이지' : '판매페이지', 'market'));
+  if (it.supplier_url) out.push(a(it.supplier_url, big ? `${it.supplier_name} 상품 페이지` : it.supplier_name, 'supplier'));
+  return out;
 }
 
 function itemSummary(o) {
@@ -1146,6 +1157,7 @@ function renderOrderDetail(body, o) {
             i.product_code ? h('span', { class: 'code-copy' }, '코드 ', h('b', { class: 'mono' }, i.product_code), h('button', { class: 'btn xs ghost', 'aria-label': '상품코드 복사', onclick: () => copyText(i.product_code) }, icon('copy', 'sm'))) : null,
             h('span', { class: ['CANCELED', 'RETURNED'].includes(i.market_state) ? 'chip red' : i.claim ? 'chip red' : 'chip' }, i.market_status || i.market_state)
           ),
+          i.product_url || i.supplier_url ? h('div', { class: 'plinks' }, ...productLinks(i, true)) : null,
           h('div', { class: 'meta muted' }, `상품주문번호 ${i.item_key}`)
         )
       )
@@ -2004,7 +2016,7 @@ async function renderStores() {
 function storeRow(s) {
   const c = connector(s.type);
   const status = s.lastError
-    ? h('div', { class: 'stat err' }, icon('alert', 'sm'), h('span', null, `수집 실패 (${ago(s.lastSyncAt)}): ${s.lastError}`))
+    ? h('div', { class: 'stat err' }, icon('alert', 'sm'), h('span', null, `수집 실패 (${ago(s.lastSyncAt)}): ${s.lastError}`, s.retryAt ? h('small', { class: 'retry-note' }, `계속 막혀 있어 자동 수집 간격을 늘렸어요 · 다음 자동 시도 ${fmtDT(s.retryAt)} ([지금 수집]은 바로 시도)`) : ''))
     : s.lastSuccessAt
       ? h('div', { class: 'stat' }, h('span', { class: 'dot' }), `정상 · 마지막 수집 ${ago(s.lastSuccessAt)} · 주문 ${s.orderCount}건`)
       : h('div', { class: 'stat' }, h('span', { class: 'dot run' }), '첫 수집 대기 중');

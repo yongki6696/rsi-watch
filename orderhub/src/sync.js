@@ -1,4 +1,6 @@
 'use strict';
+const { itemLinks } = require('./links');
+const { detectPublicIp, cachedPublicIp } = require('./publicip');
 // 주문 자동 수집 스케줄러 (기본 5분 간격) + 신규주문/취소요청 알림
 const { getConnector } = require('./connectors');
 const { getAppSettings } = require('./settings');
@@ -47,6 +49,8 @@ class SyncEngine {
     this.nextRunAt = new Date(Date.now() + ms).toISOString();
     this.timer = setTimeout(async () => {
       try {
+        // 서버 IP 확인 (마켓이 접속을 막았을 때 IP 가 바뀌었는지 알려주기 위해, 10분 캐시)
+        await detectPublicIp().catch(() => null);
         await this.runAll({ manual: false });
       } catch (e) {
         console.error('[sync] 실패', e);
@@ -151,6 +155,12 @@ class SyncEngine {
 
     for (const [index, store] of stores.entries()) {
       onStore?.({ index, total: stores.length, store });
+      // 마켓이 접속을 막고 있으면(연결 끊김) 자동 수집은 간격을 늘려서 (지금 수집은 바로)
+      const st = safeJson(store.state, {}) || {};
+      if (!manual && !backfillDays && st.retryAt && Date.parse(st.retryAt) > Date.now()) {
+        summary.stores.push({ storeId: store.id, name: store.name, type: store.type, skipped: `접속이 막혀 ${st.retryAt} 이후 다시 시도` });
+        continue;
+      }
       const r = await this.syncStore(store, { manual, backfillDays }, alerts);
       summary.stores.push(r);
       if (r.error) summary.errors++;
@@ -241,9 +251,12 @@ class SyncEngine {
         const inqFirst = firstSync || !ctx.state.inquirySyncedAt;
         const inqRun = (ctx.state.inqRun || 0) + 1;
         newState.inqRun = inqRun;
-        // 평소엔 최근 7일, 처음·1시간마다(12번에 1번) 최근 30일 → 셀러센터에서 늦게 답변한 문의도 반영
-        const inquiryDays = inqFirst || inqRun % 12 === 0 ? 30 : 7;
-        try {
+        // 마켓에 따라 몇 번에 한 번만 확인 (11번가 30분마다) - 처음·지금 수집은 바로
+        const every = connector.inquiryEvery || 1;
+        const due = inqFirst || manual || (inqRun - 1) % every === 0;
+        // 평소엔 최근 7일, 처음·6시간마다 최근 30일 → 셀러센터에서 늦게 답변한 문의도 반영
+        const inquiryDays = inqFirst || (inqRun - 1) % 72 === 0 ? 30 : 7;
+        if (due) try {
           const got = await connector.fetchInquiries({ ...ctx, firstSync: inqFirst, inquiryDays });
           const list = Array.isArray(got) ? got : got?.list || [];
           const warnings = Array.isArray(got) ? [] : got?.warnings || [];
@@ -274,6 +287,10 @@ class SyncEngine {
         alerts.recovered.push({ store });
         this.db.addEvent({ storeId: store.id, type: 'sync', message: '수집이 정상화되었습니다' });
       }
+      // 정상 수집 때의 서버 IP (나중에 접속이 막히면 IP 가 바뀌었는지 비교)
+      if (cachedPublicIp()) newState.okIp = cachedPublicIp();
+      delete newState.netFails;
+      delete newState.retryAt;
       this.db.run(
         'UPDATE stores SET state = ?, last_sync_at = ?, last_success_at = ?, last_error = NULL WHERE id = ?',
         JSON.stringify(newState),
@@ -290,6 +307,13 @@ class SyncEngine {
       }
       const firstError = !store.last_error;
       this.db.run('UPDATE stores SET last_sync_at = ?, last_error = ? WHERE id = ?', ts, e.message, store.id);
+      // 연결 끊김(방화벽 차단 등)이 계속되면 자동 수집 간격을 5→10→20→40→60분으로 늘림
+      if (e.network) {
+        const st = safeJson(store.state, {}) || {};
+        st.netFails = (st.netFails || 0) + 1;
+        st.retryAt = new Date(Date.now() + Math.min(60, 5 * 2 ** (st.netFails - 1)) * 60000).toISOString();
+        this.db.run('UPDATE stores SET state = ? WHERE id = ?', JSON.stringify(st), store.id);
+      }
       if (firstError || store.last_error !== e.message) {
         this.db.addEvent({ storeId: store.id, level: 'error', type: 'sync', message: `수집 실패: ${e.message}` });
       }
@@ -311,6 +335,11 @@ class SyncEngine {
       for (const a of alerts.newOrders) {
         const o = this.orders.get(a.orderId);
         if (!o) continue;
+        // 첫 상품의 판매 페이지 / 공급처(도매매 등) 상품 페이지
+        const first = o.items?.[0] ? itemLinks(o.store_type, o.items[0]) : {};
+        const links = [];
+        if (first.product_url) links.push({ label: '판매 페이지', url: first.product_url });
+        if (first.supplier_url) links.push({ label: `${first.supplier_name} 상품`, url: first.supplier_url });
         await n.send({
           type: 'newOrder',
           title: `🛒 신규주문 · ${label(a.store)}`,
@@ -318,6 +347,7 @@ class SyncEngine {
           url: `/#/order/${o.id}`,
           tag: `order-${o.id}`,
           badgeCount,
+          links,
         });
       }
     } else if (alerts.newOrders.length > 5) {

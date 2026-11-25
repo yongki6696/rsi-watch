@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const baseConfig = require('../src/config');
 const { createApp } = require('../server');
+const { setCachedPublicIp } = require('../src/publicip');
 const { startMock, naverAddOrder, naverChange, coupangAddSheet, elevenAddOrder, NAVER, COUPANG, ELEVEN } = require('./mock-markets');
 
 const BIG_BOX = '642538970006401429'; // JS Number 로는 정확히 표현 불가 (> 2^53)
@@ -27,6 +28,7 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     naverApiBase: `${mock.url}/external`,
     coupangApiBase: mock.url,
     elevenstApiBase: `${mock.url}/rest`,
+    elevenstGapMs: 0,
     telegramApiBase: `${mock.url}/tg`,
     disableScheduler: true,
   });
@@ -639,6 +641,69 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     const el = (await call('GET', '/api/orders?tab=all&q=202611220001')).orders[0];
     await assert.rejects(call('POST', `/api/orders/${el.id}/claim`, { type: 'CANCEL' }), /지원하지 않습니다/);
     await assert.rejects(call('POST', `/api/orders/${el.id}/claim`, { type: 'EXCHANGE' }), /취소\/반품/);
+  });
+
+  await t.test('신규주문 상품 링크: 판매 페이지 · 도매매 상품 (목록·상세·알림 버튼)', async () => {
+    naverAddOrder(mock.state, { productOrderId: '2026112500000951', orderId: '2026112590000951', name: '링크고객', productId: '6597568247', code: 'dmm41674420' });
+    coupangAddSheet(mock.state, { shipmentBoxId: '700000000951', orderId: '9200000951', vendorItemId: '951', name: '쿠팡링크', productId: '307227331' });
+    const before = mock.state.telegram.messages.length;
+    await call('POST', '/api/sync', {});
+    const nv = (await call('GET', '/api/orders?tab=new&q=2026112590000951')).orders[0];
+    assert.equal(nv.items[0].product_url, 'https://smartstore.naver.com/main/products/6597568247');
+    assert.equal(nv.items[0].supplier_name, '도매매');
+    assert.equal(nv.items[0].supplier_url, 'https://domeme.domeggook.com/s/41674420');
+    assert.equal(nv.items[0].extra, undefined, '목록에는 내부 정보(extra)를 내보내지 않음');
+    const cp = (await call('GET', '/api/orders?tab=new&q=9200000951')).orders[0];
+    assert.equal(cp.items[0].product_url, 'https://www.coupang.com/vp/products/307227331?vendorItemId=951');
+    const detail = await call('GET', `/api/orders/${nv.id}`);
+    assert.equal(detail.items[0].product_url, 'https://smartstore.naver.com/main/products/6597568247');
+    // 텔레그램 신규주문 알림: [주문 보기] + [판매 페이지] [도매매 상품] 버튼
+    const msg = mock.state.telegram.messages.slice(before).find((m) => /링크고객/.test(m.text));
+    assert.ok(msg, '신규주문 알림');
+    const buttons = msg.reply_markup.inline_keyboard.flat();
+    assert.deepEqual(buttons.map((b) => b.text), ['주문 보기', '판매 페이지', '도매매 상품']);
+    assert.equal(buttons[1].url, 'https://smartstore.naver.com/main/products/6597568247');
+    assert.equal(buttons[2].url, 'https://domeme.domeggook.com/s/41674420');
+  });
+
+  await t.test('11번가가 잘 되다가 접속을 막으면: 원인 안내 + 자동 수집 간격 늘림 + 복구', async () => {
+    const eleven = (await call('GET', '/api/stores')).stores.find((s) => s.type === 'elevenst');
+    // 정상 수집 때 서버 IP 기록
+    setCachedPublicIp('203.0.113.7');
+    await call('POST', '/api/sync', { storeId: eleven.id });
+    mock.state.eleven.reset = true; // 11번가 방화벽이 연결을 끊음
+    await app.sync.runAll({ manual: false });
+    let s = (await call('GET', '/api/stores')).stores.find((x) => x.id === eleven.id);
+    assert.match(s.lastError, /11번가가 이 서버의 접속을 막았습니다 \(마지막 정상 수집 .*서버 IP 203\.0\.113\.7 그대로\)/);
+    assert.match(s.lastError, /솔루션 업체 선택/);
+    assert.match(s.lastError, /203\.0\.113\.7 가 아직 있는지/);
+    assert.ok(s.retryAt, '자동 재시도 간격 늘림');
+    // 다음 자동 수집은 건너뜀 (11번가에 계속 두드리지 않음), [지금 수집]은 바로 시도
+    const qnaCalls = mock.state.eleven.calls.qna.length;
+    const auto = await app.sync.runAll({ manual: false });
+    assert.match(auto.stores.find((x) => x.storeId === eleven.id).skipped, /접속이 막혀/);
+    const manual = await call('POST', '/api/sync', { storeId: eleven.id });
+    assert.equal(manual.errors, 1);
+    assert.equal(mock.state.eleven.calls.qna.length, qnaCalls);
+    // 서버 IP 가 바뀐 경우는 그렇게 안내
+    setCachedPublicIp('203.0.113.99');
+    await call('POST', '/api/sync', { storeId: eleven.id });
+    s = (await call('GET', '/api/stores')).stores.find((x) => x.id === eleven.id);
+    assert.match(s.lastError, /서버 IP가 바뀌어서 11번가가 접속을 막았습니다 \(전: 203\.0\.113\.7 → 지금: 203\.0\.113\.99\)/);
+    // 연결 테스트 진단에도 서버 IP·마지막 정상 수집
+    const diag = await call('POST', `/api/stores/${eleven.id}/test`, {}, { raw: true });
+    const dj = await diag.json();
+    assert.match(dj.diagnostic, /이 서버 IP: 203\.0\.113\.99/);
+    assert.match(dj.diagnostic, /11번가 마지막 정상 수집: .*그때 서버 IP 203\.0\.113\.7 → 지금과 다름!/);
+    assert.match(dj.diagnostic, /연결됨 \(IPv4\)/);
+    // 다시 열리면 정상화 + 재시도 간격 원래대로
+    mock.state.eleven.reset = false;
+    setCachedPublicIp('203.0.113.7');
+    await call('POST', '/api/sync', { storeId: eleven.id });
+    s = (await call('GET', '/api/stores')).stores.find((x) => x.id === eleven.id);
+    assert.equal(s.lastError, null);
+    assert.equal(s.retryAt, null);
+    setCachedPublicIp(null);
   });
 
   await t.test('수집 오류 알림은 한 번만, 복구되면 정상화 알림', async () => {

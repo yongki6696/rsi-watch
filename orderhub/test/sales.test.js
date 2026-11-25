@@ -283,7 +283,7 @@ test('지난 주문 불러오기: 스마트스토어·쿠팡 (기간을 나눠 �
 test('지난 주문 불러오기: 11번가 (7일씩, 배송완료·구매확정 포함, 내 정보 유지)', async (t) => {
   const mock = await startMock();
   t.after(() => mock.close());
-  const { app, call } = await setup(t, { elevenstApiBase: `${mock.url}/rest` });
+  const { app, call } = await setup(t, { elevenstApiBase: `${mock.url}/rest`, elevenstGapMs: 0 });
   app.notifier.send = async () => {};
   // 처리 중 주문 1건 → 첫 연결로 수집, 공급처 기록
   elevenAddOrder(mock.state, { ordNo: '202611230001', dlvNo: '9301' });

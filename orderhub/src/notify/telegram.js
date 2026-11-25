@@ -17,9 +17,12 @@ async function sendTelegram(config, { botToken, chatId }, msg) {
   const text = `${msg.title}\n${msg.body || ''}`.trim();
   const body = { chat_id: chatId, text, disable_web_page_preview: true };
   const link = msg.absoluteUrl;
-  if (link && /^https:\/\//.test(link)) {
-    body.reply_markup = { inline_keyboard: [[{ text: '주문 보기', url: link }]] };
-  }
+  const rows = [];
+  if (link && /^https:\/\//.test(link)) rows.push([{ text: '주문 보기', url: link }]);
+  // 판매 페이지·공급처 상품 버튼
+  const extra = (msg.links || []).filter((l) => l && /^https:\/\//.test(l.url)).slice(0, 3);
+  if (extra.length) rows.push(extra.map((l) => ({ text: l.label, url: l.url })));
+  if (rows.length) body.reply_markup = { inline_keyboard: rows };
   await call(config, botToken, 'sendMessage', body);
   return { sent: 1 };
 }

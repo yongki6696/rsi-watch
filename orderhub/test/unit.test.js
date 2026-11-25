@@ -251,3 +251,20 @@ test('쿠팡 반품·출고중지 접수 반영: 받은 발주서는 덮어쓰�
   assert.equal(b2.partial, true);
   assert.equal(out.find((g) => g.groupKey === 'B3').items[0].marketStatus, '반품요청 철회');
 });
+
+test('주문 상품 링크: 마켓 판매 페이지 + 상품코드로 도매매 상품 페이지', () => {
+  const { itemLinks, supplierOf } = require('../src/links');
+  assert.equal(itemLinks('naver', { product_id: '6597568247' }).product_url, 'https://smartstore.naver.com/main/products/6597568247');
+  assert.equal(itemLinks('coupang', { product_id: '70000000001', extra: JSON.stringify({ displayProductId: '307227331', vendorItemId: '70000000001' }) }).product_url, 'https://www.coupang.com/vp/products/307227331?vendorItemId=70000000001');
+  assert.equal(itemLinks('coupang', { product_id: '7', extra: '{}' }).product_url, '', '노출상품ID 가 없으면 링크 없음');
+  assert.equal(itemLinks('elevenst', { product_id: '5550001' }).product_url, 'https://www.11st.co.kr/products/5550001');
+  assert.equal(itemLinks('gmarket', { product_id: '1527058123' }).product_url, 'https://item.gmarket.co.kr/Item?goodscode=1527058123');
+  assert.equal(itemLinks('auction', { product_id: 'B642025679' }).product_url, 'https://itempage3.auction.co.kr/DetailView.aspx?itemno=B642025679');
+  assert.equal(itemLinks('lotteon', { product_id: 'LO100001', extra: { spdNo: 'LO100001' } }).product_url, 'https://www.lotteon.com/p/product/LO100001');
+  assert.equal(itemLinks('demo', { product_id: '1' }).product_url, '');
+  assert.deepEqual(supplierOf('dmm41674420'), { name: '도매매', url: 'https://domeme.domeggook.com/s/41674420' });
+  assert.deepEqual(supplierOf('DMM-41674420'), { name: '도매매', url: 'https://domeme.domeggook.com/s/41674420' });
+  assert.equal(supplierOf('W287E35'), null);
+  assert.equal(supplierOf(''), null);
+  assert.equal(itemLinks('naver', { product_id: '1', product_code: 'dmm123456' }).supplier_url, 'https://domeme.domeggook.com/s/123456');
+});

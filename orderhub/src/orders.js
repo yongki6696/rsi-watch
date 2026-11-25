@@ -342,7 +342,7 @@ class OrderStore {
     if (rows.length) {
       const ids = rows.map((r) => r.id);
       const items = this.db.all(
-        `SELECT id, order_id, item_key, order_no, product_name, option_name, quantity, unit_price, amount, product_code, market_state, market_status, claim
+        `SELECT id, order_id, item_key, order_no, product_name, option_name, quantity, unit_price, amount, product_code, product_id, extra, market_state, market_status, claim
          FROM order_items WHERE order_id IN (${ids.map(() => '?').join(',')}) ORDER BY id`,
         ...ids
       );

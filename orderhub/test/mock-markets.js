@@ -81,7 +81,7 @@ function createState() {
 }
 
 // ---------------- 네이버 ----------------
-function naverAddOrder(state, { productOrderId, orderId, packageNumber = null, name = '홍길동', product = '블루투스 이어폰', option = '화이트', qty = 1, amount = 39900, status = 'PAYED', place = 'NOT_YET', claimType = null, claimStatus = null, at = new Date() }) {
+function naverAddOrder(state, { productOrderId, orderId, packageNumber = null, name = '홍길동', product = '블루투스 이어폰', option = '화이트', qty = 1, amount = 39900, status = 'PAYED', place = 'NOT_YET', claimType = null, claimStatus = null, productId = undefined, code = undefined, at = new Date() }) {
   const detail = {
     order: { orderId, orderDate: kstIso(at), paymentDate: kstIso(at), ordererName: name, ordererTel: '010-1111-2222' },
     productOrder: {
@@ -93,6 +93,8 @@ function naverAddOrder(state, { productOrderId, orderId, packageNumber = null, n
       claimStatus,
       productName: product,
       productOption: option,
+      productId,
+      sellerProductCode: code,
       quantity: qty,
       unitPrice: amount / qty,
       totalPaymentAmount: amount,
@@ -264,7 +266,7 @@ async function handleNaver(state, req, res, url) {
 }
 
 // ---------------- 쿠팡 ----------------
-function coupangAddSheet(state, { shipmentBoxId, orderId, vendorItemId, name = '이쿠팡', product = '스테인리스 텀블러', option = '실버', qty = 1, price = 18900, status = 'ACCEPT' }) {
+function coupangAddSheet(state, { shipmentBoxId, orderId, vendorItemId, name = '이쿠팡', product = '스테인리스 텀블러', option = '실버', qty = 1, price = 18900, status = 'ACCEPT', productId = null }) {
   const sheet = {
     shipmentBoxId: `#${shipmentBoxId}`,
     orderId: `#${orderId}`,
@@ -279,6 +281,7 @@ function coupangAddSheet(state, { shipmentBoxId, orderId, vendorItemId, name = '
     orderItems: [
       {
         vendorItemId: `#${vendorItemId}`,
+        ...(productId ? { productId: `#${productId}` } : {}),
         vendorItemName: `${product}, ${option}`,
         sellerProductName: product,
         sellerProductItemName: option,

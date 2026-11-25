@@ -11,6 +11,9 @@ async function sendNtfy({ server, topic, token }, msg) {
     tags: msg.tags || [],
   };
   if (msg.absoluteUrl && /^https?:\/\//.test(msg.absoluteUrl)) body.click = msg.absoluteUrl;
+  // 판매 페이지·공급처 상품 버튼 (ntfy 버튼은 최대 3개)
+  const actions = (msg.links || []).filter((l) => l && /^https?:\/\//.test(l.url)).slice(0, 3).map((l) => ({ action: 'view', label: l.label, url: l.url }));
+  if (actions.length) body.actions = actions;
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(base + '/', { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });

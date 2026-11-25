@@ -7,6 +7,8 @@ if (major < 22 || (major === 22 && minor < 13)) {
 }
 
 const http = require('node:http');
+// 마켓에 등록하는 서버 IP 는 IPv4 → IPv6 가 있어도 IPv4 로 먼저 연결
+require('node:dns').setDefaultResultOrder('ipv4first');
 const path = require('node:path');
 const config = require('./src/config');
 const { Db } = require('./src/db');

@@ -60,6 +60,7 @@ test('11번가: 국내 중계 서버를 거쳐 접속 (해외 서버용)', async
     secretKey: 'unit-test-secret',
     adminPassword: '',
     elevenstApiBase: `${mock.url}/rest`,
+    elevenstGapMs: 0,
     disableScheduler: true,
   });
   const server = http.createServer(app.handler);

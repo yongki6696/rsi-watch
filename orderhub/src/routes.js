@@ -6,23 +6,19 @@ const { getAppSettings, updateAppSettings } = require('./settings');
 const { ordersToCsv } = require('./csv');
 const { verifyPassword } = require('./secrets');
 const { nowIso, mask, str, safeJson, HttpError } = require('./util');
+const { itemLinks } = require('./links');
 
-let ipCache = { ip: null, at: 0 };
-async function detectPublicIp() {
-  if (ipCache.ip && Date.now() - ipCache.at < 10 * 60000) return ipCache.ip;
-  const sources = ['https://api.ipify.org', 'https://ifconfig.me/ip', 'https://icanhazip.com', 'https://checkip.amazonaws.com'];
-  for (const url of sources) {
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(5000), headers: { 'User-Agent': 'curl/8' } });
-      const t = (await r.text()).trim();
-      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(t) || /^[0-9a-f:]+$/i.test(t)) {
-        ipCache = { ip: t, at: Date.now() };
-        return t;
-      }
-    } catch {}
-  }
-  return null;
+// 주문 상품마다 판매 페이지·공급처 링크 붙이기 (목록은 extra 를 내보내지 않음)
+function withLinks(o, { keepExtra = false } = {}) {
+  o.items = (o.items || []).map((i) => {
+    const out = { ...i, ...itemLinks(o.store_type, i) };
+    if (!keepExtra) delete out.extra;
+    return out;
+  });
+  return o;
 }
+
+const { detectPublicIp } = require('./publicip');
 
 function validateCreds(type, creds, { partial = false } = {}) {
   const c = getConnector(type);
@@ -64,6 +60,8 @@ function register(router, app) {
       lastSuccessAt: s.last_success_at,
       lastError: s.last_error,
       inquiryError: state.inquiryError || null,
+      // 접속이 막혀 자동 재시도 간격을 늘린 경우 다음 자동 시도 시각
+      retryAt: state.retryAt && Date.parse(state.retryAt) > Date.now() ? state.retryAt : null,
       synced: !!state._syncedOnce,
       createdAt: s.created_at,
       orderCount: db.get('SELECT COUNT(*) AS n FROM orders WHERE store_id = ?', s.id).n,
@@ -152,6 +150,7 @@ function register(router, app) {
       page: req.query.page,
       limit: req.query.limit,
     });
+    r.orders = r.orders.map((o) => withLinks(o));
     return {
       ...r,
       counts: orders.counts(req.query.store),
@@ -198,7 +197,7 @@ function register(router, app) {
     o.events = db.all('SELECT ts, level, type, message FROM events WHERE order_id = ? ORDER BY id DESC LIMIT 50', o.id);
     o.trackingUrl = trackingUrl(o.courier_key, o.tracking_no);
     o.items = o.items.map((i) => ({ ...i, raw: safeJson(i.raw, null) }));
-    return o;
+    return withLinks(o, { keepExtra: true });
   });
 
   router.post('/api/orders/confirm', async (req) => ({ results: await actions.confirm(ids(req.body)) }));
