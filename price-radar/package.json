@@ -8,7 +8,9 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "node --test --no-warnings test/*.test.js",
-    "test:e2e": "node --test --no-warnings --test-concurrency=1 e2e/e2e.mjs"
+    "test:e2e": "node --test --no-warnings --test-concurrency=1 e2e/e2e.mjs",
+    "build:inline": "node scripts/inline-assets.mjs",
+    "deploy:cli": "npm run build:inline && wrangler deploy -c wrangler.cli.jsonc"
   },
   "devDependencies": {
     "wrangler": "4.158.0"

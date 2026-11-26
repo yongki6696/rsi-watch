@@ -10,8 +10,8 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  // 데이터베이스는 처음 배포할 때 자동으로 만들어져요 (database_id 를 적지 않아도 됨)
-  "d1_databases": [{ "binding": "DB", "database_name": "price-radar" }],
+  // 이 계정의 데이터베이스 (다른 계정에 배포할 때는 database_id 줄을 지우면 처음 배포 때 새로 만들어져요)
+  "d1_databases": [{ "binding": "DB", "database_name": "price-radar", "database_id": "64e7f258-16bd-4ed7-abf3-6db657658978" }],
   // 5분마다 가격 확인 작업을 깨워요 (실제 쿠팡 API 호출 수는 API_HOURLY_LIMIT 로 따로 제한)
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {

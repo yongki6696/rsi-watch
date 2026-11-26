@@ -68,6 +68,16 @@ PC 없이 휴대폰만으로 쓰고, 운영할 수 있어요. 모든 구매 링�
    빌드 명령은 비워 두고 배포 명령은 기본값(`npx wrangler deploy`), 브랜치는 이 코드가 있는 브랜치.
 3. **배포** → 데이터베이스와 예약 작업, 알림 키가 자동으로 준비돼요.
 
+### 명령어로 직접 배포하기 (개발자용)
+
+```bash
+npm install
+CLOUDFLARE_API_TOKEN=<배포 권한 토큰> npm run deploy:cli
+```
+
+`wrangler.cli.jsonc` 를 쓰고, 화면 파일을 Worker 안에 묶어서 올려요(`npm run build:inline`).
+토큰에는 Workers Scripts 편집, D1 편집, Account Settings 읽기 권한이 필요해요.
+
 ### 배포한 뒤
 
 1. **쿠팡 키 넣기**(키를 발급받으면): Cloudflare → 내 Worker → **설정(Settings) → 변수 및 비밀(Variables and Secrets)** → **추가(Add)**,
@@ -139,6 +149,7 @@ npm run dev       # 로컬 실행 (키가 없으면 데모 모드)
 
 ```
 src/index.js     API 라우터, 예약 실행 진입점
+src/main-inline.js  화면 파일을 Worker 안에 묶어 배포할 때의 진입점 (wrangler.cli.jsonc)
 src/checker.js   정기 가격 확인, 호출 한도·쿼리 한도 배분, 알림 규칙(야간 보류·대기열 포함)
 src/coupang.js   쿠팡 파트너스 API (HMAC 서명, 검색·특가·베스트·딥링크) + 데모 데이터
 src/push.js      웹 푸시 (VAPID 서명 + aes128gcm 암호화, WebCrypto 만 사용, 키 자동 생성)

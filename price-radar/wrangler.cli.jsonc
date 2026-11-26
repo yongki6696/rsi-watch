@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // 직접 배포용 설정 (npm run deploy:cli). 화면 파일을 Worker 안에 묶어 올린다.
+  // GitHub 연결/배포 버튼으로 배포할 때는 wrangler.jsonc 를 쓴다. 두 방법 모두 같은 데이터베이스를 쓴다.
+  "name": "price-radar",
+  "main": "src/main-inline.js",
+  "compatibility_date": "2026-09-01",
+  "d1_databases": [{ "binding": "DB", "database_name": "price-radar", "database_id": "64e7f258-16bd-4ed7-abf3-6db657658978" }],
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "vars": {
+    "APP_NAME": "최저가 레이더",
+    "API_HOURLY_LIMIT": "20",
+    "CHECK_INTERVAL_MIN": "60",
+    "MAX_WATCHES_PER_USER": "30",
+    "MAX_PUSH_PER_RUN": "8"
+  },
+  "observability": { "enabled": true }
+}
