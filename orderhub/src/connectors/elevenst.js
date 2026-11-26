@@ -12,6 +12,7 @@ const { courierCode } = require('../couriers');
 const { isNoData, dateRanges, compact, plainText } = require('./inquiry-util');
 const { encodeXmlEucKr, escapeXml } = require('./euckr');
 const { cachedPublicIp } = require('../publicip');
+const { faultFromText } = require('../claims');
 
 // 11번가 호출 간격 (한꺼번에 몰아서 부르지 않도록, API 키별)
 const lastCall = new Map();
@@ -461,6 +462,62 @@ async function answerQna(ctx, inquiry, text) {
   return { ok: true };
 }
 
+// 11번가 클레임 사유: 취소(ordCnRsnCd·ordCnDtlsRsn) / 반품(clmReqRsn·clmReqCont)
+function claimInfoOf(row, type) {
+  const code = str(pick(row, 'ordCnRsnCd', 'clmReqRsnCd', 'clmRsnCd'));
+  const reasonText = str(pick(row, 'clmReqRsn', 'ordCnRsnNm', 'clmRsnNm'));
+  const detail = str(pick(row, 'ordCnDtlsRsn', 'clmReqCont', 'clmDtlsRsn'));
+  const reason = (reasonText && !/^\d+$/.test(reasonText) ? reasonText : '') || detail || (code ? `사유 코드 ${code}` : '');
+  if (!reason) return undefined;
+  return {
+    market: 'elevenst',
+    type,
+    reasonCode: code,
+    reason,
+    detail: detail !== reason ? detail : '',
+    fault: faultFromText(`${reasonText} ${detail}`),
+    feeAmount: toInt(pick(row, 'clmDlvCst', 'rtnDlvCst', 'clmDlvCstAmt'), null),
+    at: toIso(pick(row, 'createDt', 'reqDt', 'clmReqDt')),
+  };
+}
+
+// 반품요청 목록 (최근 28일, 7일씩): 받은 주문에 반품요청 표시 + 목록에서 빠지면 표시만 지움
+async function applyReturnRequests(ctx, state, groups) {
+  const now = Date.now();
+  const rows = [];
+  for (let back = 28; back > 0; back -= 7) {
+    const from = kstCompact(new Date(now - back * 86400000));
+    const to = kstCompact(new Date(Math.min(now, now - (back - 7) * 86400000 - 60000)));
+    rows.push(...parseList(await api(ctx, `/claimservice/returnorders/${from}/${to}`), 'order'));
+  }
+  const open = new Set();
+  const extra = [];
+  for (const r of rows) {
+    const key = `${pick(r, 'ordNo')}-${pick(r, 'ordPrdSeq')}`;
+    if (key === '-' || open.has(key)) continue;
+    open.add(key);
+    const info = claimInfoOf(r, 'RETURN');
+    let found = false;
+    for (const g of groups) {
+      for (const it of g.items) {
+        if (it.itemKey !== key) continue;
+        found = true;
+        it.claim = 'RETURN';
+        if (!it.marketStatus.includes('반품요청')) it.marketStatus += ' · 반품요청';
+        if (info) it.claimInfo = info;
+      }
+    }
+    if (!found) extra.push({ groupKey: pick(r, 'dlvNo') || pick(r, 'ordNo'), partial: true, items: [{ itemKey: key, partial: true, claim: 'RETURN', marketStatus: '반품요청', ...(info ? { claimInfo: info } : {}) }] });
+  }
+  // 전에 반품요청이던 상품이 목록에서 빠짐 = 처리 끝났거나 고객이 철회 → 요청 표시만 지움
+  for (const key of state.openReturns || []) {
+    if (open.has(key) || groups.some((g) => g.items.some((it) => it.itemKey === key))) continue;
+    extra.push({ groupKey: key.split('-')[0], partial: true, items: [{ itemKey: key, partial: true, claim: null, marketStatus: '반품요청 종료 (셀러오피스에서 결과 확인)' }] });
+  }
+  state.openReturns = [...open];
+  return extra;
+}
+
 const meta = {
   type: 'elevenst',
   label: '11번가',
@@ -554,9 +611,11 @@ module.exports = {
       const reqs = parseList(cancelXml, 'order');
       for (const c of reqs) {
         const key = `${pick(c, 'ordNo')}-${pick(c, 'ordPrdSeq')}`;
+        const info = claimInfoOf(c, 'CANCEL');
         for (const g of groups) for (const it of g.items) if (it.itemKey === key) {
           it.claim = 'CANCEL';
           it.marketStatus += ' · 취소요청';
+          if (info) it.claimInfo = info;
         }
       }
       // 목록에서 사라진 미처리 주문이 취소요청 목록에 있으면 표시용 그룹 생성
@@ -567,6 +626,8 @@ module.exports = {
         if (!exists && open.some((g) => g.item_keys?.includes(key))) {
           const g = normalizeOrder(c, 'CONFIRMED', '취소요청');
           g.items[0].claim = 'CANCEL';
+          const info = claimInfoOf(c, 'CANCEL');
+          if (info) g.items[0].claimInfo = info;
           g.partial = true;
           groups.push(g);
         }
@@ -583,10 +644,21 @@ module.exports = {
         if (!open.some((g) => g.item_keys?.includes(key))) continue;
         const g = normalizeOrder(c, 'CANCELED', '취소완료');
         g.partial = true;
+        const info = claimInfoOf(c, 'CANCEL');
+        if (info) for (const it of g.items) it.claimInfo = info;
         groups.push(g);
       }
     } catch (e) {
       ctx.log?.(`11번가 취소완료 조회 실패: ${e.message}`);
+    }
+    // 30분마다 반품요청 목록 (사유 포함)
+    if (runCount % 6 === 1) {
+      try {
+        groups.push(...(await applyReturnRequests(ctx, state, groups)));
+      } catch (e) {
+        if (e.network) throw e;
+        ctx.log?.(`11번가 반품요청 조회 실패: ${e.message}`);
+      }
     }
     return { groups: mergeGroups(groups), state };
   },
@@ -643,6 +715,7 @@ module.exports = {
   },
 
   _internal: {
+    claimInfoOf,
     blockConclusion,
     weekWindows,
     collapse, parseList, parseFlat, resultOf, normalizeOrder },

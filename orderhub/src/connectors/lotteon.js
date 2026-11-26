@@ -16,6 +16,7 @@ const { pick, findArray, findCustomsCode, shape } = require('./fields');
 const { kstParts, toIso, toInt, str } = require('../util');
 const { courierCode } = require('../couriers');
 const { isNoData, dateRanges, compact, plainText } = require('./inquiry-util');
+const { faultFromText } = require('../claims');
 
 // 주문진행단계(odPrgsStepCd)
 const STEP = {
@@ -218,6 +219,7 @@ function normalizeItem(o) {
       marketState: st.state,
       marketStatus: st.label,
       claim: st.claim || null,
+      claimInfo: claimInfoOf(o, st.state, st.claim),
       extra: { odNo, odSeq: str(pick(o, ['odSeq'])) || null, procSeq: str(pick(o, ['procSeq'])) || null, spdNo, sitmNo, qty },
       raw: o,
     },
@@ -249,6 +251,25 @@ function matchProgress(item, progs, siblings) {
 }
 
 // 상품에 배송상태 반영 (현재 단계, 주문순번, 송장)
+// 취소·회수(반품) 사유: 클레임 사유코드(취소 101~, 반품 301~)와 사유 내용
+function claimInfoOf(row, state, claim) {
+  const type = claim === 'RETURN' || state === 'RETURNED' ? 'RETURN' : claim === 'EXCHANGE' ? 'EXCHANGE' : state === 'CANCELED' || claim === 'CANCEL' ? 'CANCEL' : '';
+  if (!type) return undefined;
+  const code = str(pick(row, ['clmRsnCd', 'rtrvRsnCd', 'cnclRsnCd']));
+  const text = plainText(pick(row, ['clmRsnCnts', 'clmRsnNm', 'clmRsnDtlCnts', 'rtrvRsnCnts', 'cnclRsnCnts', 'clmRsn']));
+  if (!code && !text) return undefined;
+  return {
+    market: 'lotteon',
+    type,
+    reasonCode: code,
+    reason: text || `사유 코드 ${code}`,
+    detail: '',
+    fault: faultFromText(text),
+    feeAmount: toInt(pick(row, ['rtrvDvCst', 'clmDvCst', 'rtngDvCst', 'rtnDvCst']), null),
+    at: toIso(pick(row, ['clmReqDttm', 'clmAccpDttm', 'dvTrcStatDttm'])),
+  };
+}
+
 function applyProgress(item, p) {
   if (!p) return;
   const step = stepOf(p);
@@ -257,6 +278,8 @@ function applyProgress(item, p) {
     item.marketState = st.state;
     item.marketStatus = st.label;
     item.claim = st.claim || null;
+    const info = claimInfoOf(p, st.state, st.claim);
+    if (info) item.claimInfo = info;
   }
   // 발주확인·발송처리 때 보낼 주문순번·처리순번
   item.extra = { ...item.extra, odSeq: str(p.odSeq) || item.extra?.odSeq || null, procSeq: str(p.procSeq) || item.extra?.procSeq || null };
@@ -651,5 +674,5 @@ module.exports = {
     return inform(ctx, items, '13', { invcNbr: '1', dvCoCd: code, invcNo: String(trackingNo).trim() });
   },
 
-  _internal: { normalizeItem, toGroups, dttm, dayWindows, lineKey, matchProgress, STEP, rawMode, unescapeHtml, normalizeProductQna, normalizeSellerInquiry },
+  _internal: { normalizeItem, toGroups, dttm, dayWindows, lineKey, matchProgress, STEP, rawMode, unescapeHtml, normalizeProductQna, normalizeSellerInquiry, claimInfoOf },
 };

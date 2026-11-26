@@ -1,5 +1,6 @@
 'use strict';
 const { itemLinks } = require('./links');
+const { claimSummary } = require('./claims');
 const { detectPublicIp, cachedPublicIp } = require('./publicip');
 // 주문 자동 수집 스케줄러 (기본 5분 간격) + 신규주문/취소요청 알림
 const { getConnector } = require('./connectors');
@@ -323,6 +324,16 @@ class SyncEngine {
     return result;
   }
 
+  // 알림에 붙일 취소·반품 사유 한 줄 (사유를 받은 첫 상품)
+  claimLine(o) {
+    const shipped = ['SHIPPED', 'DELIVERED', 'RETURNED'].includes(o.status);
+    for (const it of o.items || []) {
+      const s = it.claim_info ? claimSummary(it.claim_info, { shipped: shipped || ['SHIPPED', 'DELIVERED', 'RETURNED'].includes(it.market_state) }) : null;
+      if (s) return `\n${s.text}`;
+    }
+    return '';
+  }
+
   async sendAlerts(alerts) {
     const n = this.notifier;
     if (!n) return;
@@ -372,7 +383,7 @@ class SyncEngine {
       await n.send({
         type: 'claim',
         title: `⚠️ ${CLAIM[a.claim] || '클레임'} · ${label(a.store)}`,
-        body: `${this.orders.describe(o)}${urgent ? '\n이미 발주한 주문입니다. 공급처 주문을 확인하세요!' : ''}`,
+        body: `${this.orders.describe(o)}${this.claimLine(o)}${urgent ? '\n이미 발주한 주문입니다. 공급처 주문을 확인하세요!' : ''}`,
         url: `/#/order/${o.id}`,
         tag: `claim-${o.id}`,
         priority: 'high',
@@ -387,7 +398,7 @@ class SyncEngine {
       await n.send({
         type: 'claim',
         title: `🚫 주문${a.status === 'RETURNED' ? '반품' : '취소'} · ${label(a.store)}`,
-        body: `${this.orders.describe(o)}${afterPurchase ? '\n발주완료된 주문이 취소되었습니다. 공급처 주문도 취소하세요!' : ''}`,
+        body: `${this.orders.describe(o)}${this.claimLine(o)}${afterPurchase ? '\n발주완료된 주문이 취소되었습니다. 공급처 주문도 취소하세요!' : ''}`,
         url: `/#/order/${o.id}`,
         tag: `cancel-${o.id}`,
         priority: afterPurchase ? 'high' : 'default',

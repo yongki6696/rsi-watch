@@ -278,3 +278,41 @@ test('11번가 접속 진단 결론: API 만 막힘(허용 IP 목록) / 서버 I
   assert.match(blockConclusion({ tcp: ok, apiTls: '실패 (ECONNRESET)', webTls: null }), /방화벽이 이 서버 IP를 막고/);
   assert.match(blockConclusion({ tcp: ok, apiTls: '성공 (TLSv1.3, x)', webTls: null }), /IP 등록이 아직 반영되지 않음/);
 });
+
+test('취소·반품 사유 → 반품배송비 부담 (스마트스토어 코드, 글자 사유, 쿠팡 귀책)', () => {
+  const { naverReason, faultFromText, claimSummary } = require('../src/claims');
+  assert.deepEqual(naverReason('COLOR_AND_SIZE'), { reason: '색상·사이즈 변경', fault: 'BUYER' });
+  assert.deepEqual(naverReason('WRONG_DELIVERY'), { reason: '오배송', fault: 'SELLER' });
+  assert.deepEqual(naverReason('PRODUCT_UNSATISFIED'), { reason: '서비스·상품 불만족', fault: 'SELLER' });
+  assert.equal(naverReason('NEW_CODE').fault, 'UNKNOWN');
+  assert.equal(faultFromText('상품 불량'), 'SELLER');
+  assert.equal(faultFromText('상품정보와 상이'), 'SELLER');
+  assert.equal(faultFromText('단순변심'), 'BUYER');
+  assert.equal(faultFromText('사이즈를 잘못 골랐어요'), 'BUYER');
+  assert.equal(faultFromText(''), 'UNKNOWN');
+  // 스마트스토어는 청구액이 있으면 구매자 부담
+  assert.equal(claimSummary({ market: 'naver', type: 'RETURN', reason: '기타', fault: 'UNKNOWN', feeAmount: 3000 }).payer, 'BUYER');
+  assert.match(claimSummary({ market: 'naver', type: 'RETURN', reason: '단순 변심', fault: 'BUYER', feeAmount: 0 }).payerText, /청구액 0원/);
+  assert.equal(claimSummary({ market: 'coupang', type: 'RETURN', reason: '배송 중 분실', fault: 'MARKET' }).payerText, '반품배송비 쿠팡 부담');
+  assert.equal(claimSummary({ market: 'naver', type: 'CANCEL', reason: '주문 실수', fault: 'BUYER' }, { shipped: false }).payerText, '배송 전 취소라 반품배송비 없음');
+  assert.equal(claimSummary({ market: 'naver', type: 'CANCEL', reason: '주문 실수', fault: 'BUYER' }, { shipped: true }).payerText, '반품배송비 구매자 부담');
+  assert.equal(claimSummary(null), null);
+});
+
+test('마켓별 사유 읽기: 스마트스토어 상세 · 쿠팡 접수 · 11번가 · 롯데ON', () => {
+  const lotteon = require('../src/connectors/lotteon');
+  const n = naver._claimInfoOf({ productOrder: { claimType: 'RETURN' }, return: { returnReason: 'BROKEN', returnDetailedReason: '깨져서 왔어요', claimDeliveryFeeDemandAmount: 0 } });
+  assert.deepEqual([n.type, n.reason, n.detail, n.fault, n.feeAmount], ['RETURN', '상품 파손', '깨져서 왔어요', 'SELLER', 0]);
+  assert.equal(naver._claimInfoOf({ productOrder: { claimType: 'ADMIN_CANCEL' }, cancel: { cancelReason: 'SOLD_OUT' } }).fault, 'UNKNOWN', '직권취소는 귀책 확인 필요');
+  assert.equal(naver._claimInfoOf({ productOrder: {} }), undefined);
+  const c = coupang._internal.receiptInfo({ reasonCodeText: '', cancelReasonCategory1: '고객변심', cancelReasonCategory2: '색상변경', cancelReason: '다른 색이 좋아요', faultByType: 'GENERAL', returnShippingCharge: { units: 5000 }, enclosePrice: { units: 2500 } }, 'RETURN');
+  assert.deepEqual([c.reason, c.detail, c.fault, c.feeAmount, c.feeNote], ['고객변심 > 색상변경', '다른 색이 좋아요', 'BUYER', 5000, '동봉 2,500원']);
+  assert.equal(coupang._internal.receiptInfo({ reasonCodeText: '파손', faultByType: 'COUPANG' }, 'RETURN').fault, 'MARKET');
+  const e = elevenst._internal.claimInfoOf({ ordCnRsnCd: '101', ordCnDtlsRsn: '단순변심' }, 'CANCEL');
+  assert.deepEqual([e.reason, e.reasonCode, e.fault], ['단순변심', '101', 'BUYER']);
+  assert.equal(elevenst._internal.claimInfoOf({}, 'CANCEL'), undefined);
+  const l = lotteon._internal.claimInfoOf({ clmRsnCd: '305', clmRsnCnts: '상품이 설명과 달라요(상이)' }, 'DELIVERED', 'RETURN');
+  assert.deepEqual([l.type, l.reason, l.fault], ['RETURN', '상품이 설명과 달라요(상이)', 'SELLER']);
+  assert.equal(lotteon._internal.claimInfoOf({ clmRsnCd: '101' }, 'CANCELED', null).reason, '사유 코드 101');
+  assert.equal(lotteon._internal.claimInfoOf({}, 'CANCELED', null), undefined);
+});

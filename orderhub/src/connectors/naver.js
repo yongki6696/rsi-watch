@@ -6,6 +6,7 @@ const bcrypt = require('bcryptjs');
 const { request, parseJsonBig } = require('./http');
 const { kstIso, toIso, toInt, str, chunk, sleep } = require('../util');
 const { courierCode } = require('../couriers');
+const { naverReason } = require('../claims');
 
 const tokenCache = new Map(); // clientId -> { token, expiresAt }
 
@@ -154,6 +155,30 @@ function mapClaim(p) {
   return null;
 }
 
+// 취소·반품·교환 사유 + 반품배송비 청구액 (요청이 끝난 뒤에도 남김)
+function claimInfoOf(detail) {
+  const p = detail.productOrder || {};
+  const t = str(p.claimType).toUpperCase();
+  const type = /CANCEL/.test(t) ? 'CANCEL' : t === 'RETURN' ? 'RETURN' : t === 'EXCHANGE' ? 'EXCHANGE' : '';
+  if (!type) return undefined;
+  const c = (type === 'CANCEL' ? detail.cancel : type === 'RETURN' ? detail.return : detail.exchange) || {};
+  const code = str(c.cancelReason || c.returnReason || c.exchangeReason || p.claimReason);
+  const text = str(c.cancelDetailedReason || c.returnDetailedReason || c.exchangeDetailedReason);
+  if (!code && !text) return undefined;
+  const r = naverReason(code);
+  return {
+    market: 'naver',
+    type,
+    reasonCode: code,
+    reason: r.reason || text,
+    detail: text,
+    fault: t === 'ADMIN_CANCEL' ? 'UNKNOWN' : r.fault,
+    feeAmount: toInt(c.claimDeliveryFeeDemandAmount, null),
+    feeNote: str(c.claimDeliveryFeePayMethod || c.claimDeliveryFeePayMeans),
+    at: toIso(c.claimRequestDate),
+  };
+}
+
 function normalize(detail) {
   const o = detail.order || {};
   const p = detail.productOrder || {};
@@ -198,6 +223,7 @@ function normalize(detail) {
       marketState: mapState(p),
       marketStatus,
       claim,
+      claimInfo: claimInfoOf(detail),
       extra: { productOrderId: str(p.productOrderId), orderId: str(o.orderId), claimType: str(p.claimType), claimStatus: str(p.claimStatus) },
       raw: detail,
     },
@@ -312,6 +338,8 @@ module.exports = {
   // 고객의 취소 요청 승인(바로 환불) / 반품 승인(환불) - 상품주문마다
   //   POST /v1/pay-order/seller/product-orders/{productOrderId}/claim/cancel/approve
   //   POST /v1/pay-order/seller/product-orders/{productOrderId}/claim/return/approve (보통 수거완료 뒤)
+  _claimInfoOf: claimInfoOf,
+
   async approveClaim(ctx, order, items, type) {
     const kind = type === 'CANCEL' ? 'cancel' : 'return';
     const ok = [];

@@ -744,6 +744,9 @@ function orderCard(o) {
     append(foot, h('span', { class: 'muted small' }, o.market_status || ''));
     append(card, top, body, foot);
   }
+  // 취소·반품 사유 + 반품배송비 누가 내는지
+  const whys = claimWhys(o);
+  if (whys.length && (o.claim || ['CANCELED', 'RETURNED'].includes(o.status) || S.tab === 'claim')) append(card, h('div', { class: 'claim-why' }, whys.map((s) => whyLine(s))));
   // 취소·반품 탭: 카드에서 바로 승인
   if (S.tab === 'claim' && canApproveClaim(o)) append(card, h('div', { class: 'claim-row' }, h('span', { class: 'muted small' }, o.market_status || CLAIM[o.claim]), claimButton(o)));
   return card;
@@ -807,6 +810,22 @@ function showResults(results, okMsg) {
   if (bad.length) toast(`${ok.length ? `${ok.length}건 ${okMsg}, ` : ''}${bad.length}건 실패\n${bad.map((b) => b.message).slice(0, 3).join('\n')}`, 'err');
   else if (warn.length) toast(`${ok.length}건 ${okMsg}\n주의: ${warn[0].warning}`, 'err');
   else toast(`${ok.length}건 ${okMsg}`, 'ok');
+}
+
+// 상품별 취소·반품 사유 (같은 내용은 한 번만)
+function claimWhys(o) {
+  const seen = new Set();
+  const out = [];
+  for (const i of o.items || []) {
+    const s = i.claim_summary;
+    if (!s || seen.has(s.text)) continue;
+    seen.add(s.text);
+    out.push(s);
+  }
+  return out;
+}
+function whyLine(s) {
+  return h('div', { class: 'why' }, h('span', { class: 'why-reason' }, h('b', null, '사유 '), s.reason), h('span', { class: `payer p-${s.payer}` }, s.payerText));
 }
 
 // 취소 요청 승인 / 반품 완료 버튼 (쿠팡·스마트스토어)
@@ -1104,6 +1123,18 @@ function renderOrderDetail(body, o) {
       )
     );
   if (o.status === 'CANCELED') append(body, notice('err', h('b', null, '취소된 주문입니다. '), o.purchased_at ? '공급처 발주를 취소했는지 꼭 확인하세요.' : ''));
+  // 취소·반품 사유 + 반품배송비 부담
+  const whyItems = o.items.filter((i) => i.claim_summary);
+  if (whyItems.length)
+    append(
+      body,
+      h(
+        'div',
+        { class: 'sec claim-sec' },
+        h('div', { class: 'sec-h' }, '취소·반품 사유'),
+        whyItems.map((i) => h('div', { class: 'why-row' }, o.items.length > 1 ? h('div', { class: 'muted small' }, i.product_name) : null, whyLine(i.claim_summary)))
+      )
+    );
   if (o.address_changed)
     append(body, 
       notice(

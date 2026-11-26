@@ -74,7 +74,7 @@ function createState() {
   return {
     naver: { tokens: new Set(), orders: new Map(), changes: [], inquiries: [], qnas: [], failInquiries: false, calls: { confirm: [], dispatch: [], token: 0, answers: [], qnaAnswers: [], claimApprove: [] } },
     coupang: { sheets: new Map(), inquiries: [], callCenter: [], returns: [], calls: { ack: [], invoices: [], list: [], single: [], inquiries: [], callCenter: [], replies: [], returnLists: [], returnActions: [] }, rejectAuth: false },
-    eleven: { orders: new Map(), cancelReq: [], canceled: [], qnas: [], calls: { pack: [], deliver: [], qna: [], answers: [] } },
+    eleven: { orders: new Map(), cancelReq: [], canceled: [], qnas: [], returns: [], calls: { pack: [], deliver: [], qna: [], answers: [], returns: [] } },
     telegram: { messages: [] },
     ntfy: { messages: [] },
   };
@@ -525,6 +525,20 @@ function handleEleven(state, req, res, url) {
   }
   if (p[0] === 'claimservice' && p[1] === 'cancelorders') return sendXml(200, elevenXml(orders.filter((o) => state.eleven.cancelReq.includes(`${o.ordNo}-${o.ordPrdSeq}`))));
   if (p[0] === 'claimservice' && p[1] === 'canceledorders') return sendXml(200, elevenXml(orders.filter((o) => o.st === 'CANCELED')));
+  // 반품요청 목록: 주문번호·순번·사유(clmReqRsn·clmReqCont)
+  if (p[0] === 'claimservice' && p[1] === 'returnorders' && p.length === 4) {
+    if (!isRange(p[2], p[3])) return result('-1', 'bad range');
+    state.eleven.calls.returns.push({ start: p[2], end: p[3] });
+    const parts = [Buffer.from('<?xml version="1.0" encoding="euc-kr"?><ns2:orders xmlns:ns2="http://skt.tmall.business.openapi.spring.service.client.domain/">')];
+    if (!state.eleven.returns.length) parts.push(Buffer.from('<ns2:result_code>0</ns2:result_code><ns2:result_text>no data</ns2:result_text>'));
+    for (const r of state.eleven.returns) {
+      parts.push(Buffer.from('<ns2:order>'));
+      for (const [k, v] of Object.entries(r)) parts.push(Buffer.from(`<${k}>`), eucKr(v), Buffer.from(`</${k}>`));
+      parts.push(Buffer.from('</ns2:order>'));
+    }
+    parts.push(Buffer.from('</ns2:orders>'));
+    return sendXml(200, Buffer.concat(parts));
+  }
   if (p[0] === 'ordservices' && p[1] === 'reqpackaging' && p.length === 7) {
     const [, , ordNo, seq, addYn, addNo, dlvNo] = p;
     state.eleven.calls.pack.push({ ordNo, seq, addYn, addNo, dlvNo });

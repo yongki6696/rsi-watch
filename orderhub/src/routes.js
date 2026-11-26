@@ -7,11 +7,18 @@ const { ordersToCsv } = require('./csv');
 const { verifyPassword } = require('./secrets');
 const { nowIso, mask, str, safeJson, HttpError } = require('./util');
 const { itemLinks } = require('./links');
+const { claimSummary } = require('./claims');
 
 // 주문 상품마다 판매 페이지·공급처 링크 붙이기 (목록은 extra 를 내보내지 않음)
 function withLinks(o, { keepExtra = false } = {}) {
+  const shippedOrder = ['SHIPPED', 'DELIVERED', 'RETURNED'].includes(o.status);
   o.items = (o.items || []).map((i) => {
     const out = { ...i, ...itemLinks(o.store_type, i) };
+    // 취소·반품 사유 + 반품배송비 부담 (요청 중이거나 취소·반품된 상품만)
+    const info = typeof i.claim_info === 'string' ? safeJson(i.claim_info, null) : i.claim_info;
+    out.claim_info = info || null;
+    const shipped = shippedOrder || ['SHIPPED', 'DELIVERED', 'RETURNED'].includes(i.market_state);
+    out.claim_summary = info && (i.claim || ['CANCELED', 'RETURNED'].includes(i.market_state)) ? claimSummary(info, { shipped }) : null;
     if (!keepExtra) delete out.extra;
     return out;
   });

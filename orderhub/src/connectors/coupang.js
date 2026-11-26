@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const { request, parseJsonBig, stringifyBig, BIG } = require('./http');
 const { kstDate, kstDateWindows, toIso, toInt, str, chunk, sleep } = require('../util');
 const { courierCode } = require('../couriers');
+const { COUPANG_FAULT, faultFromText, money } = require('../claims');
 
 const STATUS_LABEL = {
   ACCEPT: '결제완료',
@@ -321,6 +322,26 @@ async function listReturns(ctx, status, days = 31) {
   return out;
 }
 
+// 접수 사유 → 오더허브 사유 정보
+function receiptInfo(rc, type) {
+  const reason = str(rc.reasonCodeText) || [str(rc.cancelReasonCategory1), str(rc.cancelReasonCategory2)].filter(Boolean).join(' > ');
+  const detail = str(rc.cancelReason);
+  const fault = COUPANG_FAULT[str(rc.faultByType).toUpperCase()] || faultFromText(`${reason} ${detail}`);
+  const enclose = money(rc.enclosePrice);
+  return {
+    market: 'coupang',
+    type,
+    reasonCode: str(rc.reasonCode),
+    reason: reason || detail,
+    detail: detail !== reason ? detail : '',
+    fault,
+    faultBy: str(rc.faultByType),
+    feeAmount: money(rc.returnShippingCharge),
+    feeNote: enclose > 0 ? `동봉 ${enclose.toLocaleString('ko-KR')}원` : '',
+    at: toIso(rc.createdAt),
+  };
+}
+
 // 접수에 들어있는 상품의 오더허브 키 (묶음배송번호-옵션ID)
 function receiptKeys(rc) {
   return (rc.returnItems || []).filter((ri) => ri && ri.shipmentBoxId && ri.vendorItemId).map((ri) => `${str(ri.shipmentBoxId)}-${str(ri.vendorItemId)}`);
@@ -336,14 +357,15 @@ async function collectReturns(ctx, state, runCount) {
       const keys = receiptKeys(rc);
       if (!info.claim || !keys.length) continue;
       open[str(rc.receiptId)] = { keys, claim: info.claim };
-      for (const k of keys) updates.set(k, { claim: info.claim, label: info.label });
+      const why = receiptInfo(rc, info.claim);
+      for (const k of keys) updates.set(k, { claim: info.claim, label: info.label, info: why });
     }
   }
   const prev = state.openReceipts || {};
   const vanished = Object.keys(prev).filter((id) => !open[id]);
   if (runCount % 6 === 1 || vanished.length) {
     for (const rc of await listReturns(ctx, 'CC')) {
-      for (const k of receiptKeys(rc)) if (!updates.has(k)) updates.set(k, { claim: null, marketState: 'RETURNED', label: '반품완료' });
+      for (const k of receiptKeys(rc)) if (!updates.has(k)) updates.set(k, { claim: null, marketState: 'RETURNED', label: '반품완료', info: receiptInfo(rc, 'RETURN') });
     }
   }
   // 반품완료도 아닌데 목록에서 빠진 접수 = 고객 철회 또는 처리 끝남 → 요청 표시만 지움
@@ -367,6 +389,7 @@ function applyReturns(groups, updates) {
       if (u.vanished || it.marketState === 'CANCELED') continue; // 방금 받은 발주서가 최신
       if (u.marketState) it.marketState = u.marketState;
       it.claim = u.claim;
+      if (u.info) it.claimInfo = u.info;
       it.marketStatus = u.marketState ? u.label : it.marketStatus.includes(u.label) ? it.marketStatus : `${it.marketStatus} · ${u.label}`;
     }
   }
@@ -375,7 +398,7 @@ function applyReturns(groups, updates) {
     if (seen.has(key)) continue;
     const box = key.split('-')[0];
     if (!byBox.has(box)) byBox.set(box, []);
-    byBox.get(box).push({ itemKey: key, partial: true, claim: u.claim, marketState: u.marketState || null, marketStatus: u.label });
+    byBox.get(box).push({ itemKey: key, partial: true, claim: u.claim, marketState: u.marketState || null, marketStatus: u.label, ...(u.info ? { claimInfo: u.info } : {}) });
   }
   return [...groups, ...[...byBox].map(([box, items]) => ({ groupKey: box, partial: true, items }))];
 }
@@ -704,6 +727,7 @@ module.exports = {
   },
 
   _internal: {
+    receiptInfo,
     applyReturns,
     receiptKeys, sign, signedDate, buildQuery, normalizeSheet, mapState },
 };

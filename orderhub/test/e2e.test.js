@@ -573,13 +573,18 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     const nc = mock.state.naver.orders.get('2026112500000901').productOrder;
     nc.claimType = 'CANCEL';
     nc.claimStatus = 'CANCEL_REQUEST';
+    // 사유: 상품주문 상세의 cancel / return 정보
+    mock.state.naver.orders.get('2026112500000901').cancel = { cancelReason: 'INTENT_CHANGED', cancelDetailedReason: '다른 상품으로 살게요', claimRequestDate: new Date().toISOString() };
+    mock.state.naver.orders.get('2026112500000902').return = { returnReason: 'COLOR_AND_SIZE', returnDetailedReason: '사이즈가 작아요', claimDeliveryFeeDemandAmount: 6000, claimDeliveryFeePayMethod: '환불금에서 차감' };
     naverChange(mock.state, '2026112500000901');
+    naverChange(mock.state, '2026112500000902');
     // 쿠팡 출고중지요청(상품준비중에서 고객 취소) + 발송한 주문(BIG_BOX)의 반품접수 - 큰 숫자 ID
     mock.state.coupang.sheets.get('700000000911').orderItems[0].holdCountForCancel = 1;
     mock.state.coupang.returns.push(
-      { receiptId: '#600000000000000911', orderId: '#9200000911', receiptType: 'CANCEL', receiptStatus: 'RELEASE_STOP_UNCHECKED', createdAt: '2026-11-25T10:00:00', cancelCountSum: 1, returnItems: [{ vendorItemId: '#911', vendorItemName: '스테인리스 텀블러, 실버', cancelCount: 1, purchaseCount: 1, shipmentBoxId: '#700000000911' }] },
-      { receiptId: '#600000000000000912', orderId: `#${BIG_ORDER}`, receiptType: 'RETURN', receiptStatus: 'RETURNS_UNCHECKED', createdAt: '2026-11-25T11:00:00', cancelCountSum: 1, returnItems: [{ vendorItemId: '#70000000001', vendorItemName: '스테인리스 텀블러, 실버', cancelCount: 1, purchaseCount: 1, shipmentBoxId: `#${BIG_BOX}` }] }
+      { receiptId: '#600000000000000911', orderId: '#9200000911', receiptType: 'CANCEL', receiptStatus: 'RELEASE_STOP_UNCHECKED', createdAt: '2026-11-25T10:00:00', cancelCountSum: 1, cancelReasonCategory1: '고객변심', cancelReasonCategory2: '단순변심', cancelReason: '필요 없어졌어요', faultByType: 'CUSTOMER', returnItems: [{ vendorItemId: '#911', vendorItemName: '스테인리스 텀블러, 실버', cancelCount: 1, purchaseCount: 1, shipmentBoxId: '#700000000911' }] },
+      { receiptId: '#600000000000000912', orderId: `#${BIG_ORDER}`, receiptType: 'RETURN', receiptStatus: 'RETURNS_UNCHECKED', createdAt: '2026-11-25T11:00:00', cancelCountSum: 1, reasonCode: 'DEFECT', reasonCodeText: '상품 불량', cancelReason: '작동이 안 돼요', faultByType: 'VENDOR', returnShippingCharge: { currencyCode: 'KRW', units: 5000, nanos: 0 }, returnItems: [{ vendorItemId: '#70000000001', vendorItemName: '스테인리스 텀블러, 실버', cancelCount: 1, purchaseCount: 1, shipmentBoxId: `#${BIG_BOX}` }] }
     );
+    const beforeClaim = mock.state.telegram.messages.length;
     await call('POST', '/api/sync', {});
     const lists = mock.state.coupang.calls.returnLists;
     assert.ok(['RU', 'UC', 'PR'].every((s) => lists.some((l) => l.status === s && l.cancelType === 'RETURN')), '출고중지·반품접수·쿠팡확인요청 목록 조회');
@@ -595,6 +600,19 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     assert.match((await call('GET', `/api/orders/${cReturn.id}`)).items[0].market_status, /반품접수/);
     const claimTab = (await call('GET', '/api/orders?tab=claim')).orders.map((o) => o.id);
     for (const o of [nCancel, nReturn, cCancel, cReturn]) assert.ok(claimTab.includes(o.id));
+
+    // 사유 + 반품배송비 누가 내는지 (목록·상세·알림)
+    const why = async (o) => (await call('GET', `/api/orders/${o.id}`)).items[0].claim_summary;
+    assert.equal((await why(nCancel)).text, '사유: 구매 의사 취소 "다른 상품으로 살게요" → 배송 전 취소라 반품배송비 없음');
+    assert.equal((await why(nReturn)).text, '사유: 색상·사이즈 변경 "사이즈가 작아요" → 반품배송비 구매자 부담 (6,000원 · 환불금에서 차감)');
+    assert.equal((await why(nReturn)).payer, 'BUYER');
+    assert.equal((await why(cCancel)).text, '사유: 고객변심 > 단순변심 "필요 없어졌어요" → 배송 전 취소라 반품배송비 없음');
+    const cw = await why(cReturn);
+    assert.equal(cw.payer, 'SELLER');
+    assert.equal(cw.text, '사유: 상품 불량 "작동이 안 돼요" → 반품배송비 판매자 부담 (판매자 책임 사유, 예상 5,000원)');
+    const listed = (await call('GET', '/api/orders?tab=claim')).orders.find((o) => o.id === nReturn.id);
+    assert.equal(listed.items[0].claim_summary.payer, 'BUYER', '목록에도 사유');
+    assert.match(mock.state.telegram.messages.slice(beforeClaim).map((m) => m.text).join('\n'), /⚠️ 취소요청[\s\S]*사유: 구매 의사 취소 "다른 상품으로 살게요" → 배송 전 취소라 반품배송비 없음/);
 
     // 스마트스토어 취소 승인 → 바로 취소완료
     let r = await call('POST', `/api/orders/${nCancel.id}/claim`, { type: 'CANCEL' });
@@ -614,6 +632,7 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     assert.equal(r.ok, true, r.message);
     assert.equal(mock.state.naver.calls.claimApprove.at(-1).kind, 'return');
     assert.equal((await call('GET', `/api/orders/${nReturn.id}`)).status, 'RETURNED');
+    assert.equal((await why(nReturn)).payer, 'BUYER', '반품완료 뒤에도 사유는 남음');
 
     // 쿠팡 출고중지완료: 접수번호(큰 숫자 그대로) + 접수 전체 수량
     r = await call('POST', `/api/orders/${cCancel.id}/claim`, { type: 'CANCEL' });
@@ -704,6 +723,33 @@ test('주문 수집 → 알림 → 발주 → 송장 → 발송처리 전체 흐
     assert.equal(s.lastError, null);
     assert.equal(s.retryAt, null);
     setCachedPublicIp(null);
+  });
+
+  await t.test('11번가 반품요청: 사유로 반품배송비 부담 안내, 목록에서 빠지면 요청 표시 해제', async () => {
+    const eleven = (await call('GET', '/api/stores')).stores.find((s) => s.type === 'elevenst');
+    // 반품요청 목록은 30분마다(6번에 1번) 확인 → 나올 때까지 수집
+    const fetchReturns = async () => {
+      const n = mock.state.eleven.calls.returns.length;
+      for (let i = 0; i < 7 && mock.state.eleven.calls.returns.length === n; i++) await call('POST', '/api/sync', { storeId: eleven.id });
+      assert.ok(mock.state.eleven.calls.returns.length > n, '반품요청 목록 조회');
+    };
+    mock.state.eleven.returns.push({ ordNo: '202611220001', ordPrdSeq: '1', clmReqRsn: '상품 불량', clmReqCont: '박스가 찌그러져 왔어요', clmReqQty: '1', reqDt: '2026-11-25 10:00:00' });
+    await fetchReturns();
+    // 28일을 7일씩 4번
+    const calls = mock.state.eleven.calls.returns.slice(-4);
+    assert.equal(calls.length, 4);
+    let o = await orderByNo('202611220001');
+    assert.equal(o.claim, 'RETURN');
+    let d = await call('GET', `/api/orders/${o.id}`);
+    assert.equal(d.items[0].claim_summary.text, '사유: 상품 불량 "박스가 찌그러져 왔어요" → 반품배송비 판매자 부담 (판매자 책임 사유)');
+    // 처리되거나 철회되어 목록에서 빠지면 요청 표시만 지움 (사유는 기록으로 남김)
+    mock.state.eleven.returns.length = 0;
+    await fetchReturns();
+    o = await orderByNo('202611220001');
+    assert.equal(o.claim, null);
+    d = await call('GET', `/api/orders/${o.id}`);
+    assert.equal(d.items[0].claim_info.reason, '상품 불량');
+    assert.equal(d.items[0].claim_summary, null, '요청이 끝나면 화면에는 안 보임');
   });
 
   await t.test('수집 오류 알림은 한 번만, 복구되면 정상화 알림', async () => {

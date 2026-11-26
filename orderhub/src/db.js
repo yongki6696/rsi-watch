@@ -167,6 +167,9 @@ class Db {
       this.db.exec('ALTER TABLE orders ADD COLUMN seen_at TEXT');
       this.run('UPDATE orders SET seen_at = ?', nowIso());
     }
+    // 취소·반품·교환 사유와 귀책(반품배송비 부담) - JSON
+    const itemCols = this.all('PRAGMA table_info(order_items)').map((c) => c.name);
+    if (!itemCols.includes('claim_info')) this.db.exec('ALTER TABLE order_items ADD COLUMN claim_info TEXT');
   }
 
   get(sql, ...params) {

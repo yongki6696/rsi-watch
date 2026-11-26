@@ -62,7 +62,7 @@ function findCourierByMarketCode(market, code, name) {
 }
 
 function rowItem(i) {
-  return { ...i, extra: safeJson(i.extra, {}) };
+  return { ...i, extra: safeJson(i.extra, {}), claim_info: safeJson(i.claim_info, null) };
 }
 
 class OrderStore {
@@ -101,10 +101,11 @@ class OrderStore {
       // 일부 정보만 있는 데이터(취소 목록 등)는 상태만 갱신
       if (existing) {
         this.db.run(
-          'UPDATE order_items SET market_state = COALESCE(?, market_state), market_status = ?, claim = ?, updated_at = ? WHERE id = ?',
+          'UPDATE order_items SET market_state = COALESCE(?, market_state), market_status = ?, claim = ?, claim_info = COALESCE(?, claim_info), updated_at = ? WHERE id = ?',
           it.marketState || null,
           str(it.marketStatus),
           it.claim || null,
+          it.claimInfo ? JSON.stringify(it.claimInfo) : null,
           ts,
           existing.id
         );
@@ -127,23 +128,27 @@ class OrderStore {
       JSON.stringify(it.raw ?? null),
       ts,
     ];
+    // 사유는 새로 받았을 때만 바꿈 (요청이 끝나도 왜 취소·반품됐는지 남겨둠)
+    const claimInfo = it.claimInfo ? JSON.stringify(it.claimInfo) : null;
     if (existing) {
       this.db.run(
         `UPDATE order_items SET order_id = ?, order_no = ?, product_name = ?, option_name = ?, quantity = ?, unit_price = ?, amount = ?,
-         product_code = ?, product_id = ?, market_state = ?, market_status = ?, claim = ?, extra = ?, raw = ?, updated_at = ? WHERE id = ?`,
+         product_code = ?, product_id = ?, market_state = ?, market_status = ?, claim = ?, extra = ?, raw = ?, updated_at = ?, claim_info = COALESCE(?, claim_info) WHERE id = ?`,
         orderId,
         ...values,
+        claimInfo,
         existing.id
       );
       return existing.order_id !== orderId ? existing.order_id : null; // 다른 묶음에서 옮겨온 경우 이전 묶음 id
     }
     this.db.run(
       `INSERT INTO order_items(order_id, store_id, item_key, order_no, product_name, option_name, quantity, unit_price, amount,
-       product_code, product_id, market_state, market_status, claim, extra, raw, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       product_code, product_id, market_state, market_status, claim, extra, raw, updated_at, claim_info) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       orderId,
       storeId,
       it.itemKey,
-      ...values
+      ...values,
+      claimInfo
     );
     return null;
   }
@@ -342,7 +347,7 @@ class OrderStore {
     if (rows.length) {
       const ids = rows.map((r) => r.id);
       const items = this.db.all(
-        `SELECT id, order_id, item_key, order_no, product_name, option_name, quantity, unit_price, amount, product_code, product_id, extra, market_state, market_status, claim
+        `SELECT id, order_id, item_key, order_no, product_name, option_name, quantity, unit_price, amount, product_code, product_id, extra, market_state, market_status, claim, claim_info
          FROM order_items WHERE order_id IN (${ids.map(() => '?').join(',')}) ORDER BY id`,
         ...ids
       );
