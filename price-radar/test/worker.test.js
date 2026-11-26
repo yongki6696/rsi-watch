@@ -339,3 +339,22 @@ test('무료 플랜 한도: 요청 한 번에 D1 쿼리 50개를 넘지 않고, 
   assert.equal(new Set(got.map((p) => p.path)).size, 12, '12명 모두 알림을 받는다');
   assert.ok(s2.sent >= 4, JSON.stringify(s2));
 });
+
+test('알림 키를 안 넣어도 서버가 한 번 만들어 계속 쓰고, 그 키로 보낸 푸시가 도착한다', async () => {
+  const env = makeEnv({ VAPID_PUBLIC_KEY: '', VAPID_PRIVATE_KEY: '' });
+  const c1 = await call(env, 'GET', '/api/config');
+  assert.equal(c1.data.push, true);
+  assert.equal(c1.data.pushKeys, 'auto');
+  assert.match(c1.data.vapidPublicKey, /^[\w-]{86,88}$/);
+  const c2 = await call(env, 'GET', '/api/config');
+  assert.equal(c2.data.vapidPublicKey, c1.data.vapidPublicKey, '같은 키를 계속 쓴다');
+  const token = await newUser(env);
+  const sub = await call(env, 'POST', '/api/push/subscribe', { token, body: { endpoint: `${pushBase}/push/auto`, keys: { p256dh: subKeys.p256dh, auth: subKeys.auth } } });
+  assert.equal(sub.status, 201, JSON.stringify(sub.data));
+  const r = await call(env, 'POST', '/api/push/test', { token, body: {} });
+  assert.equal(r.data.sent, 1);
+  const p = pushes.at(-1);
+  assert.equal(p.path, '/push/auto');
+  assert.equal(p.payload.title, '🔔 알림이 잘 와요');
+  assert.ok(p.auth.endsWith(`k=${c1.data.vapidPublicKey}`), '자동으로 만든 공개키로 서명');
+});

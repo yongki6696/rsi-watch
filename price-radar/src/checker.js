@@ -7,7 +7,7 @@ import { ensureSchema, getMeta, setMeta, purgeMock, countingDb, priceChange } fr
 import { makeApi, partnersConfigured, CATEGORIES } from './coupang.js';
 import { normalizeKeyword, keywordFromName } from './parse.js';
 import { intEnv, isNight } from './util.js';
-import { sendPush, pushConfigured } from './push.js';
+import { sendPush, vapidKeys } from './push.js';
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
@@ -164,7 +164,8 @@ function combine(payloads) {
 export async function sendMany(env, perUser, { maxPush = 8 } = {}) {
   const done = new Set(); const skipped = [];
   if (!perUser.size) return { sent: 0, done, skipped };
-  if (!pushConfigured(env)) { for (const u of perUser.keys()) done.add(u); return { sent: 0, done, skipped }; }
+  const keys = await vapidKeys(env);
+  if (!keys) { for (const u of perUser.keys()) done.add(u); return { sent: 0, done, skipped }; }
   const db = env.DB;
   const users = [...perUser.keys()];
   const { results: subs } = await db.prepare(`SELECT endpoint, user_id, p256dh, auth FROM subscriptions WHERE user_id IN ${IN_JSON}`).bind(JSON.stringify(users)).all();
@@ -178,7 +179,7 @@ export async function sendMany(env, perUser, { maxPush = 8 } = {}) {
     for (const s of mine) {
       attempts++;
       try {
-        const status = await sendPush(env, s, perUser.get(u), subject, vapidCache);
+        const status = await sendPush(keys, s, perUser.get(u), subject, vapidCache);
         if (status === 404 || status === 410) expired.push(s.endpoint);
         else if (status >= 200 && status < 300) sent++;
         else console.log(`[push] 응답 ${status}`);

@@ -30,19 +30,22 @@
   </section>
 
   <section class="card section">
-    <h3>2. 알림 키 만들기 (VAPID)</h3>
-    <p class="fine">푸시 알림을 보내려면 한 쌍의 키가 필요해요. 아래 버튼을 누르면 이 화면 안에서 새로 만들어요. 한 번 정해서 넣은 뒤에는 바꾸지 마세요 (바꾸면 모든 사람이 알림을 다시 켜야 해요).</p>
-    <button class="btn" type="button" id="gen">키 만들기</button>
+    <h3>2. 관리자 토큰 만들기 (선택)</h3>
+    <p class="fine">푸시 알림 키는 서버가 처음 실행될 때 <b>자동으로 만들어 저장</b>해요. 따로 넣을 필요가 없어요.
+      아래 버튼은 운영 현황을 보는 데 쓰는 <b>ADMIN_TOKEN</b>(과, 알림 키를 직접 정하고 싶은 경우를 위한 VAPID 키)을 이 화면 안에서 만들어요.
+      알림 키를 직접 넣으려면 사용자가 알림을 켜기 <b>전에</b> 넣으세요 (나중에 바꾸면 모든 사람이 알림을 다시 켜야 해요).</p>
+    <button class="btn" type="button" id="gen">만들기</button>
     <div id="keys" hidden>
+      <div class="keyname">ADMIN_TOKEN <span class="no">(비밀)</span></div>
+      <code class="code" id="admin"></code>
+      <button class="btn ghost small" type="button" data-copy="admin">복사</button>
+      <p class="fine">아래 두 값은 알림 키를 직접 정할 때만 쓰세요 (보통은 필요 없음).</p>
       <div class="keyname">VAPID_PUBLIC_KEY</div>
       <code class="code" id="pub"></code>
       <button class="btn ghost small" type="button" data-copy="pub">복사</button>
       <div class="keyname">VAPID_PRIVATE_KEY <span class="no">(비밀)</span></div>
       <code class="code" id="priv"></code>
       <button class="btn ghost small" type="button" data-copy="priv">복사</button>
-      <div class="keyname">ADMIN_TOKEN <span class="no">(비밀)</span></div>
-      <code class="code" id="admin"></code>
-      <button class="btn ghost small" type="button" data-copy="admin">복사</button>
     </div>
   </section>
 
@@ -53,10 +56,7 @@
       <li><b>Add</b> → Type 은 <b>Secret</b> 으로, 아래 이름과 값을 하나씩 넣고 <b>Deploy</b>
         <pre>COUPANG_ACCESS_KEY   (쿠팡 파트너스 Access Key)
 COUPANG_SECRET_KEY   (쿠팡 파트너스 Secret Key)
-VAPID_PUBLIC_KEY     (위에서 만든 값)
-VAPID_PRIVATE_KEY    (위에서 만든 값)
-VAPID_SUBJECT        mailto:내이메일@example.com
-ADMIN_TOKEN          (위에서 만든 값)</pre></li>
+ADMIN_TOKEN          (위에서 만든 값, 선택)</pre></li>
       <li>쿠팡 키를 넣기 전에는 <b>데모 모드</b>(가상 가격)로 동작해요. 키를 넣으면 데모 데이터는 자동으로 지워져요.</li>
     </ol>
   </section>
@@ -81,7 +81,7 @@ ADMIN_TOKEN          (위에서 만든 값)</pre></li>
       const row = (k, ok, text) => [h('b', { text: k }), h('span', { class: ok ? 'ok' : 'no', text })];
       fill($('status'),
         ...row('쿠팡 파트너스', c.mode === 'live', c.mode === 'live' ? '연결됨 (실제 가격)' : '키 없음 → 데모 모드'),
-        ...row('푸시 알림', c.push, c.push ? '설정됨' : 'VAPID 키 없음'),
+        ...row('푸시 알림', c.push, c.push ? (c.pushKeys === 'env' ? '직접 넣은 키 사용 중' : '자동으로 만든 키 사용 중') : '준비 안 됨'),
         h('b', { text: '앱 이름' }), h('span', { text: c.appName }));
     } catch (e) { fill($('status'), h('span', { class: 'no', text: `서버에 연결하지 못했어요: ${e.message}` })); }
   }

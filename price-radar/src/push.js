@@ -47,8 +47,30 @@ export async function vapidHeader({ publicKey, privateKey, subject }, endpoint, 
   return `vapid t=${unsigned}.${b64u(sig)}, k=${publicKey}`;
 }
 
-export function pushConfigured(env) {
-  return Boolean(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY);
+/**
+ * 알림 키(VAPID). Cloudflare 비밀값에 넣어 두었으면 그것을 쓰고,
+ * 없으면 처음 한 번 만들어 데이터베이스에 저장해 두고 계속 같은 키를 쓴다 (운영자가 따로 넣을 필요 없음).
+ * @returns {Promise<{publicKey:string, privateKey:string, source:'env'|'auto'}|null>}
+ */
+export async function vapidKeys(env) {
+  if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) return { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, source: 'env' };
+  if (!env.DB) return null;
+  const read = async () => {
+    const { results } = await env.DB.prepare("SELECT key, value FROM meta WHERE key IN ('vapid_public', 'vapid_private')").all();
+    const m = Object.fromEntries(results.map((r) => [r.key, r.value]));
+    return m.vapid_public && m.vapid_private ? { publicKey: m.vapid_public, privateKey: m.vapid_private, source: 'auto' } : null;
+  };
+  const found = await read();
+  if (found) return found;
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const pub = b64u(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
+  const priv = (await crypto.subtle.exportKey('jwk', pair.privateKey)).d;
+  // 두 요청이 동시에 만들어도 먼저 저장된 한 쌍만 남는다 (batch 는 한 트랜잭션)
+  await env.DB.batch([
+    env.DB.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('vapid_public', ?)").bind(pub),
+    env.DB.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('vapid_private', ?)").bind(priv),
+  ]);
+  return read();
 }
 
 /** 브라우저가 준 푸시 주소가 믿을 만한지 (사설망 주소로 요청을 보내지 않도록) */
@@ -63,13 +85,13 @@ export function validEndpoint(env, endpoint) {
 /**
  * @returns {Promise<number>} HTTP 상태 (201 성공, 404/410 은 구독 만료)
  */
-export async function sendPush(env, sub, payload, subject, vapidCache = null) {
+export async function sendPush(keys, sub, payload, subject, vapidCache = null) {
   const body = await encryptPayload(sub.p256dh, sub.auth, JSON.stringify(payload));
   // 같은 푸시 서비스(예: FCM, Apple)로 가는 서명은 한 번 만들어 재사용 (무료 플랜 CPU 시간 절약)
   const aud = new URL(sub.endpoint).origin;
   let auth = vapidCache && vapidCache.get(aud);
   if (!auth) {
-    auth = await vapidHeader({ publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject }, sub.endpoint);
+    auth = await vapidHeader({ publicKey: keys.publicKey, privateKey: keys.privateKey, subject }, sub.endpoint);
     if (vapidCache) vapidCache.set(aud, auth);
   }
   const res = await fetch(sub.endpoint, {

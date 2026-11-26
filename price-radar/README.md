@@ -51,33 +51,43 @@ PC 없이 휴대폰만으로 쓰고, 운영할 수 있어요. 모든 구매 링�
 
 ## 휴대폰만으로 배포하기
 
-준비물: GitHub 계정(이 저장소), [Cloudflare](https://dash.cloudflare.com) 무료 계정, 쿠팡 파트너스 API 키(최종 승인 후 파트너스 사이트에서 발급).
+### 가장 쉬운 방법: 배포 버튼
 
-1. **Cloudflare 가입** 후 대시보드에서 **Workers & Pages → 만들기(Create)** → **저장소 가져오기(Import a repository)** → GitHub 연결 → 이 저장소 선택.
-2. 프로젝트 설정
-   - 프로젝트 이름: **`price-radar`** (`wrangler.jsonc` 의 `name` 과 같아야 해요)
-   - 루트 디렉터리(Root directory / Path): **`price-radar`** ← 중요
-   - 빌드 명령: 비워 두기 · 배포 명령: `npx wrangler deploy` (기본값)
-   - 배포할 브랜치: 이 코드가 있는 브랜치 (main 에 합쳤다면 main)
-3. **배포** → 처음 배포할 때 데이터베이스(D1)가 자동으로 만들어지고, 5분마다 도는 예약 작업도 자동으로 설정돼요.
-   배포가 끝나면 `https://price-radar.<계정이름>.workers.dev` 주소가 생겨요. 열어서 데모 모드로 동작하는지 확인하세요.
-4. 그 주소 뒤에 **`/setup.html`** 을 붙여 열고 **키 만들기** → 값 3개(VAPID 공개키, VAPID 비밀키, 관리자 토큰)를 복사해 두세요.
-5. Cloudflare → **price-radar → 설정(Settings) → 변수 및 비밀(Variables and Secrets)** → **추가(Add)**, 종류는 **비밀(Secret)** 로:
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yongki6696/rsi-watch/tree/main/price-radar)
+
+1. Cloudflare 에 로그인한 브라우저에서 위 버튼을 누르세요.
+2. 처음이라면 **GitHub 연결(Connect GitHub)** 을 눌러 허용하세요. 이 앱이 **내 GitHub 에 새 저장소로 복사**되고, 그 저장소가 바뀌면 자동으로 다시 배포돼요.
+3. 이름은 그대로 두고 **만들고 배포(Create and deploy)** 를 누르세요.
+   데이터베이스(D1), 5분마다 도는 예약 작업, 푸시 알림 키가 모두 **자동으로** 준비돼요.
+4. 끝나면 `https://<이름>.<계정이름>.workers.dev` 주소가 생겨요. 열면 **데모 모드**(가상 가격)로 동작해요.
+
+### 직접 연결하는 방법
+
+1. Cloudflare 대시보드 → **Workers & Pages → 만들기(Create)** → **저장소 가져오기(Import a repository)** → GitHub 연결 → 이 저장소 선택.
+2. 프로젝트 이름 **`price-radar`** (`wrangler.jsonc` 의 `name` 과 같아야 해요), 루트 디렉터리(Root directory / Path) **`price-radar`**,
+   빌드 명령은 비워 두고 배포 명령은 기본값(`npx wrangler deploy`), 브랜치는 이 코드가 있는 브랜치.
+3. **배포** → 데이터베이스와 예약 작업, 알림 키가 자동으로 준비돼요.
+
+### 배포한 뒤
+
+1. **쿠팡 키 넣기**(키를 발급받으면): Cloudflare → 내 Worker → **설정(Settings) → 변수 및 비밀(Variables and Secrets)** → **추가(Add)**,
+   종류는 꼭 **비밀(Secret)** 로 (텍스트로 넣으면 다음 배포 때 지워질 수 있어요):
 
    | 이름 | 값 |
    |---|---|
    | `COUPANG_ACCESS_KEY` | 쿠팡 파트너스 Access Key |
    | `COUPANG_SECRET_KEY` | 쿠팡 파트너스 Secret Key |
-   | `VAPID_PUBLIC_KEY` | 4번에서 만든 공개키 |
-   | `VAPID_PRIVATE_KEY` | 4번에서 만든 비밀키 |
-   | `VAPID_SUBJECT` | `mailto:내이메일@example.com` |
-   | `ADMIN_TOKEN` | 4번에서 만든 관리자 토큰 |
+   | `ADMIN_TOKEN` (선택) | 운영 현황용 관리자 토큰 — `/setup.html` 에서 만들 수 있어요 |
+   | `VAPID_SUBJECT` (선택) | 알림 서명에 쓰는 연락처, 예: `mailto:내이메일@example.com` (없으면 서비스 주소를 씀) |
 
-   저장(배포)하면 바로 적용돼요. **VAPID 키는 한 번 정하면 바꾸지 마세요** (바꾸면 모든 사용자가 알림을 다시 켜야 해요).
-6. `/setup.html` 에서 상태가 "연결됨"인지 확인하고, 관리자 토큰을 넣어 **지금 가격 확인 한 번 실행** → 오류가 없는지 보세요.
-7. 휴대폰에서 앱 주소를 열고 **홈 화면에 추가** → 홈 화면 아이콘으로 열어 **알림 켜기**.
+   키를 넣으면 실제 가격으로 바뀌고, 데모 데이터는 자동으로 지워져요.
+2. 주소 뒤에 **`/setup.html`** 을 붙여 열면 연결 상태를 볼 수 있어요. 관리자 토큰을 넣었다면 **지금 가격 확인 한 번 실행** 으로 오류가 없는지 확인하세요.
+3. 휴대폰에서 앱 주소를 열고 **홈 화면에 추가** → 홈 화면 아이콘으로 열어 **알림 켜기** → 설정의 **테스트 알림 보내기**.
    아이폰은 반드시 홈 화면에 추가한 앱에서만 알림을 받을 수 있어요(iOS 16.4 이상).
 
+> 알림 키는 처음 실행 때 자동으로 만들어 데이터베이스에 저장해요. 직접 정하고 싶다면 사용자가 알림을 켜기 **전에** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` 비밀값을 넣으세요
+> (나중에 바꾸면 모든 사용자가 알림을 다시 켜야 해요).
+>
 > 배포 중 "데이터베이스를 만들 수 없다"는 오류가 나면: Cloudflare → **D1** → 데이터베이스 만들기(이름 `price-radar`) → 만들어진 **데이터베이스 ID** 를
 > `wrangler.jsonc` 의 `"database_name": "price-radar"` 옆에 `"database_id": "<ID>"` 로 적어 GitHub 에 저장하면 다시 배포돼요.
 
@@ -131,7 +141,7 @@ npm run dev       # 로컬 실행 (키가 없으면 데모 모드)
 src/index.js     API 라우터, 예약 실행 진입점
 src/checker.js   정기 가격 확인, 호출 한도·쿼리 한도 배분, 알림 규칙(야간 보류·대기열 포함)
 src/coupang.js   쿠팡 파트너스 API (HMAC 서명, 검색·특가·베스트·딥링크) + 데모 데이터
-src/push.js      웹 푸시 (VAPID 서명 + aes128gcm 암호화, WebCrypto 만 사용)
+src/push.js      웹 푸시 (VAPID 서명 + aes128gcm 암호화, WebCrypto 만 사용, 키 자동 생성)
 src/db.js        D1 스키마(첫 요청 때 자동 생성)와 도우미
 src/parse.js     공유 문구·링크·상품명 해석
 public/          휴대폰 화면 (PWA, 공유 받기, 서비스 워커), setup.html(운영자), privacy.html

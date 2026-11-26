@@ -6,7 +6,7 @@ import { ensureSchema, getMeta, setMeta, hitLimit, refreshWatchers, history, cou
 import { makeApi, partnersConfigured, Budget, ApiError } from './coupang.js';
 import { parseInput, parseProductUrl, isShortLink, normalizeKeyword, keywordFromName, cleanName } from './parse.js';
 import { runChecks, searchCached, applyResults, refreshFeed, FEEDS, budgetPlan, sendToUser } from './checker.js';
-import { pushConfigured, validEndpoint } from './push.js';
+import { vapidKeys, validEndpoint } from './push.js';
 import { json, HttpError, randomToken, sha256Hex, intEnv, toInt } from './util.js';
 
 const MIN = 60 * 1000;
@@ -151,11 +151,13 @@ async function route(request, env, url) {
   const now = Date.now();
 
   if (m === 'GET' && pathname === '/api/config') {
+    const keys = await vapidKeys(env);
     return json({
       appName: env.APP_NAME || '최저가 레이더',
       mode: partnersConfigured(env) ? 'live' : 'mock',
-      push: pushConfigured(env),
-      vapidPublicKey: env.VAPID_PUBLIC_KEY || null,
+      push: Boolean(keys),
+      pushKeys: keys ? keys.source : null,
+      vapidPublicKey: keys ? keys.publicKey : null,
       disclosure: DISCLOSURE,
       maxWatches: intEnv(env, 'MAX_WATCHES_PER_USER', 30, 1, 500),
       feeds: FEEDS.map(([key, label]) => ({ key, label })),
@@ -355,7 +357,7 @@ async function route(request, env, url) {
 
   if (m === 'POST' && pathname === '/api/push/subscribe') {
     const user = await auth(request, env);
-    if (!pushConfigured(env)) throw new HttpError(503, '운영자가 아직 알림 키를 설정하지 않았어요.');
+    if (!(await vapidKeys(env))) throw new HttpError(503, '알림 키를 준비하지 못했어요.');
     const body = await readJson(request);
     const endpoint = String(body.endpoint || '');
     const p256dh = String((body.keys && body.keys.p256dh) || '');
